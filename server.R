@@ -43,6 +43,25 @@ server <- function(input, output, session) {
                       min = min(annees_disponibles), 
                       max = max(annees_disponibles),
                       value = max(annees_disponibles) -1)
+    
+    # --- Mise à jour de la liste des villes ---
+    
+    # On filtre les données pour ne garder que les lignes avec une température valide,
+    # puis on extrait la liste des villes uniques.
+    villes_avec_donnees_valides <- tmax_annuelles %>%
+      # La fonction is.finite() exclut les NA, NaN, Inf et -Inf en une seule fois.
+      filter(is.finite(tmax_celsius)) %>%
+      distinct(city) %>%
+      pull(city)
+    
+    # On trie cette liste par ordre alphabétique
+    villes_triees <- sort(villes_avec_donnees_valides)
+    
+    # On met à jour le selectInput avec la liste
+    updateSelectInput(session, "ville_select",
+                      choices = villes_triees,
+                      selected = villes_triees[1])
+    
   })
   
   # -- Logique du Quiz --
@@ -120,10 +139,10 @@ server <- function(input, output, session) {
     data <- quiz_data()
     is_correct <- (input$user_answer == data$correct_answer)
     
-    if (is_correct) {
+    if (is_correct && !input$trash_talk_mode) {
       nouveau_score_succes <- score_succes() + 1
       score_succes(nouveau_score_succes)
-    } else {
+    } else if (!is_correct && !input$trash_talk_mode) {
       nouveau_score_echecs <- score_echecs() + 1
       score_echecs(nouveau_score_echecs)
     }
@@ -168,15 +187,16 @@ server <- function(input, output, session) {
     }
     
     # Construction du corps du feedback (l'explication factuelle reste la même)
+    
+    # --- Préparation des informations communes ---
+    diff <- round(abs(data$temp - data$normale_moy), 1)
+    direction <- if (data$temp > data$normale_moy) "supérieure" else "inférieure"
+    direction_bis <- if (data$temp > data$normale_moy) "élevée" else "basse"
+    explication_principale <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", data$normale_moy, "°C) pour la période ", input$periode_normale, ".")
+    
     if (data$correct_answer == "Dans les normales de saison") {
-      explication_text <- paste0("Cette température est considérée comme normale pour un ", format(data$date, "%d %B"), " à ", data$city, ".")
+      explication_text <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", data$normale_moy, "°C) et est considérée comme normale pour un ", format(data$date, "%d %B"), " à ", data$city, ".")
     } else {
-      
-      # --- Préparation des informations communes ---
-      diff <- round(abs(data$temp - data$normale_moy), 1)
-      direction <- if (data$temp > data$normale_moy) "supérieure" else "inférieure"
-      explication_principale <- paste0("Cette température est <b>", diff, "°C</b> plus ", direction, " que la moyenne de saison (", data$normale_moy, "°C) pour la période ", input$periode_normale, ".")
-      
       annees_periode <- as.numeric(unlist(strsplit(input$periode_normale, "-")))
       annee_debut <- annees_periode[1]
       annee_fin <- annees_periode[2]
@@ -212,9 +232,9 @@ server <- function(input, output, session) {
       }
       
       if (nombre_occurrences_saison == 0) {
-        frequence_saison_text <- paste0("À l'échelle de la saison (", saison$nom, "), une température aussi ", direction, " est arrivée <b>", nombre_occurrences_saison, " fois</b> au total sur cette période.")
+        frequence_saison_text <- paste0("À l'échelle de la saison (", saison$nom, "), une température aussi ", direction_bis, " ne s'est <b>jamais produit</b> durant la période de référence.")
       } else {
-        frequence_saison_text <- paste0("À l'échelle de la saison (", saison$nom, "), une température aussi ", direction, " ne s'est <b>jamais produit</b> durant la période de référence.")
+        frequence_saison_text <- paste0("À l'échelle de la saison (", saison$nom, "), une température aussi ", direction_bis, " est arrivée <b>", nombre_occurrences_saison, " fois</b> au total sur cette période.")
       }
         
       # --- 3. Assemblage final de toutes les explications ---

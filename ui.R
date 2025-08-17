@@ -42,13 +42,14 @@ ui <- navbarPage(
              sidebarLayout(
                sidebarPanel(
                  # On utilise la colonne 'ville' du dataframe chargé depuis utils.R
-                 selectInput("ville_select", "Choisissez une ville :", choices = villes$ville),
+                 selectInput("ville_select", "Choisissez une ville :", choices = NULL),
                  selectInput("periode_select", "Choisissez la période de référence :", choices = c("1951-1980")),
                  sliderInput("annee_select", "Choisissez l'année à comparer :", 
                              min = 1950, 
-                             max = 1980, 
-                             value = 1980, 
-                             sep = ""),
+                             max = 2024, 
+                             value = 2023, 
+                             sep = "",
+                             animate = animationOptions(interval = 800, loop = TRUE)),
                  width = 3
                ),
                mainPanel(

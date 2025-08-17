@@ -22,7 +22,7 @@ donnees_augmentees <- donnees_brutes %>%
     jour_annee = yday(date),
     # On définit les différentes périodes de référence de 30 ans
     periode_ref = case_when(
-      annee >= 1951 & annee <= 1960 ~ "1951-1980",
+      annee >= 1951 & annee <= 1980 ~ "1951-1980",
       annee >= 1961 & annee <= 1990 ~ "1961-1990",
       annee >= 1971 & annee <= 2000 ~ "1971-2000",
       annee >= 1981 & annee <= 2010 ~ "1981-2010",
