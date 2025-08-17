@@ -1,0 +1,2 @@
+DIR_APP=C:/Users/maxp1/Documents/guess_climate
+KEY_CDS=9e71b600-abdb-4b74-92f5-94721d1f774f
