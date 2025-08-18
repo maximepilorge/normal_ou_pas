@@ -12,6 +12,11 @@ library(sf)
 library(here)
 library(plotly)
 
+# A travailler :
+# Module analyse : pourquoi ça regarde ce qui est inférieur ou égale en-dessous d'une certaine température ? Forcer le supérieur ou égal
+# Découper l'application en plusieurs modules pour améliorer la lisibilité du code
+# Réduire nombre décimales infobulle dans onglet Explorateur
+
 dirApp <- Sys.getenv("DIR_APP")
 key_cds <- Sys.getenv("KEY_CDS")
 

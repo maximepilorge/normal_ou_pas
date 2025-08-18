@@ -4,6 +4,7 @@ library(ggplot2)
 library(dplyr)
 library(lubridate)
 library(plotly)
+library(shinyjs)
 
 # --- CHARGEMENT DES DONNÉES ---
 
@@ -31,11 +32,53 @@ server <- function(input, output, session) {
     }
   }
   
+  calculer_frequence <- function(ville_sel, date_sel, temp_sel, periode_ref_str, data_brutes) {
+    
+    # Extraire les années de la période de référence
+    annees_periode <- as.numeric(unlist(strsplit(periode_ref_str, "-")))
+    annee_debut <- annees_periode[1]
+    annee_fin <- annees_periode[2]
+    nombre_annees_periode <- annee_fin - annee_debut + 1
+    
+    # Déterminer si on cherche un événement chaud ou froid (par rapport à la moyenne)
+    moyenne_jour <- stats_normales %>%
+      filter(city == ville_sel, jour_annee == yday(date_sel), periode_ref == periode_ref_str) %>%
+      pull(t_moy)
+    
+    # Si on n'a pas de moyenne pour ce jour, on ne peut pas continuer
+    if (length(moyenne_jour) == 0) return(NULL)
+    
+    direction <- if (temp_sel >= moyenne_jour) "supérieure ou égale" else "inférieure ou égale"
+    comparaison_jour <- if (direction == "supérieure ou égale") `>=` else `<=`
+    
+    # --- Calcul sur le JOUR PRÉCIS ---
+    donnees_historiques_jour <- data_brutes %>%
+      filter(city == ville_sel, jour_annee == yday(date_sel), year(date) >= annee_debut, year(date) <= annee_fin)
+    
+    nombre_occurrences_jour <- sum(comparaison_jour(donnees_historiques_jour$tmax_celsius, temp_sel), na.rm = TRUE)
+    
+    texte_jour <- paste0("Pour ce jour précis (le ", format(date_sel, "%d %B"), "), une température ", direction, " ou égale à ", temp_sel, "°C s'est produite <b>", nombre_occurrences_jour, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
+    
+    # --- Calcul sur la SAISON ---
+    saison <- get_season_info(date_sel)
+    donnees_historiques_saison <- data_brutes %>%
+      filter(city == ville_sel, month(date) %in% saison$mois, year(date) >= annee_debut, year(date) <= annee_fin)
+    
+    nombre_occurrences_saison <- sum(comparaison_jour(donnees_historiques_saison$tmax_celsius, temp_sel), na.rm = TRUE)
+    
+    texte_saison <- paste0("À l'échelle de la saison (", saison$nom, "), une température ", direction, " ou égale à ", temp_sel, "°C s'est produite <b>", nombre_occurrences_saison, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
+    
+    return(list(jour = texte_jour, saison = texte_saison))
+  }
+  
   # Mise à jour dynamique des sliders/sélecteurs en fonction des données chargées
   observe({
     # Met à jour les périodes de référence disponibles dans le sélecteur
     periodes_disponibles <- unique(stats_normales$periode_ref)
+    
+    updateSelectInput(session, "periode_normale", choices = periodes_disponibles)
     updateSelectInput(session, "periode_select", choices = periodes_disponibles)
+    updateSelectInput(session, "periode_analyse", choices = periodes_disponibles)
     
     # Met à jour le slider des années
     annees_disponibles <- unique(year(tmax_annuelles$date))
@@ -62,6 +105,11 @@ server <- function(input, output, session) {
                       choices = villes_triees,
                       selected = villes_triees[1])
     
+    # On met à jour le selectInput de l'onglet d'analyse
+    updateSelectInput(session, "ville_analyse",
+                      choices = villes_triees,
+                      selected = villes_triees[1])
+    
   })
   
   # -- Logique du Quiz --
@@ -71,52 +119,53 @@ server <- function(input, output, session) {
   
   observeEvent(input$new_question_btn, {
     
-    # On ajoute la colonne 'jour_annee' si elle n'existe pas déjà
-    tmax_pour_quiz <- tmax_annuelles %>% mutate(jour_annee = yday(date))
+    # 1. Préparer les données de normales pour la période de référence choisie par l'utilisateur
+    normales_periode_selectionnee <- stats_normales %>%
+      filter(periode_ref == input$periode_normale) %>%
+      # Calculer les seuils pour la définition de "normal" (basé sur l'écart interquartile)
+      mutate(
+        iqr = t_q3 - t_q1,
+        seuil_haut = t_q3 + 1.5 * iqr,
+        seuil_bas = t_q1 - 1.5 * iqr
+      ) %>%
+      select(city, jour_annee, seuil_bas, seuil_haut, normale_moy = t_moy)
     
-    repeat {
-      random_sample <- tmax_pour_quiz %>% sample_n(1)
-      random_city <- random_sample$city
-      random_day_of_year <- random_sample$jour_annee
-      
-      normale_stats <- stats_normales %>%
-        filter(city == random_city, jour_annee == random_day_of_year, periode_ref == input$periode_normale)
-      
-      # Condition de sortie :
-      # 1. On a bien trouvé une ligne de stats
-      # 2. ET les valeurs nécessaires au calcul ne sont pas NA
-      if (nrow(normale_stats) > 0 && !is.na(normale_stats$t_moy) && !is.na(normale_stats$t_q1) && !is.na(normale_stats$t_q3)) {
-        break
-      }
-    }
+    # 2. Classifier chaque jour de l'historique par rapport à sa normale
+    # On joint les données journalières avec les seuils calculés précédemment
+    donnees_classees <- tmax_annuelles %>%
+      left_join(normales_periode_selectionnee, by = c("city", "jour_annee")) %>%
+      # On supprime les jours pour lesquels on n'a pas de normale (ex: 29 fév)
+      filter(!is.na(seuil_haut)) %>%
+      mutate(
+        categorie = case_when(
+          tmax_celsius > seuil_haut ~ "Au-dessus des normales",
+          tmax_celsius < seuil_bas ~ "En-dessous des normales",
+          TRUE ~ "Dans les normales de saison"
+        )
+      )
     
-    random_date <- random_sample$date
+    # 3. Définir les catégories et leurs probabilités de tirage
+    categories_possibles <- c("Au-dessus des normales", "En-dessous des normales", "Dans les normales de saison")
+    probabilites <- c(0.33, 0.2, 0.47) # IL FAUDRAIT ADAPTER LA PROBABILITE A LA REPARTITION ENTRE LES CATEGORIES DE 1950 A AUJOURD'HUI NON ?
     
-    temp_range <- tmax_pour_quiz %>%
-      filter(city == random_city, jour_annee == random_day_of_year) %>%
-      summarise(min_t = floor(min(tmax_celsius, na.rm = TRUE)), 
-                max_t = ceiling(max(tmax_celsius, na.rm = TRUE)))
+    # 4. Choisir une catégorie au hasard (mais avec pondération)
+    categorie_choisie <- sample(categories_possibles, size = 1, prob = probabilites)
     
-    random_temp <- sample(temp_range$min_t:temp_range$max_t, 1)
+    # 5. Tirer une question au hasard DANS la catégorie choisie
+    question_selectionnee <- donnees_classees %>%
+      filter(categorie == categorie_choisie) %>%
+      sample_n(1)
     
-    normale_stats <- stats_normales %>%
-      filter(city == random_city, jour_annee == random_day_of_year, periode_ref == input$periode_normale)
-    
-    iqr <- normale_stats$t_q3 - normale_stats$t_q1
-    upper_bound <- normale_stats$t_q3 + 1.5 * iqr
-    lower_bound <- normale_stats$t_q1 - 1.5 * iqr
-    
-    correct_answer <- case_when(
-      random_temp > upper_bound ~ "Au-dessus des normales",
-      random_temp < lower_bound ~ "En-dessous des normales",
-      TRUE ~ "Dans les normales de saison"
-    )
-    
+    # On stocke les données de la question pour les utiliser dans l'UI
     quiz_data(list(
-      city = random_city, date = random_date, temp = random_temp,
-      correct_answer = correct_answer, normale_moy = round(normale_stats$t_moy, 1)
+      city = question_selectionnee$city, 
+      date = question_selectionnee$date, 
+      temp = round(question_selectionnee$tmax_celsius, 1), # On utilise la vraie température observée
+      correct_answer = question_selectionnee$categorie, # La bonne réponse est la catégorie qu'on a tirée
+      normale_moy = round(question_selectionnee$normale_moy, 1)
     ))
     
+    # Réinitialiser l'interface pour la nouvelle question
     updateRadioButtons(session, "user_answer", selected = character(0))
     output$feedback_ui <- renderUI(NULL)
     
@@ -192,7 +241,6 @@ server <- function(input, output, session) {
     diff <- round(abs(data$temp - data$normale_moy), 1)
     direction <- if (data$temp > data$normale_moy) "supérieure" else "inférieure"
     direction_bis <- if (data$temp > data$normale_moy) "élevée" else "basse"
-    explication_principale <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", data$normale_moy, "°C) pour la période ", input$periode_normale, ".")
     
     if (data$correct_answer == "Dans les normales de saison") {
       explication_text <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", data$normale_moy, "°C) et est considérée comme normale pour un ", format(data$date, "%d %B"), " à ", data$city, ".")
@@ -201,6 +249,8 @@ server <- function(input, output, session) {
       annee_debut <- annees_periode[1]
       annee_fin <- annees_periode[2]
       nombre_annees_periode <- annee_fin - annee_debut + 1
+      
+      explication_principale <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", data$normale_moy, "°C) pour la période ", input$periode_normale, ".")
       
       # --- Analyse sur le jour précis ---
       donnees_historiques_jour <- tmax_annuelles %>%
@@ -214,9 +264,9 @@ server <- function(input, output, session) {
       
       frequence_jour_text <- "" # Initialisation
       if (nombre_occurrences_jour == 0) {
-        frequence_jour_text <- "Pour ce jour précis, un événement de cette intensité ne s'est <b>jamais produit</b> durant la période de référence."
+        frequence_jour_text <- paste0("Pour ce jour précis, un événement de cette intensité ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".")
       } else {
-        frequence_jour_text <- paste0("Pour ce jour précis, cela s'est produit <b>", nombre_occurrences_jour, " fois</b> en ", nombre_annees_periode, " ans.")
+        frequence_jour_text <- paste0("Pour ce jour précis, une température égale ou ", direction, " est arrivée <b>", nombre_occurrences_jour, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
       }
       
       # --- Analyse sur la saison complète ---
@@ -232,9 +282,9 @@ server <- function(input, output, session) {
       }
       
       if (nombre_occurrences_saison == 0) {
-        frequence_saison_text <- paste0("À l'échelle de la saison (", saison$nom, "), une température aussi ", direction_bis, " ne s'est <b>jamais produit</b> durant la période de référence.")
+        frequence_saison_text <- paste0("À l'échelle de la saison (", saison$nom, "), une température aussi ", direction_bis, " ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".")
       } else {
-        frequence_saison_text <- paste0("À l'échelle de la saison (", saison$nom, "), une température aussi ", direction_bis, " est arrivée <b>", nombre_occurrences_saison, " fois</b> au total sur cette période.")
+        frequence_saison_text <- paste0("À l'échelle de la saison (", saison$nom, "), une température égale ou ", direction, " est arrivée <b>", nombre_occurrences_saison, " fois</b> au total entre ", annee_debut, " et ", annee_fin, ".")
       }
         
       # --- 3. Assemblage final de toutes les explications ---
@@ -287,4 +337,79 @@ server <- function(input, output, session) {
     ggplotly(p, tooltip = c("x", "y"))
     
   })
+  
+  # On utilise un reactiveVal pour stocker le résultat
+  resultat <- reactiveVal(NULL)
+  
+  observeEvent(input$toute_annee_analyse, {
+    toggleState("selecteurs_date", condition = !input$toute_annee_analyse)
+  })
+  
+  # Mettre à jour le nombre de jours disponibles en fonction du mois choisi
+  observeEvent(input$mois_analyse, {
+    req(input$mois_analyse)
+    jours_dans_le_mois <- days_in_month(as.Date(paste("2001", input$mois_analyse, "01", sep="-")))
+    updateSelectInput(session, "jour_analyse", choices = 1:jours_dans_le_mois)
+  })
+  
+  # Le calcul est déclenché par le clic sur le bouton
+  observeEvent(input$calculer_frequence_btn, {
+    req(input$ville_analyse, input$temp_analyse, input$periode_analyse)
+    
+    # Si on analyse l'année entière
+    if (input$toute_annee_analyse) {
+      
+      annees_periode <- as.numeric(unlist(strsplit(input$periode_analyse, "-")))
+      annee_debut <- annees_periode[1]; annee_fin <- annees_periode[2]
+      
+      donnees_historiques_annee <- tmax_annuelles %>%
+        filter(city == input$ville_analyse, year(date) >= annee_debut, year(date) <= annee_fin)
+
+      occurrences_sup <- sum(donnees_historiques_annee$tmax_celsius >= input$temp_analyse, na.rm = TRUE)
+
+      res <- list(
+        jour = paste0("Sur l'ensemble de l'année, une température supérieure ou égale à <b>", input$temp_analyse, "°C</b> est arrivée <b>", occurrences_sup, " fois</b> entre ", annee_debut, " et ", annee_fin, "."),
+        saison = ""
+      )
+      
+      # Si on analyse un jour spécifique
+    } else {
+      req(input$jour_analyse, input$mois_analyse)
+      
+      # On reconstruit une date (l'année n'a pas d'importance, on prend une non-bissextile)
+      date_selectionnee <- as.Date(paste("2001", input$mois_analyse, input$jour_analyse, sep="-"), format="%Y-%m-%d")
+      
+      # On vérifie que la date est valide
+      if (is.na(date_selectionnee)) {
+        res <- list(jour = "Date invalide.", saison = "")
+      } else {
+        # Appel de notre fonction réutilisable
+        res <- calculer_frequence(
+          ville_sel = input$ville_analyse,
+          date_sel = date_selectionnee,
+          temp_sel = input$temp_analyse,
+          periode_ref_str = input$periode_analyse,
+          data_brutes = tmax_annuelles
+        )
+      }
+    }
+    resultat(res) # On stocke le résultat
+  })
+  
+  # On affiche le résultat dans l'UI
+  output$resultat_frequence_ui <- renderUI({
+    res <- resultat()
+    if (is.null(res)) {
+      return(tags$p("Veuillez renseigner tous les champs et cliquer sur 'Calculer' pour voir un résultat."))
+    }
+    
+    # Mise en forme du résultat en HTML
+    tagList(
+      h3("Résultats de l'analyse"),
+      tags$p(HTML(res$jour)),
+      tags$hr(),
+      tags$p(HTML(res$saison))
+    )
+  })
+  
 }
