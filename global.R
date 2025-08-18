@@ -3,17 +3,15 @@ library(shiny)
 library(ggplot2)
 library(dplyr)
 library(lubridate)
-library(ecmwfr) 
 library(dplyr) 
 library(tidyr) 
 library(lubridate) 
-library(ncdf4) 
-library(sf) 
 library(here)
 library(plotly)
 
 # A travailler :
 # Réduire nombre décimales infobulle dans onglet Explorateur
+# Corriger bug mode analyse (ne jamais regarder la fréquence pour les températures inférieures au seuil, toujours supérieures... ou alors on ajoute un input pour définir ça)
 
 dirApp <- Sys.getenv("DIR_APP")
 key_cds <- Sys.getenv("KEY_CDS")
