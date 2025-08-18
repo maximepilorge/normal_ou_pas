@@ -8,6 +8,9 @@ mod_quiz_ui <- function(id) {
       sidebarPanel(
         # Note : ce selectInput est global et mis à jour dans le serveur principal
         selectInput("periode_normale", "Période de référence climatique", choices = NULL),
+        selectInput(ns("saison_select"), "Filtrer par saison (optionnel) :",
+                    choices = c("Toutes les saisons", "Hiver", "Printemps", "Été", "Automne"),
+                    selected = "Toutes les saisons"),
         h4("Nouvelle Question"),
         actionButton(ns("new_question_btn"), "Tirer une température au hasard !", icon = icon("dice")),
         checkboxInput(ns("trash_talk_mode"), "Me forcer à vous répondre poliment", value = FALSE),
@@ -36,75 +39,72 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
     score_succes <- reactiveVal(0)
     score_echecs <- reactiveVal(0)
     
-    # NOUVEAU : On utilise un reactiveVal pour stocker les données classées et les probabilités
+    # On utilise un reactiveVal pour stocker les données classées et les probabilités
     # Cela évite de les recalculer à chaque nouvelle question si la période de référence ne change pas.
     donnees_et_probabilites <- reactive({
+      
       req(periode_globale())
       
-      # 1. Préparation des seuils de normalité pour la période choisie
+      # 1. Filtrer les stats pré-calculées pour la période choisie
       normales_periode_selectionnee <- data_stats %>%
-        filter(periode_ref == periode_globale()) %>%
-        mutate(
-          iqr = t_q3 - t_q1,
-          seuil_haut = t_q3 + 1.5 * iqr,
-          seuil_bas = t_q1 - 1.5 * iqr
-        ) %>%
-        select(city, jour_annee, seuil_bas, seuil_haut, normale_moy = t_moy)
+        filter(periode_ref == periode_globale())
       
-      # 2. Classification de TOUT l'historique
+      # 2. Classification de tout l'historique en joignant les seuils pré-calculés
       donnees_classees <- data_tmax %>%
         left_join(normales_periode_selectionnee, by = c("city", "jour_annee")) %>%
-        filter(!is.na(seuil_haut)) %>%
+        filter(!is.na(seuil_haut_p90)) %>%
         mutate(
           categorie = case_when(
-            tmax_celsius > seuil_haut ~ "Au-dessus des normales",
-            tmax_celsius < seuil_bas ~ "En-dessous des normales",
-            TRUE ~ "Dans les normales de saison"
+            tmax_celsius > seuil_haut_p90 ~ "Au-dessus des normales",
+            tmax_celsius < seuil_bas_p10  ~ "En-dessous des normales",
+            TRUE                          ~ "Dans les normales de saison"
           )
         )
       
-      # 3. Calcul des probabilités basées sur la répartition réelle des données
-      probabilites_reelles <- donnees_classees %>%
-        count(categorie) %>%
-        mutate(prob = n / sum(n))
-      
       # On retourne une liste contenant les données classées et le tableau des probabilités
-      list(
-        donnees = donnees_classees,
-        probabilites = probabilites_reelles
-      )
+      return(donnees_classees)
     })
     
     observeEvent(input$new_question_btn, {
       
       # On récupère les données et probabilités calculées
-      calc <- donnees_et_probabilites()
-      donnees_classees <- calc$donnees
-      probabilites_df <- calc$probabilites
+      donnees_classees <- donnees_et_probabilites()
       
+      donnees_a_sampler <- if (input$saison_select == "Toutes les saisons") {
+        donnees_classees
+      } else {
+        saison_mois <- switch(input$saison_select,
+                              "Hiver"     = c(12, 1, 2),
+                              "Printemps" = c(3, 4, 5),
+                              "Été"       = c(6, 7, 8),
+                              "Automne"   = c(9, 10, 11)
+        )
+        donnees_classees %>%
+          filter(month(date) %in% saison_mois)
+      }
+
       # On s'assure que l'ordre des catégories est le même pour le tirage au sort
       categories_possibles <- c("Au-dessus des normales", "En-dessous des normales", "Dans les normales de saison")
       
       # On réorganise le dataframe de probabilités pour correspondre à l'ordre de `categories_possibles`
-      prob_vector <- probabilites_df %>%
-        mutate(categorie = factor(categorie, levels = categories_possibles)) %>%
-        arrange(categorie) %>%
-        pull(prob)
+      prob_vector <- c(0.3, 0.2, 0.5)
       
       # 4. Tirage au sort de la catégorie en utilisant les probabilités réelles
       categorie_choisie <- sample(categories_possibles, size = 1, prob = prob_vector)
       
       # 5. Tirage d'une question au hasard DANS la catégorie choisie
-      question_selectionnee <- donnees_classees %>%
+      question_selectionnee <- donnees_a_sampler %>%
         filter(categorie == categorie_choisie) %>%
         sample_n(1)
+      
+      print(summary(question_selectionnee))
       
       quiz_data(list(
         city = question_selectionnee$city, 
         date = question_selectionnee$date, 
         temp = round(question_selectionnee$tmax_celsius, 1),
         correct_answer = question_selectionnee$categorie,
-        normale_moy = round(question_selectionnee$normale_moy, 1)
+        normale_moy = round(question_selectionnee$t_moy, 1)
       ))
       
       updateRadioButtons(session, "user_answer", selected = character(0))
@@ -135,7 +135,7 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
       
       messages_succes <- c("C’est la chance du débutant, j’imagine.", "Tu es vraiment obligé de montrer que tu sais tout mieux que tout le monde.", "Je pourrais presque commencer à t’apprécier, à force.", "Promis, j’arrête d’être désagréable à partir de maintenant car tu l’as bien mérité.")
       message_succes_classique <- "Tu es trop fort !"
-      messages_echecs <- c("Tu feras mieux la prochaine fois, ne t’en fais pas. À vrai dire, tu peux difficilement faire pire.", "Tu ne pouvais pas mieux te tromper, félicitations !", "Ta détermination à échouer force l’admiration.", "Je pourrais être extrêmement désagréable mais je m’en voudrais de ruiner ta confiance en toi.")
+      messages_echecs <- c("Tu feras mieux la prochaine fois, ne t’en fais pas. À vrai dire, tu peux difficilement faire pire.", "Tu ne pouvais pas mieux te tromper, félicitations !", "Ta détermination à échouer force l’admiration.", "Je pourrais être extrêmement désagréable à ce stade mais je m’en voudrais de ruiner ta confiance en toi.")
       message_echec_classique <- "Dommage, tu feras mieux la prochaine fois !"
       
       intro_message <- ""
@@ -215,7 +215,7 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
           theme(plot.title = element_text(face = "bold"))
       })
       
-      # --- MODIFIÉ : Affichage du texte ET du graphique dans l'UI ---
+      # --- Affichage du texte et du graphique dans l'UI ---
       output$feedback_ui <- renderUI({
         tagList(
           HTML(feedback_body), # Le texte de feedback comme avant

@@ -41,9 +41,25 @@ mod_visualisation_server <- function(id, data_stats, data_tmax, ville, periode, 
       p <- ggplot() +
         geom_ribbon(data = plot_data_normale, aes(x = date, ymin = t_min, ymax = t_max), fill = "lightblue", alpha = 0.5) +
         geom_ribbon(data = plot_data_normale, aes(x = date, ymin = t_q1, ymax = t_q3), fill = "skyblue", alpha = 0.6) +
-        geom_line(data = plot_data_normale, aes(x = date, y = t_moy, color = "Moyenne normale"), linetype = "dashed") +
-        geom_line(data = plot_data_annee, aes(x = date, y = tmax_celsius, color = "Année sélectionnée"), size = 1) +
-        scale_color_manual(values = c("Moyenne normale" = "darkblue", "Année sélectionnée" = "red")) +
+        # Ligne de la moyenne normale
+        geom_line(data = plot_data_normale, aes(x = date, y = t_moy, color = "Moyenne normale"), 
+                  linetype = "dashed", 
+                  size = 0.6) +
+        
+        # Courbe de tendance (en arrière-plan)
+        geom_smooth(data = plot_data_annee, aes(x = date, y = tmax_celsius), 
+                    color = "#8B0000", linetype = "dashed", # <-- Changement de couleur ici pour du rouge foncé
+                    size = 0.6,
+                    method = "loess", span = 0.3, se = FALSE) +
+        
+        # Courbe journalière (au premier plan)
+        geom_line(data = plot_data_annee, aes(x = date, y = tmax_celsius, color = "Année sélectionnée"), 
+                  size = 1) +
+        
+        # Légende
+        scale_color_manual(values = c("Moyenne normale" = "darkblue", 
+                                      "Année sélectionnée" = "#E41A1C")) +
+        
         scale_x_date(date_labels = "%b", date_breaks = "1 month") +
         labs(
           title = paste("Températures maximales journalières à", ville(), "en", annee()),
@@ -54,6 +70,7 @@ mod_visualisation_server <- function(id, data_stats, data_tmax, ville, periode, 
         theme(legend.position = "bottom")
       
       ggplotly(p, tooltip = c("x", "y"))
+      
     })
     
   })

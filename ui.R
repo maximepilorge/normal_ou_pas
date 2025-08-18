@@ -46,20 +46,20 @@ ui <- navbarPage(
                       
                       hr(), 
                       
-                      h3("Calcul et définition des 'Normales de saison' 📊"), 
-                      p("L'application se base sur le calcul de normales climatiques."), 
-                      tags$ul( 
-                        tags$li(strong("Périodes de référence : "), "Les normales sont calculées pour différentes périodes (ex: 1961-1990, 1991-2020) afin de permettre la comparaison et de visualiser l'évolution du climat."), 
-                        tags$li(strong("Définition statistique du 'normal' : "), "Pour le quiz, une température n'est pas simplement comparée à la moyenne. L'application utilise la méthode de l'écart interquartile (IQR) pour détecter les valeurs atypiques.", 
-                                tags$ol( 
-                                  tags$li("Pour un jour donné (ex: le 15 août) et une période de référence, l'application analyse la distribution de toutes les températures maximales observées les 15 août de cette période."), 
-                                  tags$li("Elle calcule le premier quartile (Q1) et le troisième quartile (Q3)."), 
-                                  tags$li("Une température est jugée ", strong("'Dans les normales de saison'"), " si elle se situe entre les bornes [Q1 - 1.5 * IQR] et [Q3 + 1.5 * IQR]."), 
-                                  tags$li("Si elle est en dehors de ces bornes, elle est considérée comme 'En-dessous' ou 'Au-dessus' des normales.") 
-                                ) 
-                        ), 
-                        p("Cette méthode est plus robuste qu'une simple comparaison à la moyenne car elle tient compte de la variabilité habituelle des températures pour un jour donné.") 
-                      ), 
+                      h3("Calcul et définition des 'Normales de saison' 📊"),
+                      p("L'application se base sur le calcul de normales climatiques, conformément aux standards internationaux."),
+                      tags$ul(
+                        tags$li(strong("Périodes de référence : "), "Les normales sont calculées pour différentes périodes de 30 ans (ex: 1961-1990, 1991-2020), comme le recommande l'Organisation Météorologique Mondiale (OMM), afin de permettre la comparaison et de visualiser l'évolution du climat."),
+                        tags$li(strong("Définition du 'normal' : "), "Pour définir ce qui est 'normal', l'application utilise la méthode des percentiles.",
+                                tags$ol(
+                                  tags$li("Pour un jour donné (ex: le 15 août) et une période de référence, l'application analyse la distribution de toutes les températures maximales observées les 15 août de cette période."),
+                                  tags$li("Elle calcule ensuite le 10e percentile (la valeur en dessous de laquelle se trouvent les 10% des jours les plus froids) et le 90e percentile (la valeur au-dessus de laquelle se trouvent les 10% des jours les plus chauds)."),
+                                  tags$li("Une température est jugée ", strong("'Dans les normales de saison'"), " si elle se situe entre ces deux bornes (le 10e et le 90e percentile)."),
+                                  tags$li("Si elle est en dehors de cette plage, elle est considérée comme 'En-dessous' ou 'Au-dessus' des normales.")
+                                )
+                        ),
+                        p("Cette méthode signifie qu'environ 80% des températures de la période de référence sont considérées comme 'normales'.")
+                      ),
                       
                       hr(), 
                       

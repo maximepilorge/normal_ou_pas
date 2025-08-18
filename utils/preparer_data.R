@@ -1,4 +1,4 @@
-# data_prep.R
+# preparer_data.R
 # Ce script récupère les températures maximales journalières et pré-calcule les statistiques des normales climatiques
 # À n'exécuter qu'une seule fois ou lors de la mise à jour des données
 
@@ -41,6 +41,8 @@ stats_normales <- donnees_augmentees %>%
     t_moy = mean(tmax_celsius, na.rm = TRUE),
     t_q3 = quantile(tmax_celsius, probs = 0.75, na.rm = TRUE),
     t_max = max(tmax_celsius, na.rm = TRUE),
+    seuil_bas_p10 = quantile(tmax_celsius, probs = 0.1, na.rm = TRUE),
+    seuil_haut_p90 = quantile(tmax_celsius, probs = 0.9, na.rm = TRUE),
     .groups = "drop"
   )
 
