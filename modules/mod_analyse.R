@@ -3,12 +3,11 @@
 mod_analyse_ui <- function(id) {
   ns <- NS(id)
   fluidPage(
-    useShinyjs(), # Activer shinyjs pour cet onglet
+    useShinyjs(),
     titlePanel("Quelle est la rareté d'un événement météo chaud ?"),
     sidebarLayout(
       sidebarPanel(
         p("Testez une température pour un jour ou pour l'année entière et découvrez la fréquence à laquelle elle a été dépassée."),
-        # Ces contrôles sont globaux
         selectInput("ville_analyse", "Choisissez une ville :", choices = NULL),
         selectInput("periode_analyse", "Choisissez la période de référence :", choices = NULL),
         
@@ -40,7 +39,6 @@ mod_analyse_server <- function(id, ville, periode, data_tmax, calculer_frequence
     resultat <- reactiveVal(NULL)
     
     observeEvent(input$toute_annee_analyse, {
-      # On utilise ns() pour cibler le div spécifique à ce module
       toggleState(id = "selecteurs_date", condition = !input$toute_annee_analyse)
     })
     

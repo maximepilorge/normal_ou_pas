@@ -13,7 +13,7 @@ source("modules/mod_analyse.R")
 
 server <- function(input, output, session) {
   
-  # --- CHARGEMENT DES DONNÉES (reste ici car partagé entre les modules) ---
+  # --- CHARGEMENT DES DONNÉES ---
   stats_normales <- readRDS("data/stats_normales_precalculees.rds")
   tmax_annuelles <- readRDS("data/era5_temperatures_france.rds") %>%
     rename(city = ville, tmax_celsius = temperature_max) %>%
@@ -51,7 +51,7 @@ server <- function(input, output, session) {
     direction <- if (temp_sel >= moyenne_jour) "supérieure ou égale" else "inférieure ou égale"
     comparaison_jour <- if (direction == "supérieure ou égale") `>=` else `<=`
     
-    # --- Calcul sur le JOUR PRÉCIS ---
+    # --- Calcul sur le jour précis ---
     donnees_historiques_jour <- data_brutes %>%
       filter(city == ville_sel, jour_annee == yday(date_sel), year(date) >= annee_debut, year(date) <= annee_fin)
     
@@ -59,7 +59,7 @@ server <- function(input, output, session) {
     
     texte_jour <- paste0("Pour ce jour précis (le ", format(date_sel, "%d %B"), "), une température ", direction, " ou égale à ", temp_sel, "°C s'est produite <b>", nombre_occurrences_jour, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
     
-    # --- Calcul sur la SAISON ---
+    # --- Calcul sur la saison ---
     saison <- get_season_info(date_sel)
     donnees_historiques_saison <- data_brutes %>%
       filter(city == ville_sel, month(date) %in% saison$mois, year(date) >= annee_debut, year(date) <= annee_fin)

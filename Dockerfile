@@ -1,6 +1,4 @@
 FROM rocker/shiny:4.4
-# install R packages required 
-# Change the packages list to suit your needs
 RUN R -e 'install.packages(c(\
               "shiny", \
               "ggplot2", \

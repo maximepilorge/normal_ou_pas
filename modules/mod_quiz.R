@@ -6,7 +6,6 @@ mod_quiz_ui <- function(id) {
     titlePanel("Testez votre intuition climatique"),
     sidebarLayout(
       sidebarPanel(
-        # Note : ce selectInput est global et mis à jour dans le serveur principal
         selectInput("periode_normale", "Période de référence climatique", choices = NULL),
         selectInput(ns("saison_select"), "Filtrer par saison (optionnel) :",
                     choices = c("Toutes les saisons", "Hiver", "Printemps", "Été", "Automne"),
@@ -39,17 +38,16 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
     score_succes <- reactiveVal(0)
     score_echecs <- reactiveVal(0)
     
-    # On utilise un reactiveVal pour stocker les données classées et les probabilités
-    # Cela évite de les recalculer à chaque nouvelle question si la période de référence ne change pas.
+    # On utilise un reactiveVal pour stocker les données et leur associer une catégorie
     donnees_et_probabilites <- reactive({
       
       req(periode_globale())
       
-      # 1. Filtrer les stats pré-calculées pour la période choisie
+      # Filtrer les stats pré-calculées pour la période choisie
       normales_periode_selectionnee <- data_stats %>%
         filter(periode_ref == periode_globale())
       
-      # 2. Classification de tout l'historique en joignant les seuils pré-calculés
+      # Classification de tout l'historique en joignant les seuils pré-calculés
       donnees_classees <- data_tmax %>%
         left_join(normales_periode_selectionnee, by = c("city", "jour_annee")) %>%
         filter(!is.na(seuil_haut_p90)) %>%
@@ -65,6 +63,7 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
       return(donnees_classees)
     })
     
+    # --- NOUVELLE QUESTION ---
     observeEvent(input$new_question_btn, {
       
       # On récupère les données et probabilités calculées
@@ -86,13 +85,14 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
       # On s'assure que l'ordre des catégories est le même pour le tirage au sort
       categories_possibles <- c("Au-dessus des normales", "En-dessous des normales", "Dans les normales de saison")
       
-      # On réorganise le dataframe de probabilités pour correspondre à l'ordre de `categories_possibles`
+      # On définit la probabilité d'occurrence par catégorie : on favorise les valeurs dans les normales (50%), suivi
+      # des températures supérieures aux normales (30%) puis de celles inférieures aux normales (20%)
       prob_vector <- c(0.3, 0.2, 0.5)
       
-      # 4. Tirage au sort de la catégorie en utilisant les probabilités réelles
+      # Tirage au sort de la catégorie en utilisant les probabilités réelles
       categorie_choisie <- sample(categories_possibles, size = 1, prob = prob_vector)
       
-      # 5. Tirage d'une question au hasard DANS la catégorie choisie
+      # Tirage d'une question au hasard DANS la catégorie choisie
       question_selectionnee <- donnees_a_sampler %>%
         filter(categorie == categorie_choisie) %>%
         sample_n(1)
@@ -113,13 +113,15 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
       shinyjs::enable("submit_answer_btn")
     })
     
+    # --- AFFICHAGE QUESTION ---
     output$question_text <- renderText({
       req(quiz_data())
       data <- quiz_data()
-      formatted_date <- format(data$date, "%d %B") 
+      formatted_date <- paste(format(data$date, "%d"), mois_fr[as.numeric(format(data$date, "%m"))])
       paste0('Le ', formatted_date, ', à ', data$city, ', la température maximale observée est de ', data$temp, '°C. Est-ce normal ?')
     })
     
+    # --- ENVOI RÉPONSE ---
     observeEvent(input$submit_answer_btn, {
       req(quiz_data(), input$user_answer, periode_globale())
       data <- quiz_data()
@@ -178,7 +180,7 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
       
       feedback_body <- paste0("<b>", intro_message, "</b><br><br>", explication_text)
       
-      # --- Création du rendu pour le boxplot ---
+      # --- BOXPLOT ---
       output$feedback_boxplot <- renderPlot({
         
         data_quiz <- quiz_data()
@@ -206,7 +208,7 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
           geom_point(aes(y = data_quiz$temp), color = "red", size = 5, shape = 18) +
           scale_y_continuous(labels = ~paste(.x, "°C")) +
           labs(
-            title = paste("Distribution historique pour un", format(data_quiz$date, "%d %B"), "à", data_quiz$city),
+            title = paste("Distribution historique pour un", paste(format(data_quiz$date, "%d"), mois_fr[as.numeric(format(data_quiz$date, "%m"))]), "à", data_quiz$city),
             subtitle = paste("Période", periode_globale(), "- Le point rouge est la température du quiz."),
             x = "",
             y = "Température Maximale"
@@ -218,10 +220,10 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
       # --- Affichage du texte et du graphique dans l'UI ---
       output$feedback_ui <- renderUI({
         tagList(
-          HTML(feedback_body), # Le texte de feedback comme avant
-          hr(),               # Une ligne de séparation
+          HTML(feedback_body),
+          hr(),               
           h4("Visualisation de la distribution"),
-          plotOutput(session$ns("feedback_boxplot")) # L'appel au nouveau graphique
+          plotOutput(session$ns("feedback_boxplot"))
         )
       })
       

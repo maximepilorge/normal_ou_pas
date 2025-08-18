@@ -17,9 +17,6 @@ dirApp <- Sys.getenv("DIR_APP")
 key_cds <- Sys.getenv("KEY_CDS")
 Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
 
-dirApp <- "C:/Users/maxp1/Documents/guess_climate"
-key_cds <- "9e71b600-abdb-4b74-92f5-94721d1f774f"
-
 mois_fr <- c("Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
              "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre")
 

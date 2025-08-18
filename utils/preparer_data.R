@@ -7,8 +7,6 @@ library(dplyr)
 library(lubridate)
 library(here)
 
-source(here("global.R")) 
-
 cat("Début du pré-calcul des normales climatiques...\n")
 
 # Chargement des données

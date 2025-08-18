@@ -48,7 +48,7 @@ mod_visualisation_server <- function(id, data_stats, data_tmax, ville, periode, 
         
         # Courbe de tendance (en arrière-plan)
         geom_smooth(data = plot_data_annee, aes(x = date, y = tmax_celsius), 
-                    color = "#8B0000", linetype = "dashed", # <-- Changement de couleur ici pour du rouge foncé
+                    color = "#8B0000", linetype = "dashed",
                     size = 0.6,
                     method = "loess", span = 0.3, se = FALSE) +
         
