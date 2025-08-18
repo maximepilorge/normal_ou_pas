@@ -1,0 +1,25 @@
+# --- Fichiers de configuration R et RStudio ---
+# Cache et fichiers temporaires spécifiques à l'utilisateur
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+
+# --- Fichiers spécifiques au projet ---
+
+# Fichier de variables d'environnement (NE JAMAIS PARTAGER)
+# Contient vos clés d'API et chemins personnels.
+.Renviron
+
+# Données brutes et pré-calculées
+# Il est préférable de ne pas suivre les fichiers de données volumineux,
+# mais plutôt les scripts qui permettent de les générer.
+data/
+
+# --- Fichiers générés par les systèmes d'exploitation ---
+
+# Fichiers système de macOS
+.DS_Store
+
+# Fichiers système de Windows
+Thumbs.db
