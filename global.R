@@ -22,6 +22,9 @@ Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
 dirApp <- "C:/Users/maxp1/Documents/guess_climate"
 key_cds <- "9e71b600-abdb-4b74-92f5-94721d1f774f"
 
+mois_fr <- c("Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+             "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre")
+
 villes <- tibble::tribble(
   ~ville, ~latitude, ~longitude,
   "Paris", 48.8566, 2.3522,

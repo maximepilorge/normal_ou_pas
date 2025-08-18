@@ -4,10 +4,10 @@ mod_analyse_ui <- function(id) {
   ns <- NS(id)
   fluidPage(
     useShinyjs(), # Activer shinyjs pour cet onglet
-    titlePanel("Quelle est la rareté d'un événement météo ?"),
+    titlePanel("Quelle est la rareté d'un événement météo chaud ?"),
     sidebarLayout(
       sidebarPanel(
-        p("Testez une température pour un jour ou pour l'année entière et découvrez sa fréquence historique."),
+        p("Testez une température pour un jour ou pour l'année entière et découvrez la fréquence à laquelle elle a été dépassée."),
         # Ces contrôles sont globaux
         selectInput("ville_analyse", "Choisissez une ville :", choices = NULL),
         selectInput("periode_analyse", "Choisissez la période de référence :", choices = NULL),
@@ -19,8 +19,8 @@ mod_analyse_ui <- function(id) {
         
         div(id = ns("selecteurs_date"),
             selectInput(ns("mois_analyse"), "Mois :", 
-                        choices = setNames(1:12, month.name), selected = 6), 
-            selectInput(ns("jour_analyse"), "Jour :", choices = 1:31, selected = 26)
+                        choices = setNames(1:12, mois_fr), selected = 1), 
+            selectInput(ns("jour_analyse"), "Jour :", choices = 1:31, selected = 1)
         ),
         
         actionButton(ns("calculer_frequence_btn"), "Calculer la fréquence", icon = icon("calculator")),
