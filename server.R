@@ -42,7 +42,7 @@ server <- function(input, output, session) {
   mod_quiz_server("quiz_1", 
                   periode_globale = reactive(input$periode_normale),
                   data_stats = stats_normales, 
-                  data_tmax = tmax_annuelles,
+                  data_tmax = tmax_annuelles_precalcule,
                   get_season_info_func = get_season_info)
   
   # Module Visualisation

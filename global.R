@@ -37,6 +37,45 @@ get_season_info <- function(date_input) {
   }
 }
 
+calculer_frequence <- function(ville_sel, date_sel, temp_sel, periode_ref_str, data_brutes) {
+  
+  # Extraire les années de la période de référence
+  annees_periode <- as.numeric(unlist(strsplit(periode_ref_str, "-")))
+  annee_debut <- annees_periode[1]
+  annee_fin <- annees_periode[2]
+  nombre_annees_periode <- annee_fin - annee_debut + 1
+  
+  # Déterminer si on cherche un événement chaud ou froid (par rapport à la moyenne)
+  moyenne_jour <- stats_normales %>%
+    filter(city == ville_sel, jour_annee == yday(date_sel), periode_ref == periode_ref_str) %>%
+    pull(t_moy)
+  
+  # Si on n'a pas de moyenne pour ce jour, on ne peut pas continuer
+  if (length(moyenne_jour) == 0) return(NULL)
+  
+  direction <- if (temp_sel >= moyenne_jour) "supérieure ou égale" else "inférieure ou égale"
+  comparaison_jour <- if (direction == "supérieure ou égale") `>=` else `<=`
+  
+  # --- Calcul sur le jour précis ---
+  donnees_historiques_jour <- data_brutes %>%
+    filter(city == ville_sel, jour_annee == yday(date_sel), year(date) >= annee_debut, year(date) <= annee_fin)
+  
+  nombre_occurrences_jour <- sum(comparaison_jour(donnees_historiques_jour$tmax_celsius, temp_sel), na.rm = TRUE)
+  
+  texte_jour <- paste0("Pour ce jour précis (le ", paste(format(date_sel, "%d"), mois_fr[as.numeric(format(date_sel, "%m"))]), "), une température ", direction, " ou égale à ", temp_sel, "°C s'est produite <b>", nombre_occurrences_jour, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
+  
+  # --- Calcul sur la saison ---
+  saison <- get_season_info(date_sel)
+  donnees_historiques_saison <- data_brutes %>%
+    filter(city == ville_sel, month(date) %in% saison$mois, year(date) >= annee_debut, year(date) <= annee_fin)
+  
+  nombre_occurrences_saison <- sum(comparaison_jour(donnees_historiques_saison$tmax_celsius, temp_sel), na.rm = TRUE)
+  
+  texte_saison <- paste0("À l'échelle de la saison (", saison$nom, "), une température ", direction, " ou égale à ", temp_sel, "°C s'est produite <b>", nombre_occurrences_saison, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
+  
+  return(list(jour = texte_jour, saison = texte_saison))
+}
+
 # --- AUTRES VARIABLES ---
 mois_fr <- c("Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
              "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre")
@@ -75,41 +114,31 @@ villes <- tibble::tribble(
   "Ajaccio", 41.9207, 8.7397
 )
 
-calculer_frequence <- function(ville_sel, date_sel, temp_sel, periode_ref_str, data_brutes) {
+# 1. Obtenir la liste unique des périodes de référence disponibles
+periodes <- unique(stats_normales$periode_ref)
+
+# 2. Pour chaque période, on fait une jointure propre et on calcule la catégorie
+tmax_precalcule_list <- lapply(periodes, function(p) {
   
-  # Extraire les années de la période de référence
-  annees_periode <- as.numeric(unlist(strsplit(periode_ref_str, "-")))
-  annee_debut <- annees_periode[1]
-  annee_fin <- annees_periode[2]
-  nombre_annees_periode <- annee_fin - annee_debut + 1
+  # On filtre les stats pour n'avoir que la période en cours
+  normales_periode <- stats_normales %>% filter(periode_ref == p)
   
-  # Déterminer si on cherche un événement chaud ou froid (par rapport à la moyenne)
-  moyenne_jour <- stats_normales %>%
-    filter(city == ville_sel, jour_annee == yday(date_sel), periode_ref == periode_ref_str) %>%
-    pull(t_moy)
-  
-  # Si on n'a pas de moyenne pour ce jour, on ne peut pas continuer
-  if (length(moyenne_jour) == 0) return(NULL)
-  
-  direction <- if (temp_sel >= moyenne_jour) "supérieure ou égale" else "inférieure ou égale"
-  comparaison_jour <- if (direction == "supérieure ou égale") `>=` else `<=`
-  
-  # --- Calcul sur le jour précis ---
-  donnees_historiques_jour <- data_brutes %>%
-    filter(city == ville_sel, jour_annee == yday(date_sel), year(date) >= annee_debut, year(date) <= annee_fin)
-  
-  nombre_occurrences_jour <- sum(comparaison_jour(donnees_historiques_jour$tmax_celsius, temp_sel), na.rm = TRUE)
-  
-  texte_jour <- paste0("Pour ce jour précis (le ", format(date_sel, "%d %B"), "), une température ", direction, " ou égale à ", temp_sel, "°C s'est produite <b>", nombre_occurrences_jour, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
-  
-  # --- Calcul sur la saison ---
-  saison <- get_season_info(date_sel)
-  donnees_historiques_saison <- data_brutes %>%
-    filter(city == ville_sel, month(date) %in% saison$mois, year(date) >= annee_debut, year(date) <= annee_fin)
-  
-  nombre_occurrences_saison <- sum(comparaison_jour(donnees_historiques_saison$tmax_celsius, temp_sel), na.rm = TRUE)
-  
-  texte_saison <- paste0("À l'échelle de la saison (", saison$nom, "), une température ", direction, " ou égale à ", temp_sel, "°C s'est produite <b>", nombre_occurrences_saison, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
-  
-  return(list(jour = texte_jour, saison = texte_saison))
-}
+  # On effectue la jointure (qui est maintenant une relation un-à-plusieurs, ce qui est correct)
+  tmax_annuelles %>%
+    left_join(normales_periode, by = c("city", "jour_annee")) %>%
+    filter(!is.na(seuil_haut_p90)) %>%
+    mutate(
+      categorie = case_when(
+        tmax_celsius > seuil_haut_p90 ~ "Au-dessus des normales",
+        tmax_celsius < seuil_bas_p10  ~ "En-dessous des normales",
+        TRUE                          ~ "Dans les normales de saison"
+      )
+    )
+})
+
+# 3. On combine la liste de dataframes en une seule grande table
+tmax_annuelles_precalcule <- dplyr::bind_rows(tmax_precalcule_list)
+
+# Optionnel mais recommandé : libérer la mémoire de la liste intermédiaire
+rm(tmax_precalcule_list)
+gc()

@@ -53,20 +53,8 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
       req(periode_globale())
       
       # Filtrer les stats pré-calculées pour la période choisie
-      normales_periode_selectionnee <- data_stats %>%
-        filter(periode_ref == periode_globale())
-      
-      # Classification de tout l'historique en joignant les seuils pré-calculés
       donnees_classees <- data_tmax %>%
-        left_join(normales_periode_selectionnee, by = c("city", "jour_annee")) %>%
-        filter(!is.na(seuil_haut_p90)) %>%
-        mutate(
-          categorie = case_when(
-            tmax_celsius > seuil_haut_p90 ~ "Au-dessus des normales",
-            tmax_celsius < seuil_bas_p10  ~ "En-dessous des normales",
-            TRUE                          ~ "Dans les normales de saison"
-          )
-        )
+        filter(periode_ref == periode_globale())
       
       # On retourne une liste contenant les données classées et le tableau des probabilités
       return(donnees_classees)
@@ -106,8 +94,6 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
         filter(categorie == categorie_choisie) %>%
         sample_n(1)
       
-      print(summary(question_selectionnee))
-      
       quiz_data(list(
         city = question_selectionnee$city, 
         date = question_selectionnee$date, 
@@ -132,6 +118,7 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
     
     # --- ENVOI RÉPONSE ---
     observeEvent(input$submit_answer_btn, {
+      
       req(quiz_data(), input$user_answer, periode_globale())
       data <- quiz_data()
       is_correct <- (input$user_answer == data$correct_answer)
@@ -177,15 +164,17 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
         
         explication_principale <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", data$normale_moy, "°C) pour la période ", periode_globale(), ".")
         
-        donnees_historiques_jour <- data_tmax %>%
-          filter(city == data$city, jour_annee == yday(data$date), year(date) >= annee_debut, year(date) <= annee_fin)
+        donnees_periode_filtree <- donnees_et_probabilites()
+        
+        donnees_historiques_jour <- donnees_periode_filtree %>%
+          filter(city == data$city, jour_annee == yday(data$date))
         
         nombre_occurrences_jour <- if (direction == "supérieure") sum(donnees_historiques_jour$tmax_celsius >= data$temp, na.rm = TRUE) else sum(donnees_historiques_jour$tmax_celsius <= data$temp, na.rm = TRUE)
         frequence_jour_text <- if (nombre_occurrences_jour == 0) paste0("Pour ce jour précis, un événement de cette intensité ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".") else paste0("Pour ce jour précis, une température égale ou ", direction, " est arrivée <b>", nombre_occurrences_jour, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
         
         saison <- get_season_info_func(data$date)
-        donnees_historiques_saison <- data_tmax %>%
-          filter(city == data$city, month(date) %in% saison$mois, year(date) >= annee_debut, year(date) <= annee_fin)
+        donnees_historiques_saison <- donnees_periode_filtree %>%
+          filter(city == data$city, month(date) %in% saison$mois)
         
         nombre_occurrences_saison <- if (direction == "supérieure") sum(donnees_historiques_saison$tmax_celsius >= data$temp, na.rm = TRUE) else sum(donnees_historiques_saison$tmax_celsius <= data$temp, na.rm = TRUE)
         frequence_saison_text <- if (nombre_occurrences_saison == 0) paste0("À l'échelle de la saison (", saison$nom, "), une température aussi ", if (direction == "supérieure") "élevée" else "basse", " ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".") else paste0("À l'échelle de la saison (", saison$nom, "), une température égale ou ", direction, " est arrivée en moyenne <b>", round(nombre_occurrences_saison/(annee_fin-annee_debut+1), 0), " fois</b> par an entre ", annee_debut, " et ", annee_fin, ".")
@@ -205,8 +194,9 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
         annee_debut <- annees_periode[1]
         annee_fin <- annees_periode[2]
         
-        donnees_historiques_jour <- data_tmax %>%
+        donnees_historiques_jour_plot <- donnees_et_probabilites() %>%
           filter(
+            periode_ref == periode_globale(),
             city == data_quiz$city, 
             jour_annee == yday(data_quiz$date), 
             year(date) >= annee_debut, 
@@ -214,13 +204,13 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
           )
         
         # Création du graphique
-        ggplot(donnees_historiques_jour, aes(x = "", y = tmax_celsius)) +
+        ggplot(donnees_historiques_jour_plot, aes(x = "", y = tmax_celsius)) +
           # Boxplot basé sur les données historiques
           geom_boxplot(width = 0.3, fill = "skyblue", alpha = 0.7) +
           # Afficher tous les points historiques avec un peu de jitter
           geom_jitter(width = 0.1, alpha = 0.4, color = "darkblue") +
           # Ajouter le point de la température du quiz en rouge
-          geom_point(aes(y = data_quiz$temp), color = "red", size = 5, shape = 18) +
+          annotate("point", x = "", y = data_quiz$temp, color = "red", size = 5, shape = 18) +
           scale_y_continuous(labels = ~paste(.x, "°C")) +
           labs(
             title = paste("Distribution historique pour un", paste(format(data_quiz$date, "%d"), mois_fr[as.numeric(format(data_quiz$date, "%m"))]), "à", data_quiz$city),
