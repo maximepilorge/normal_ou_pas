@@ -78,7 +78,7 @@ cat("4/7 - Écriture des statistiques dans la table 'stats_normales'...\n")
 dbWriteTable(con, "stats_normales", as.data.frame(stats_normales), overwrite = TRUE)
 
 
-# --- Étape 3 : Création de la table pour le quiz (VERSION CORRIGÉE) ---
+# --- Étape 3 : Création de la table pour le quiz ---
 cat("5/7 - Jointure et pré-calcul de la table optimisée pour le quiz...\n")
 
 # On crée une table des périodes pour faciliter la jointure
@@ -96,7 +96,7 @@ quiz_data_precalculee <- donnees_avec_annee %>%
   # On joint les stats correspondantes
   left_join(stats_normales, by = c("ville", "jour_annee", "periode_ref")) %>%
   filter(!is.na(seuil_haut_p90)) %>%
-  # On calcule la catégorie UNE SEULE FOIS
+  # On calcule la catégorie
   mutate(
     categorie = case_when(
       tmax_celsius > seuil_haut_p90 ~ "Au-dessus des normales",
@@ -116,9 +116,7 @@ dbWriteTable(con, "quiz_data_precalculee", as.data.frame(quiz_data_precalculee),
 
 # --- Étape 4 : Créer des index pour optimiser les performances ---
 cat("7/7 - Création des index pour l'optimisation...\n")
-# Index pour la nouvelle table (le plus important !)
 dbExecute(con, "CREATE INDEX idx_quiz_main ON quiz_data_precalculee (periode_ref, categorie, mois);")
-# Les autres index sont maintenant moins cruciaux mais peuvent être gardés
 dbExecute(con, "CREATE INDEX idx_temp_ville_date ON temperatures_max (ville, jour_annee);")
 dbExecute(con, "CREATE INDEX idx_stats_ville_periode ON stats_normales (ville, periode_ref);")
 

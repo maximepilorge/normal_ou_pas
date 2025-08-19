@@ -11,7 +11,7 @@ mod_quiz_ui <- function(id) {
         # Première carte pour les paramètres généraux
         card(
           card_header("Paramètres"),
-          selectInput("periode_normale", "Période de référence climatique", choices = NULL),
+          selectInput(ns("periode_normale"), "Période de référence climatique", choices = NULL),
           selectInput(ns("saison_select"), "Filtrer par saison (optionnel) :",
                       choices = c("Toutes les saisons", "Hiver", "Printemps", "Été", "Automne"),
                       selected = "Toutes les saisons")
@@ -40,25 +40,38 @@ mod_quiz_ui <- function(id) {
   )
 }
 
-mod_quiz_server <- function(id, periode_globale, db_pool) {
+mod_quiz_server <- function(id, db_pool) {
   moduleServer(id, function(input, output, session) {
     
     quiz_data <- reactiveVal(NULL)
+    boxplot_data <- reactiveVal(NULL)
     score_succes <- reactiveVal(0)
     score_echecs <- reactiveVal(0)
     
+    observe({
+      periodes_disponibles <- tbl(db_pool, "stats_normales") %>%
+        distinct(periode_ref) %>%
+        arrange(periode_ref) %>%
+        pull()
+      
+      updateSelectInput(session, "periode_normale", choices = periodes_disponibles)
+    })
+    
     # --- NOUVELLE QUESTION ---
     observeEvent(input$new_question_btn, {
-      
-      # 1. On choisit une catégorie en R (instantané)
+    
+      shinyjs::disable("new_question_btn")
+      boxplot_data(NULL)
+        
+      # 1. On choisit une catégorie
       categories_possibles <- c("Au-dessus des normales", "En-dessous des normales", "Dans les normales de saison")
       prob_vector <- c(0.3, 0.2, 0.5)
       categorie_choisie <- sample(categories_possibles, size = 1, prob = prob_vector)
       
-      # 2. On construit une requête de base SIMPLE sur la nouvelle table
+      # 2. On construit une requête de base sur la nouvelle table
       requete_base <- tbl(db_pool, "quiz_data_precalculee") %>%
         filter(
-          periode_ref == !!periode_globale(),
+          periode_ref == !!input$periode_normale,
           categorie == !!categorie_choisie
         )
       
@@ -70,7 +83,7 @@ mod_quiz_server <- function(id, periode_globale, db_pool) {
         requete_base <- requete_base %>% filter(mois %in% !!saison_mois)
       }
       
-      # 3. On tire UNE ligne au hasard. Cette requête est maintenant ultra-rapide
+      # 3. On tire une ligne au hasard
       question_selectionnee <- requete_base %>%
         arrange(dbplyr::sql("RANDOM()")) %>%
         head(1) %>%
@@ -91,6 +104,9 @@ mod_quiz_server <- function(id, periode_globale, db_pool) {
       output$feedback_ui <- renderUI(NULL)
       shinyjs::enable("user_answer")
       shinyjs::enable("submit_answer_btn")
+      shinyjs::enable("new_question_btn")
+      shinyjs::enable("periode_normale")
+      shinyjs::enable("saison_select")
     })
     
     # --- AFFICHAGE QUESTION ---
@@ -104,7 +120,12 @@ mod_quiz_server <- function(id, periode_globale, db_pool) {
     # --- ENVOI RÉPONSE ---
     observeEvent(input$submit_answer_btn, {
       
-      req(quiz_data(), input$user_answer, periode_globale())
+      req(quiz_data(), input$user_answer, input$periode_normale)
+      
+      shinyjs::disable("submit_answer_btn")
+      shinyjs::disable("periode_normale")
+      shinyjs::disable("saison_select")
+      
       data <- quiz_data()
       is_correct <- (input$user_answer == data$correct_answer)
 
@@ -141,33 +162,36 @@ mod_quiz_server <- function(id, periode_globale, db_pool) {
       diff <- round(abs(data$temp - data$normale_moy), 1)
       direction <- if (data$temp > data$normale_moy) "supérieure" else "inférieure"
       
+      # On prépare les éléments du filtre
+      annees_periode <- as.numeric(unlist(strsplit(input$periode_normale, "-")))
+      annee_debut <- annees_periode[1]; annee_fin <- annees_periode[2]
+      jour_quiz_str <- sprintf("%02d", lubridate::day(data$date))
+      mois_quiz_str <- sprintf("%02d", lubridate::month(data$date))
+      annee_debut_str <- as.character(annee_debut)
+      annee_fin_str <- as.character(annee_fin)
+      
+      # Ce code demande à la BDD de faire TOUT le filtrage avant le transfert
+      donnees_historiques_jour <- tbl(db_pool, "temperatures_max") %>%
+        filter(
+          ville == !!data$city,
+          dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") >= !!annee_debut_str,
+          dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") <= !!annee_fin_str,
+          dbplyr::sql("STRFTIME('%m', date * 86400, 'unixepoch')") == !!mois_quiz_str,
+          dbplyr::sql("STRFTIME('%d', date * 86400, 'unixepoch')") == !!jour_quiz_str
+        ) %>%
+        collect() %>% # <-- Transfert de ~30 lignes seulement !
+        mutate(date = as.Date(date, origin = "1970-01-01")) %>% # On convertit la date après coup
+        rename(tmax_celsius = temperature_max)
+      
+      # On stocke immédiatement les données pour le graphique
+      boxplot_data(donnees_historiques_jour)
+      
       if (data$correct_answer == "Dans les normales de saison") {
         explication_text <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", data$normale_moy, "°C) et est considérée comme normale pour un ", paste(format(data$date, "%d"), mois_fr[as.numeric(format(data$date, "%m"))]), " à ", data$city, ".")
       } else {
-        annees_periode <- as.numeric(unlist(strsplit(periode_globale(), "-")))
-        annee_debut <- annees_periode[1]; annee_fin <- annees_periode[2]
         
-        explication_principale <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", data$normale_moy, "°C) pour la période ", periode_globale(), ".")
+        explication_principale <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", data$normale_moy, "°C) pour la période ", input$periode_normale, ".")
         
-        # On prépare les éléments du filtre en R
-        jour_quiz_str <- sprintf("%02d", lubridate::day(data$date))
-        mois_quiz_str <- sprintf("%02d", lubridate::month(data$date))
-        annee_debut_str <- as.character(annee_debut)
-        annee_fin_str <- as.character(annee_fin)
-        
-        # Ce code demande à la BDD de faire TOUT le filtrage avant le transfert
-        donnees_historiques_jour <- tbl(db_pool, "temperatures_max") %>%
-          filter(
-            ville == !!data$city,
-            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") >= !!annee_debut_str,
-            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") <= !!annee_fin_str,
-            dbplyr::sql("STRFTIME('%m', date * 86400, 'unixepoch')") == !!mois_quiz_str,
-            dbplyr::sql("STRFTIME('%d', date * 86400, 'unixepoch')") == !!jour_quiz_str
-          ) %>%
-          collect() %>% # <-- Transfert de ~30 lignes seulement !
-          mutate(date = as.Date(date, origin = "1970-01-01")) %>% # On convertit la date après coup
-          rename(tmax_celsius = temperature_max)
-
         nombre_occurrences_jour <- if (direction == "supérieure") sum(donnees_historiques_jour$tmax_celsius >= data$temp, na.rm = TRUE) else sum(donnees_historiques_jour$tmax_celsius <= data$temp, na.rm = TRUE)
         frequence_jour_text <- if (nombre_occurrences_jour == 0) paste0("Pour ce jour précis, un événement de cette intensité ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".") else paste0("Pour ce jour précis, une température égale ou ", direction, " est arrivée <b>", nombre_occurrences_jour, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
         
@@ -196,28 +220,19 @@ mod_quiz_server <- function(id, periode_globale, db_pool) {
       # --- BOXPLOT ---
       output$feedback_boxplot <- renderPlot({
         
+        req(boxplot_data())
+        
         data_quiz <- quiz_data()
+        donnees_historiques_jour_plot <- boxplot_data()
         
         # Filtrer les données historiques pour le jour et la ville du quiz
-        annees_periode <- as.numeric(unlist(strsplit(periode_globale(), "-")))
+        annees_periode <- as.numeric(unlist(strsplit(input$periode_normale, "-")))
         annee_debut <- annees_periode[1]
         annee_fin <- annees_periode[2]
         jour_quiz_str <- sprintf("%02d", lubridate::day(data_quiz$date))
         mois_quiz_str <- sprintf("%02d", lubridate::month(data_quiz$date))
         annee_debut_str <- as.character(annee_debut)
         annee_fin_str <- as.character(annee_fin)
-        
-        donnees_historiques_jour_plot <- tbl(db_pool, "temperatures_max") %>%
-          filter(
-            ville == !!data_quiz$city,
-            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") >= !!annee_debut_str,
-            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") <= !!annee_fin_str,
-            dbplyr::sql("STRFTIME('%m', date * 86400, 'unixepoch')") == !!mois_quiz_str,
-            dbplyr::sql("STRFTIME('%d', date * 86400, 'unixepoch')") == !!jour_quiz_str
-          ) %>%
-          collect() %>% # <-- Transfert de ~30 lignes seulement !
-          rename(tmax_celsius = temperature_max) %>%
-          mutate(date = as.Date(date, origin = "1970-01-01")) # On convertit la date après coup
         
         # Création du graphique
         ggplot(donnees_historiques_jour_plot, aes(x = "", y = tmax_celsius)) +
@@ -230,7 +245,7 @@ mod_quiz_server <- function(id, periode_globale, db_pool) {
           scale_y_continuous(labels = ~paste(.x, "°C")) +
           labs(
             title = paste("Distribution historique pour un", paste(format(data_quiz$date, "%d"), mois_fr[as.numeric(format(data_quiz$date, "%m"))]), "à", data_quiz$city),
-            subtitle = paste("Période", periode_globale(), "- Le point rouge est la température du quiz."),
+            subtitle = paste("Période", input$periode_normale, "- Le point rouge est la température du quiz."),
             x = "",
             y = "Température Maximale"
           ) +

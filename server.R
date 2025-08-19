@@ -19,10 +19,9 @@ server <- function(input, output, session) {
     
     periodes_disponibles <- tbl(db_pool, "stats_normales") %>%
       distinct(periode_ref) %>%
-      pull() %>%
-      sort()
+      arrange(periode_ref) %>%
+      pull()
 
-    updateSelectInput(session, "periode_normale", choices = periodes_disponibles)
     updateSelectInput(session, "periode_select", choices = periodes_disponibles)
     updateSelectInput(session, "periode_analyse", choices = periodes_disponibles)
     
@@ -33,8 +32,8 @@ server <- function(input, output, session) {
     
     villes_triees <- tbl(db_pool, "temperatures_max") %>%
       distinct(ville) %>%
-      pull(ville) %>%   
-      sort()           
+      arrange(ville) %>%
+      pull(ville)          
     
     updateSelectInput(session, "ville_select", choices = villes_triees, selected = villes_triees[1])
     updateSelectInput(session, "ville_analyse", choices = villes_triees, selected = villes_triees[1])
@@ -51,7 +50,6 @@ server <- function(input, output, session) {
   
   # Module Quiz
   mod_quiz_server("quiz_1", 
-                  periode_globale = reactive(input$periode_normale),
                   db_pool = db_pool)
   
   # Module Visualisation

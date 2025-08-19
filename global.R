@@ -16,7 +16,7 @@ library(dbplyr)
 
 # A travailler :
 # Corriger bug mode analyse (ne jamais regarder la fréquence pour les températures inférieures au seuil, toujours supérieures... ou alors on ajoute un input pour définir ça)
-# Supprimer données inutiles dans BDD
+# Figer input de la période de référence et de la saison dans le module de quiz quand on a validé la réponse
 
 dirApp <- Sys.getenv("DIR_APP")
 Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
