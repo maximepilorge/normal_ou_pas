@@ -9,7 +9,7 @@ RUN R -e 'install.packages(c(\
               "here", \
               "tidyr", \
               "DBI", \
-              "RSQLite", \
+              "RPostgres", \
               "pool", \
               "dbplyr"), \
             repos="https://packagemanager.rstudio.com/cran/__linux__/focal/2025-08-11"\

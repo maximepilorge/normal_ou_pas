@@ -170,16 +170,24 @@ mod_quiz_server <- function(id, db_pool) {
       annee_debut_str <- as.character(annee_debut)
       annee_fin_str <- as.character(annee_fin)
       
+      # On prépare les éléments du filtre
+      annees_periode <- as.numeric(unlist(strsplit(input$periode_normale, "-")))
+      annee_debut <- annees_periode[1]; annee_fin <- annees_periode[2]
+      jour_quiz_str <- sprintf("%02d", lubridate::day(data$date))
+      mois_quiz_str <- sprintf("%02d", lubridate::month(data$date))
+      annee_debut_str <- as.character(annee_debut)
+      annee_fin_str <- as.character(annee_fin)
+      
       # Ce code demande à la BDD de faire TOUT le filtrage avant le transfert
       donnees_historiques_jour <- tbl(db_pool, "temperatures_max") %>%
         filter(
           ville == !!data$city,
-          dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") >= !!annee_debut_str,
-          dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") <= !!annee_fin_str,
-          dbplyr::sql("STRFTIME('%m', date * 86400, 'unixepoch')") == !!mois_quiz_str,
-          dbplyr::sql("STRFTIME('%d', date * 86400, 'unixepoch')") == !!jour_quiz_str
+          dbplyr::sql("EXTRACT(YEAR FROM TO_TIMESTAMP(date * 86400))") >= !!annee_debut,
+          dbplyr::sql("EXTRACT(YEAR FROM TO_TIMESTAMP(date * 86400))") <= !!annee_fin,
+          dbplyr::sql("TO_CHAR(TO_TIMESTAMP(date * 86400), 'MM')") == !!mois_quiz_str,
+          dbplyr::sql("TO_CHAR(TO_TIMESTAMP(date * 86400), 'DD')") == !!jour_quiz_str
         ) %>%
-        collect() %>% # <-- Transfert de ~30 lignes seulement !
+        collect() %>%
         mutate(date = as.Date(date, origin = "1970-01-01")) %>% # On convertit la date après coup
         rename(tmax_celsius = temperature_max)
       
@@ -201,9 +209,9 @@ mod_quiz_server <- function(id, db_pool) {
         donnees_historiques_saison <- tbl(db_pool, "temperatures_max") %>%
           filter(
             ville == !!data$city,
-            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") >= !!annee_debut_str,
-            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") <= !!annee_fin_str,
-            dbplyr::sql("STRFTIME('%m', date * 86400, 'unixepoch')") %in% !!mois_saison_str
+            dbplyr::sql("EXTRACT(YEAR FROM TO_TIMESTAMP(date * 86400))") >= !!annee_debut_str,
+            dbplyr::sql("EXTRACT(YEAR FROM TO_TIMESTAMP(date * 86400))") <= !!annee_fin_str,
+            dbplyr::sql("TO_CHAR(TO_TIMESTAMP(date * 86400), 'MM')") %in% !!mois_saison_str
           ) %>%
           collect() %>%
           mutate(date = as.Date(date, origin = "1970-01-01")) %>%

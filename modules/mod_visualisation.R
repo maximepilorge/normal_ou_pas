@@ -64,12 +64,10 @@ mod_visualisation_server <- function(id, db_pool, ville, periode, annee) {
       req(ville(), annee())
 
       # On prépare l'année en chaîne de caractères pour la requête SQL
-      annee_str <- as.character(annee())
-      
       donnees_preparees <- tbl(db_pool, "temperatures_max") %>%
         filter(
           ville == !!ville(),
-          dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") == !!annee_str
+          dbplyr::sql("EXTRACT(YEAR FROM TO_TIMESTAMP(date * 86400))") == !!annee()
         ) %>%
         collect() %>%
         rename(tmax_celsius = temperature_max) %>%

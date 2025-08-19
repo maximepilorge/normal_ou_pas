@@ -10,7 +10,7 @@ library(here)
 library(plotly)
 library(bslib)
 library(DBI)
-library(RSQLite)
+library(RPostgres)
 library(pool)
 library(dbplyr)
 
@@ -18,13 +18,19 @@ library(dbplyr)
 # Corriger bug mode analyse (ne jamais regarder la fréquence pour les températures inférieures au seuil, toujours supérieures... ou alors on ajoute un input pour définir ça)
 # Figer input de la période de référence et de la saison dans le module de quiz quand on a validé la réponse
 
-dirApp <- Sys.getenv("DIR_APP")
 Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
 
 # --- CHARGEMENT DES DONNÉES ---
 
 # Établir une "promesse" de connexion à la BDD
-db_pool <- pool::dbPool(RSQLite::SQLite(), dbname = "data/temperatures.sqlite")
+db_pool <- pool::dbPool(
+  drv = RPostgres::Postgres(),
+  dbname = Sys.getenv("DB_NAME"),
+  host = Sys.getenv("DB_HOST"),
+  port = as.integer(Sys.getenv("DB_PORT")),
+  user = Sys.getenv("DB_USER"),
+  password = Sys.getenv("DB_PASS")
+)
 
 # S'assurer que le pool se ferme quand l'app s'arrête
 onStop(function() {

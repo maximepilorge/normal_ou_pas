@@ -55,8 +55,6 @@ mod_analyse_server <- function(id, ville, periode, db_pool) {
       annees_periode <- as.numeric(unlist(strsplit(periode(), "-")))
       annee_debut <- annees_periode[1]
       annee_fin <- annees_periode[2]
-      annee_debut_str <- as.character(annee_debut)
-      annee_fin_str <- as.character(annee_fin)
       
       res <- NULL
       
@@ -65,8 +63,8 @@ mod_analyse_server <- function(id, ville, periode, db_pool) {
         donnees_historiques <- tbl(db_pool, "temperatures_max") %>%
           filter(
             ville == !!ville(),
-            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") >= !!annee_debut_str,
-            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") <= !!annee_fin_str
+            dbplyr::sql("EXTRACT(YEAR FROM TO_TIMESTAMP(date * 86400))") >= !!annee_debut,
+            dbplyr::sql("EXTRACT(YEAR FROM TO_TIMESTAMP(date * 86400))") <= !!annee_fin
           ) %>%
           collect() %>%
           rename(tmax_celsius = temperature_max)
@@ -89,10 +87,10 @@ mod_analyse_server <- function(id, ville, periode, db_pool) {
         donnees_jour <- tbl(db_pool, "temperatures_max") %>%
           filter(
             ville == !!ville(),
-            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") >= !!annee_debut_str,
-            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") <= !!annee_fin_str,
-            dbplyr::sql("STRFTIME('%m', date * 86400, 'unixepoch')") == !!mois_str,
-            dbplyr::sql("STRFTIME('%d', date * 86400, 'unixepoch')") == !!jour_str
+            dbplyr::sql("EXTRACT(YEAR FROM TO_TIMESTAMP(date * 86400))") >= !!annee_debut,
+            dbplyr::sql("EXTRACT(YEAR FROM TO_TIMESTAMP(date * 86400))") <= !!annee_fin,
+            dbplyr::sql("TO_CHAR(TO_TIMESTAMP(date * 86400), 'MM')") == !!mois_str,
+            dbplyr::sql("TO_CHAR(TO_TIMESTAMP(date * 86400), 'DD')") == !!jour_str
           ) %>%
           collect() %>%
           rename(tmax_celsius = temperature_max)
@@ -104,13 +102,14 @@ mod_analyse_server <- function(id, ville, periode, db_pool) {
         date_selectionnee <- as.Date(paste("2001", input$mois_analyse, input$jour_analyse, sep="-"))
         saison <- get_season_info(date_selectionnee) # get_season_info() vient de global.R
         mois_saison_str <- sprintf("%02d", saison$mois)
+        mois_clause_sql <- paste0("TO_CHAR(TO_TIMESTAMP(date * 86400), 'MM') IN (", paste0("'", mois_saison_str, "'", collapse = ", "), ")")
         
         donnees_saison <- tbl(db_pool, "temperatures_max") %>%
           filter(
             ville == !!ville(),
-            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") >= !!annee_debut_str,
-            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") <= !!annee_fin_str,
-            dbplyr::sql("STRFTIME('%m', date * 86400, 'unixepoch')") %in% !!mois_saison_str
+            dbplyr::sql("EXTRACT(YEAR FROM TO_TIMESTAMP(date * 86400))") >= !!annee_debut,
+            dbplyr::sql("EXTRACT(YEAR FROM TO_TIMESTAMP(date * 86400))") <= !!annee_fin,
+            dbplyr::sql(mois_clause_sql)
           ) %>%
           collect() %>%
           rename(tmax_celsius = temperature_max)
