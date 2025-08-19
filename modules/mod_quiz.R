@@ -2,30 +2,39 @@
 
 mod_quiz_ui <- function(id) {
   ns <- NS(id)
-  fluidPage(
-    titlePanel("Testez votre intuition climatique"),
-    sidebarLayout(
-      sidebarPanel(
-        selectInput("periode_normale", "Période de référence climatique", choices = NULL),
-        selectInput(ns("saison_select"), "Filtrer par saison (optionnel) :",
-                    choices = c("Toutes les saisons", "Hiver", "Printemps", "Été", "Automne"),
-                    selected = "Toutes les saisons"),
-        h4("Nouvelle Question"),
-        actionButton(ns("new_question_btn"), "Tirer une température au hasard !", icon = icon("dice")),
-        checkboxInput(ns("trash_talk_mode"), "Me forcer à vous répondre poliment", value = FALSE),
-        hr(),
-        h4("Votre Réponse"),
-        radioButtons(ns("user_answer"), "Cette température est :",
-                     choices = c("En-dessous des normales", "Dans les normales de saison", "Au-dessus des normales"),
-                     selected = character(0)),
-        actionButton(ns("submit_answer_btn"), "Valider", icon = icon("check")),
-        width = 3
+  tagList(
+    page_sidebar(
+      title = "Testez votre intuition climatique",
+      
+      sidebar = sidebar(
+        width = "350px",
+        # Première carte pour les paramètres généraux
+        card(
+          card_header("Paramètres"),
+          selectInput("periode_normale", "Période de référence climatique", choices = NULL),
+          selectInput(ns("saison_select"), "Filtrer par saison (optionnel) :",
+                      choices = c("Toutes les saisons", "Hiver", "Printemps", "Été", "Automne"),
+                      selected = "Toutes les saisons")
+        ),
+        # Deuxième carte pour l'interaction avec le quiz
+        card(
+          card_header("Action"),
+          actionButton(ns("new_question_btn"), "Tirer une température au hasard !", icon = icon("dice"), class = "btn-primary w-100 mb-3"),
+          checkboxInput(ns("trash_talk_mode"), "Me forcer à vous répondre poliment", value = FALSE),
+          hr(),
+          h4("Votre Réponse"),
+          radioButtons(ns("user_answer"), "Cette température est :",
+                       choices = c("En-dessous des normales", "Dans les normales de saison", "Au-dessus des normales"),
+                       selected = character(0)),
+          actionButton(ns("submit_answer_btn"), "Valider", icon = icon("check"), class = "btn-success w-100")
+        )
       ),
-      mainPanel(
-        h3(textOutput(ns("question_text"))),
+      
+      # La carte principale pour afficher la question et les résultats
+      card(
+        card_header(h3(textOutput(ns("question_text")))),
         hr(),
-        uiOutput(ns("feedback_ui")),
-        width = 9
+        uiOutput(ns("feedback_ui"))
       )
     )
   )
@@ -179,7 +188,7 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
           filter(city == data$city, month(date) %in% saison$mois, year(date) >= annee_debut, year(date) <= annee_fin)
         
         nombre_occurrences_saison <- if (direction == "supérieure") sum(donnees_historiques_saison$tmax_celsius >= data$temp, na.rm = TRUE) else sum(donnees_historiques_saison$tmax_celsius <= data$temp, na.rm = TRUE)
-        frequence_saison_text <- if (nombre_occurrences_saison == 0) paste0("À l'échelle de la saison (", saison$nom, "), une température aussi ", if (direction == "supérieure") "élevée" else "basse", " ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".") else paste0("À l'échelle de la saison (", saison$nom, "), une température égale ou ", direction, " est arrivée <b>", nombre_occurrences_saison, " fois</b> au total entre ", annee_debut, " et ", annee_fin, ".")
+        frequence_saison_text <- if (nombre_occurrences_saison == 0) paste0("À l'échelle de la saison (", saison$nom, "), une température aussi ", if (direction == "supérieure") "élevée" else "basse", " ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".") else paste0("À l'échelle de la saison (", saison$nom, "), une température égale ou ", direction, " est arrivée en moyenne <b>", round(nombre_occurrences_saison/(annee_fin-annee_debut+1), 0), " fois</b> par an entre ", annee_debut, " et ", annee_fin, ".")
         
         explication_text <- paste(explication_principale, frequence_jour_text, frequence_saison_text, sep = "<br><br>")
       }

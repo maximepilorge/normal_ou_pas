@@ -2,15 +2,12 @@
 
 mod_visualisation_ui <- function(id) {
   ns <- NS(id)
-  # On remplace fluidPage par une simple liste de tags, 
-  # car page_sidebar gère la structure de la page.
   tagList(
-    # page_sidebar est le remplaçant moderne de sidebarLayout
     page_sidebar(
       title = "Visualiser le changement climatique",
       
-      # Le contenu de l'ancienne sidebarPanel va ici
       sidebar = sidebar(
+        width = "350px",
         # On encapsule les contrôles dans une "card" pour un meilleur rendu visuel
         card(
           card_header("Paramètres"),
@@ -21,9 +18,8 @@ mod_visualisation_ui <- function(id) {
         )
       ),
       
-      # Le contenu de l'ancien mainPanel va ici, encapsulé dans une card
       card(
-        full_screen = TRUE, # Permet à l'utilisateur d'agrandir le graphique
+        full_screen = TRUE,
         card_header("Évolution des températures maximales"),
         plotlyOutput(ns("climate_plot"), height = "600px")
       )

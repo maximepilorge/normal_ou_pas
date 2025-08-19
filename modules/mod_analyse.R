@@ -2,32 +2,33 @@
 
 mod_analyse_ui <- function(id) {
   ns <- NS(id)
-  fluidPage(
-    useShinyjs(),
-    titlePanel("Quelle est la rareté d'un événement météo chaud ?"),
-    sidebarLayout(
-      sidebarPanel(
-        p("Testez une température pour un jour ou pour l'année entière et découvrez la fréquence à laquelle elle a été dépassée."),
-        selectInput("ville_analyse", "Choisissez une ville :", choices = NULL),
-        selectInput("periode_analyse", "Choisissez la période de référence :", choices = NULL),
-        
-        numericInput(ns("temp_analyse"), "Température maximale à tester (°C) :", 
-                     value = 35, min = -20, max = 50),
-        hr(),
-        checkboxInput(ns("toute_annee_analyse"), "Analyser sur l'année entière", value = FALSE),
-        
-        div(id = ns("selecteurs_date"),
-            selectInput(ns("mois_analyse"), "Mois :", 
-                        choices = setNames(1:12, mois_fr), selected = 1), 
-            selectInput(ns("jour_analyse"), "Jour :", choices = 1:31, selected = 1)
-        ),
-        
-        actionButton(ns("calculer_frequence_btn"), "Calculer la fréquence", icon = icon("calculator")),
-        width = 3
+  tagList(
+    page_sidebar(
+      title = "Quelle est la rareté d'un événement météo chaud ?",
+      
+      sidebar = sidebar(
+        width = "350px",
+        card(
+          card_header("Paramètres d'analyse"),
+          p("Testez une température pour un jour ou pour l'année entière et découvrez sa fréquence d'occurrence."),
+          selectInput("ville_analyse", "Choisissez une ville :", choices = NULL),
+          selectInput("periode_analyse", "Choisissez la période de référence :", choices = NULL),
+          numericInput(ns("temp_analyse"), "Température maximale à tester (°C) :",
+                       value = 35, min = -20, max = 50),
+          hr(),
+          checkboxInput(ns("toute_annee_analyse"), "Analyser sur l'année entière", value = FALSE),
+          div(id = ns("selecteurs_date"),
+              selectInput(ns("mois_analyse"), "Mois :",
+                          choices = setNames(1:12, mois_fr), selected = 1),
+              selectInput(ns("jour_analyse"), "Jour :", choices = 1:31, selected = 1)
+          ),
+          actionButton(ns("calculer_frequence_btn"), "Calculer la fréquence", icon = icon("calculator"), class = "btn-primary w-100 mt-3")
+        )
       ),
-      mainPanel(
-        uiOutput(ns("resultat_frequence_ui")),
-        width = 9
+      
+      # La carte principale pour les résultats
+      card(
+        uiOutput(ns("resultat_frequence_ui"))
       )
     )
   )
