@@ -1,3 +1,4 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 data/temperatures.sqlite filter=lfs diff=lfs merge=lfs -text
+/data/temperatures.sqlite filter=lfs diff=lfs merge=lfs -text
