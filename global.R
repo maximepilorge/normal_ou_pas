@@ -8,6 +8,7 @@ library(tidyr)
 library(lubridate) 
 library(here)
 library(plotly)
+library(bslib)
 
 # A travailler :
 # Réduire nombre décimales infobulle dans onglet Explorateur

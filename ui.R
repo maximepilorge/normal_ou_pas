@@ -2,6 +2,7 @@
 library(shiny)
 library(shinyjs)
 library(plotly)
+library(bslib)
 
 # On charge le code UI de chaque module
 source("modules/mod_quiz.R")
@@ -10,6 +11,7 @@ source("modules/mod_analyse.R")
 
 ui <- navbarPage(
   "Climat : Normal ou pas ?",
+  theme = bs_theme(version = 5),
   header = useShinyjs(),
   
   tags$head(

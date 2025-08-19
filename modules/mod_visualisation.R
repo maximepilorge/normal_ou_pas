@@ -2,20 +2,30 @@
 
 mod_visualisation_ui <- function(id) {
   ns <- NS(id)
-  fluidPage(
-    titlePanel("Visualiser le changement climatique"),
-    sidebarLayout(
-      sidebarPanel(
-        # Ces contrôles sont globaux et définis dans ui.R
-        selectInput("ville_select", "Choisissez une ville :", choices = NULL),
-        selectInput("periode_select", "Choisissez la période de référence :", choices = NULL),
-        sliderInput("annee_select", "Choisissez l'année à comparer :", 
-                    min = 1950, max = 2024, value = 2024, sep = ""),
-        width = 3
+  # On remplace fluidPage par une simple liste de tags, 
+  # car page_sidebar gère la structure de la page.
+  tagList(
+    # page_sidebar est le remplaçant moderne de sidebarLayout
+    page_sidebar(
+      title = "Visualiser le changement climatique",
+      
+      # Le contenu de l'ancienne sidebarPanel va ici
+      sidebar = sidebar(
+        # On encapsule les contrôles dans une "card" pour un meilleur rendu visuel
+        card(
+          card_header("Paramètres"),
+          selectInput("ville_select", "Choisissez une ville :", choices = NULL),
+          selectInput("periode_select", "Choisissez la période de référence :", choices = NULL),
+          sliderInput("annee_select", "Choisissez l'année à comparer :", 
+                      min = 1950, max = 2024, value = 2024, sep = "")
+        )
       ),
-      mainPanel(
-        plotlyOutput(ns("climate_plot"), height = "600px"),
-        width = 9
+      
+      # Le contenu de l'ancien mainPanel va ici, encapsulé dans une card
+      card(
+        full_screen = TRUE, # Permet à l'utilisateur d'agrandir le graphique
+        card_header("Évolution des températures maximales"),
+        plotlyOutput(ns("climate_plot"), height = "600px")
       )
     )
   )
@@ -57,7 +67,7 @@ mod_visualisation_server <- function(id, data_stats, data_tmax, ville, periode, 
           subtitle = paste("Comparaison avec la normale climatique", periode()),
           y = "Température maximale (°C)", x = "Jour de l'année", color = "Légende"
         ) +
-        theme_minimal(base_size = 16) +
+        theme_minimal(base_size = 14) +
         theme(legend.position = "bottom")
       
       ggplotly(p, tooltip = c("x", "y"))
