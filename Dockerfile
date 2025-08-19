@@ -18,4 +18,5 @@ COPY .Renviron .Renviron
 COPY guess_climate.Rproj guess_climate.Rproj
 COPY data data
 COPY modules modules
+COPY www www
 CMD Rscript -e "shiny::runApp(appDir = '.', host = '0.0.0.0', port = 5000)"

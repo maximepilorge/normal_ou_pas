@@ -9,8 +9,23 @@ source("modules/mod_visualisation.R")
 source("modules/mod_analyse.R")
 
 ui <- navbarPage(
-  "Climat : Normal ou pas normal ?",
+  "Climat : Normal ou pas ?",
   header = useShinyjs(),
+  
+  tags$head(
+    # Balises Open Graph (pour LinkedIn, Facebook, etc.)
+    tags$meta(property = "og:title", content = "Climat : Normal ou pas ?"),
+    tags$meta(property = "og:description", content = "Explorez le changement climatique. Jouez au quiz, comparez les années et analysez si la météo est vraiment 'normale'."),
+    tags$meta(property = "og:image", content = "https://normal-ou-pas.com/social_preview.png"),
+    tags$meta(property = "og:url", content = "https://normal-ou-pas.com"),
+    tags$meta(property = "og:type", content = "website"),
+    
+    # Balises Twitter Card (pour Twitter)
+    tags$meta(name = "twitter:card", content = "summary_large_image"),
+    tags$meta(name = "twitter:title", content = "Climat : Normal ou pas ?"),
+    tags$meta(name = "twitter:description", content = "Explorez le changement climatique. Jouez au quiz, comparez les années et analysez si la météo est vraiment 'normale'."),
+    tags$meta(name = "twitter:image", content = "https://normal-ou-pas.com/social_preview.png") # URL à personnaliser !
+  ),
   
   # -- Onglet 1 : Le Quiz --
   tabPanel("Le Quiz 🧐",
