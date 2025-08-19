@@ -30,6 +30,36 @@ mod_visualisation_ui <- function(id) {
 mod_visualisation_server <- function(id, db_pool, ville, periode, annee) {
   moduleServer(id, function(input, output, session) {
     
+    ns <- session$ns
+    screen_width <- reactiveVal()
+    
+    observe({
+      # On injecte l'ID complet et "namespacé" dans le code JS
+      js_code <- sprintf(
+        "
+        $(window).on('resize', function(){
+          Shiny.setInputValue('%s', window.innerWidth);
+        });
+        Shiny.setInputValue('%s', window.innerWidth);
+        ",
+        ns("screen_width"), ns("screen_width")
+      )
+      shinyjs::runjs(js_code)
+    })
+    
+    observeEvent(input$screen_width, {
+      req(input$screen_width) # On attend d'avoir la largeur
+      
+      # 768px est un seuil commun pour les tablettes/smartphones
+      is_mobile <- input$screen_width < 768 
+      
+      # On utilise plotlyProxy pour modifier le graphique existant sans le redessiner
+      plotlyProxy("climate_plot", session) %>%
+        # On met à jour la visibilité des traces 6 et 7 (indices 5 et 6)
+        plotlyProxyInvoke("restyle", list(visible = !is_mobile), as.list(5:6))
+      
+    }, ignoreNULL = TRUE, ignoreInit = TRUE)
+    
     plot_data_annee <- reactive({
       req(ville(), annee())
 
@@ -81,18 +111,22 @@ mod_visualisation_server <- function(id, db_pool, ville, periode, annee) {
                                                  text = paste("Date:", format(date, "%d %b"), "<br>Moyenne normale:", round(t_moy, 1), "°C")),
                    alpha = 0) +
         # La courbe de lissage geom_smooth
-        geom_smooth(data = plot_data_annee(), aes(x = date, y = tmax_celsius), color = "#8B0000", linetype = "dashed", linewidth = 0.6, method = "loess", span = 0.3, se = FALSE) +
+        geom_smooth(data = plot_data_annee(), 
+                    aes(x = date, y = tmax_celsius, color = "Tendance de l'année"), # <--- On déplace "color" ici
+                    linetype = "dashed", linewidth = 0.6, method = "loess", span = 0.3, se = FALSE) +
         
         # --- Couches pour l'année sélectionnée ---
         # 1. On dessine la ligne (simple, sans 'text')
         geom_line(data = plot_data_annee(), aes(x = date, y = tmax_celsius, color = "Année sélectionnée"), 
-                  linewidth = 1) +
+                  linewidth = 0.8) +
         # 2. On ajoute les points invisibles (alpha=0) juste pour l'infobulle
         geom_point(data = plot_data_annee(), aes(x = date, y = tmax_celsius, 
                                                  text = paste("Date:", format(date, "%d %b"), "<br>Température:", round(tmax_celsius, 1), "°C")),
                    alpha = 0) +
         
-        scale_color_manual(values = c("Moyenne normale" = "darkblue", "Année sélectionnée" = "#E41A1C")) +
+        scale_color_manual(values = c("Moyenne normale" = "darkblue", 
+                                      "Année sélectionnée" = "#E41A1C",
+                                      "Tendance de l'année" = "#8B0000")) +
         scale_x_date(date_labels = "%b", date_breaks = "1 month") +
         labs(
           title = paste("Températures maximales journalières à", ville(), "en", annee()),
