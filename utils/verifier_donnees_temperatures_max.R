@@ -10,11 +10,12 @@ library(dplyr)
 # Modifiez ce chemin si votre script n'est pas à la racine du projet
 db_path <- "C:/Users/maxp1/Documents/guess_climate/data/temperatures.sqlite"
 con <- dbConnect(RSQLite::SQLite(), db_path)
+nom_table <- "temperatures_max"
 
 # --- 3. PRÉPARATION ET EXÉCUTION DE LA REQUÊTE ---
 # On utilise dplyr pour construire la requête qui sera envoyée à la BDD
 # Cette première étape est très rapide car elle est exécutée par SQLite.
-summary_db <- tbl(con, "temperatures_max") %>%
+summary_db <- tbl(con, nom_table) %>%
   group_by(ville) %>%
   summarise(
     # On récupère les dates min/max (au format numérique) et le compte des lignes

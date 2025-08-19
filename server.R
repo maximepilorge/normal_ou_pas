@@ -16,7 +16,12 @@ server <- function(input, output, session) {
   
   # --- MISE A JOUR DES INPUTS GLOBAUX ---
   observe({
-    periodes_disponibles <- unique(stats_normales$periode_ref)
+    
+    periodes_disponibles <- tbl(db_pool, "stats_normales") %>%
+      distinct(periode_ref) %>%
+      pull() %>%
+      sort()
+
     updateSelectInput(session, "periode_normale", choices = periodes_disponibles)
     updateSelectInput(session, "periode_select", choices = periodes_disponibles)
     updateSelectInput(session, "periode_analyse", choices = periodes_disponibles)
@@ -47,12 +52,11 @@ server <- function(input, output, session) {
   # Module Quiz
   mod_quiz_server("quiz_1", 
                   periode_globale = reactive(input$periode_normale),
-                  stats_normales = stats_normales,
                   db_pool = db_pool)
   
   # Module Visualisation
   mod_visualisation_server("visu_1", 
-                           stats_normales = stats_normales, 
+                           db_pool = db_pool,
                            ville = reactive(input$ville_select), 
                            periode = reactive(input$periode_select),
                            annee = reactive(input$annee_select))

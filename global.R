@@ -15,15 +15,13 @@ library(pool)
 library(dbplyr)
 
 # A travailler :
-# Réduire nombre décimales infobulle dans onglet Explorateur
 # Corriger bug mode analyse (ne jamais regarder la fréquence pour les températures inférieures au seuil, toujours supérieures... ou alors on ajoute un input pour définir ça)
+# Supprimer données inutiles dans BDD
 
 dirApp <- Sys.getenv("DIR_APP")
 Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
 
 # --- CHARGEMENT DES DONNÉES ---
-# Charger uniquement les statistiques agrégées
-stats_normales <- readRDS("data/stats_normales_precalculees.rds")
 
 # Établir une "promesse" de connexion à la BDD
 db_pool <- pool::dbPool(RSQLite::SQLite(), dbname = "data/temperatures.sqlite")
@@ -56,8 +54,12 @@ calculer_frequence <- function(ville_sel, date_sel, temp_sel, periode_ref_str, d
   nombre_annees_periode <- annee_fin - annee_debut + 1
   
   # Déterminer si on cherche un événement chaud ou froid (par rapport à la moyenne)
-  moyenne_jour <- stats_normales %>%
-    filter(city == ville_sel, jour_annee == yday(date_sel), periode_ref == periode_ref_str) %>%
+  moyenne_jour <- tbl(db_pool, "stats_normales") %>%
+    filter(
+      ville == !!ville_sel, 
+      jour_annee == !!yday(date_sel), 
+      periode_ref == !!periode_ref_str
+    ) %>%
     pull(t_moy)
   
   # Si on n'a pas de moyenne pour ce jour, on ne peut pas continuer

@@ -40,7 +40,7 @@ mod_quiz_ui <- function(id) {
   )
 }
 
-mod_quiz_server <- function(id, periode_globale, stats_normales, db_pool) {
+mod_quiz_server <- function(id, periode_globale, db_pool) {
   moduleServer(id, function(input, output, session) {
     
     quiz_data <- reactiveVal(NULL)
@@ -50,51 +50,38 @@ mod_quiz_server <- function(id, periode_globale, stats_normales, db_pool) {
     # --- NOUVELLE QUESTION ---
     observeEvent(input$new_question_btn, {
       
-      # On choisit toujours une catégorie au hasard en premier
+      # 1. On choisit une catégorie en R (instantané)
       categories_possibles <- c("Au-dessus des normales", "En-dessous des normales", "Dans les normales de saison")
       prob_vector <- c(0.3, 0.2, 0.5)
       categorie_choisie <- sample(categories_possibles, size = 1, prob = prob_vector)
       
-      # On filtre les stats pour la période
-      normales_periode <- stats_normales %>% filter(periode_ref == periode_globale())
+      # 2. On construit une requête de base SIMPLE sur la nouvelle table
+      requete_base <- tbl(db_pool, "quiz_data_precalculee") %>%
+        filter(
+          periode_ref == !!periode_globale(),
+          categorie == !!categorie_choisie
+        )
       
-      # On construit la requête de base
-      query <- tbl(db_pool, "temperatures_max")
-      
-      # Filtrage optionnel par saison (se fait dans la BDD, c'est optimisé !)
+      # On ajoute le filtre saisonnier s'il y a lieu
       if (input$saison_select != "Toutes les saisons") {
         saison_mois <- switch(input$saison_select,
-                              "Hiver"     = c(12, 1, 2),
-                              "Printemps" = c(3, 4, 5),
-                              "Été"       = c(6, 7, 8),
-                              "Automne"   = c(9, 10, 11))
-        query <- query %>% filter(lubridate::month(date) %in% !!saison_mois)
+                              "Hiver"     = c(12, 1, 2), "Printemps" = c(3, 4, 5),
+                              "Été"       = c(6, 7, 8), "Automne"   = c(9, 10, 11))
+        requete_base <- requete_base %>% filter(mois %in% !!saison_mois)
       }
       
-      # On rapatrie les données filtrées en mémoire avant la jointure
-      temperatures_filtrees <- query %>% collect()
+      # 3. On tire UNE ligne au hasard. Cette requête est maintenant ultra-rapide
+      question_selectionnee <- requete_base %>%
+        arrange(dbplyr::sql("RANDOM()")) %>%
+        head(1) %>%
+        collect()
       
-      # On peut maintenant joindre et muter les données en mémoire
-      question_selectionnee <- temperatures_filtrees %>%
-        mutate(date = as.Date(date, origin = "1970-01-01"), 
-               jour_annee = lubridate::yday(date)) %>%
-        left_join(normales_periode, by = c("ville" = "city", "jour_annee")) %>%
-        filter(!is.na(seuil_haut_p90)) %>%
-        mutate(
-          categorie = case_when(
-            temperature_max > seuil_haut_p90 ~ "Au-dessus des normales",
-            temperature_max < seuil_bas_p10  ~ "En-dessous des normales",
-            TRUE                          ~ "Dans les normales de saison"
-          )
-        ) %>%
-        filter(categorie == !!categorie_choisie) %>%
-        slice_sample(n = 1) %>%
-        rename(tmax_celsius = temperature_max)
+      req(nrow(question_selectionnee) > 0)
       
-      # Le reste de votre code est identique
+      # 4. On utilise les données
       quiz_data(list(
         city = question_selectionnee$ville, 
-        date = question_selectionnee$date, 
+        date = as.Date(question_selectionnee$date, origin = "1970-01-01"), 
         temp = round(question_selectionnee$tmax_celsius, 1),
         correct_answer = question_selectionnee$categorie,
         normale_moy = round(question_selectionnee$t_moy, 1)

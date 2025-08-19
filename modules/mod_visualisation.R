@@ -27,7 +27,7 @@ mod_visualisation_ui <- function(id) {
   )
 }
 
-mod_visualisation_server <- function(id, stats_normales, ville, periode, annee) {
+mod_visualisation_server <- function(id, db_pool, ville, periode, annee) {
   moduleServer(id, function(input, output, session) {
     
     plot_data_annee <- reactive({
@@ -45,7 +45,6 @@ mod_visualisation_server <- function(id, stats_normales, ville, periode, annee) 
         rename(tmax_celsius = temperature_max) %>%
         mutate(
           date = as.Date(date, origin = "1970-01-01"),
-          jour_annee = lubridate::yday(date)
         )
       
       # On retourne le dataframe
@@ -59,8 +58,12 @@ mod_visualisation_server <- function(id, stats_normales, ville, periode, annee) 
       
       # Données pour les normales (ne change pas avec l'année)
       annee_origine <- paste0(annee(), "-01-01")
-      plot_data_normale <- stats_normales %>%
-        filter(city == ville(), periode_ref == periode()) %>%
+      plot_data_normale <- tbl(db_pool, "stats_normales") %>%
+        filter(
+          ville == !!ville(), 
+          periode_ref == !!periode()
+          ) %>%
+        collect() %>%
         mutate(date = as.Date(jour_annee - 1, origin = annee_origine))
       
       # Construction du graphique complet
