@@ -34,7 +34,7 @@ mod_analyse_ui <- function(id) {
   )
 }
 
-mod_analyse_server <- function(id, ville, periode, data_tmax, calculer_frequence_func) {
+mod_analyse_server <- function(id, ville, periode, db_pool) {
   moduleServer(id, function(input, output, session) {
     
     resultat <- reactiveVal(NULL)
@@ -52,34 +52,73 @@ mod_analyse_server <- function(id, ville, periode, data_tmax, calculer_frequence
     observeEvent(input$calculer_frequence_btn, {
       req(ville(), input$temp_analyse, periode())
       
+      annees_periode <- as.numeric(unlist(strsplit(periode(), "-")))
+      annee_debut <- annees_periode[1]
+      annee_fin <- annees_periode[2]
+      annee_debut_str <- as.character(annee_debut)
+      annee_fin_str <- as.character(annee_fin)
+      
+      res <- NULL
+      
       if (input$toute_annee_analyse) {
-        annees_periode <- as.numeric(unlist(strsplit(periode(), "-")))
-        annee_debut <- annees_periode[1]; annee_fin <- annees_periode[2]
         
-        donnees_historiques_annee <- data_tmax %>%
-          filter(city == ville(), year(date) >= annee_debut, year(date) <= annee_fin)
+        donnees_historiques <- tbl(db_pool, "temperatures_max") %>%
+          filter(
+            ville == !!ville(),
+            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") >= !!annee_debut_str,
+            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") <= !!annee_fin_str
+          ) %>%
+          collect() %>%
+          rename(tmax_celsius = temperature_max)
         
-        occurrences_sup <- sum(donnees_historiques_annee$tmax_celsius >= input$temp_analyse, na.rm = TRUE)
+        occurrences_sup <- sum(donnees_historiques$tmax_celsius >= input$temp_analyse, na.rm = TRUE)
         
         res <- list(
           jour = paste0("Sur l'ensemble de l'année, une température supérieure ou égale à <b>", input$temp_analyse, "°C</b> est arrivée <b>", occurrences_sup, " fois</b> entre ", annee_debut, " et ", annee_fin, "."),
           saison = ""
         )
       } else {
-        req(input$jour_analyse, input$mois_analyse)
-        date_selectionnee <- as.Date(paste("2001", input$mois_analyse, input$jour_analyse, sep="-"), format="%Y-%m-%d")
         
-        if (is.na(date_selectionnee)) {
-          res <- list(jour = "Date invalide.", saison = "")
-        } else {
-          res <- calculer_frequence_func(
-            ville_sel = ville(),
-            date_sel = date_selectionnee,
-            temp_sel = input$temp_analyse,
-            periode_ref_str = periode(),
-            data_brutes = data_tmax
-          )
-        }
+        req(input$jour_analyse, input$mois_analyse)
+        
+        jour_str <- sprintf("%02d", as.numeric(input$jour_analyse))
+        mois_str <- sprintf("%02d", as.numeric(input$mois_analyse))
+        
+        # Calcul pour le jour précis
+        donnees_jour <- tbl(db_pool, "temperatures_max") %>%
+          filter(
+            ville == !!ville(),
+            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") >= !!annee_debut_str,
+            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") <= !!annee_fin_str,
+            dbplyr::sql("STRFTIME('%m', date * 86400, 'unixepoch')") == !!mois_str,
+            dbplyr::sql("STRFTIME('%d', date * 86400, 'unixepoch')") == !!jour_str
+          ) %>%
+          collect() %>%
+          rename(tmax_celsius = temperature_max)
+        
+        occurrences_jour <- sum(donnees_jour$tmax_celsius >= input$temp_analyse, na.rm = TRUE)
+        texte_jour <- paste0("Pour le <b>", input$jour_analyse, " ", mois_fr[as.numeric(input$mois_analyse)], "</b>, une température supérieure ou égale à <b>", input$temp_analyse, "°C</b> est arrivée <b>", occurrences_jour, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
+        
+        # Calcul pour la saison
+        date_selectionnee <- as.Date(paste("2001", input$mois_analyse, input$jour_analyse, sep="-"))
+        saison <- get_season_info(date_selectionnee) # get_season_info() vient de global.R
+        mois_saison_str <- sprintf("%02d", saison$mois)
+        
+        donnees_saison <- tbl(db_pool, "temperatures_max") %>%
+          filter(
+            ville == !!ville(),
+            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") >= !!annee_debut_str,
+            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") <= !!annee_fin_str,
+            dbplyr::sql("STRFTIME('%m', date * 86400, 'unixepoch')") %in% !!mois_saison_str
+          ) %>%
+          collect() %>%
+          rename(tmax_celsius = temperature_max)
+        
+        occurrences_saison <- sum(donnees_saison$tmax_celsius >= input$temp_analyse, na.rm = TRUE)
+        texte_saison <- paste0("À l'échelle de la saison (", saison$nom, "), une température supérieure ou égale à <b>", input$temp_analyse, "°C</b> est arrivée <b>", occurrences_saison, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
+        
+        res <- list(jour = texte_jour, saison = texte_saison)
+
       }
       resultat(res)
     })

@@ -9,6 +9,9 @@ library(lubridate)
 library(here)
 library(plotly)
 library(bslib)
+library(DBI)
+library(RSQLite)
+library(pool)
 
 # A travailler :
 # Réduire nombre décimales infobulle dans onglet Explorateur
@@ -18,10 +21,16 @@ dirApp <- Sys.getenv("DIR_APP")
 Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
 
 # --- CHARGEMENT DES DONNÉES ---
+# Charger uniquement les statistiques agrégées
 stats_normales <- readRDS("data/stats_normales_precalculees.rds")
-tmax_annuelles <- readRDS("data/era5_temperatures_france.rds") %>%
-  rename(city = ville, tmax_celsius = temperature_max) %>%
-  mutate(jour_annee = yday(date))
+
+# Établir une "promesse" de connexion à la BDD
+db_pool <- pool::dbPool(RSQLite::SQLite(), dbname = "data/temperatures.sqlite")
+
+# S'assurer que le pool se ferme quand l'app s'arrête
+onStop(function() {
+  pool::poolClose(db_pool)
+})
 
 # --- FONCTIONS ---
 get_season_info <- function(date_input) {
@@ -113,32 +122,3 @@ villes <- tibble::tribble(
   "Poitiers", 46.5802, 0.3405,
   "Ajaccio", 41.9207, 8.7397
 )
-
-# 1. Obtenir la liste unique des périodes de référence disponibles
-periodes <- unique(stats_normales$periode_ref)
-
-# 2. Pour chaque période, on fait une jointure propre et on calcule la catégorie
-tmax_precalcule_list <- lapply(periodes, function(p) {
-  
-  # On filtre les stats pour n'avoir que la période en cours
-  normales_periode <- stats_normales %>% filter(periode_ref == p)
-  
-  # On effectue la jointure (qui est maintenant une relation un-à-plusieurs, ce qui est correct)
-  tmax_annuelles %>%
-    left_join(normales_periode, by = c("city", "jour_annee")) %>%
-    filter(!is.na(seuil_haut_p90)) %>%
-    mutate(
-      categorie = case_when(
-        tmax_celsius > seuil_haut_p90 ~ "Au-dessus des normales",
-        tmax_celsius < seuil_bas_p10  ~ "En-dessous des normales",
-        TRUE                          ~ "Dans les normales de saison"
-      )
-    )
-})
-
-# 3. On combine la liste de dataframes en une seule grande table
-tmax_annuelles_precalcule <- dplyr::bind_rows(tmax_precalcule_list)
-
-# Optionnel mais recommandé : libérer la mémoire de la liste intermédiaire
-rm(tmax_precalcule_list)
-gc()

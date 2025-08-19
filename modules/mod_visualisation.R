@@ -27,25 +27,39 @@ mod_visualisation_ui <- function(id) {
   )
 }
 
-mod_visualisation_server <- function(id, data_stats, data_tmax, ville, periode, annee) {
+mod_visualisation_server <- function(id, stats_normales, ville, periode, annee) {
   moduleServer(id, function(input, output, session) {
     
     plot_data_annee <- reactive({
       req(ville(), annee())
-      annee_origine <- paste0(annee(), "-01-01")
-      data_tmax %>%
-        filter(city == ville(), year(date) == annee()) %>%
-        mutate(date = as.Date(jour_annee - 1, origin = annee_origine))
+
+      # On prépare l'année en chaîne de caractères pour la requête SQL
+      annee_str <- as.character(annee())
+      
+      donnees_preparees <- tbl(db_pool, "temperatures_max") %>%
+        filter(
+          ville == !!ville(),
+          dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") == !!annee_str
+        ) %>%
+        collect() %>%
+        mutate(
+          date = as.Date(date, origin = "1970-01-01"),
+          jour_annee = lubridate::yday(date)
+        ) %>%
+        rename(tmax_celsius = temperature_max)
+      
+      # On retourne le dataframe
+      donnees_preparees
     })
     
     # 1. On dessine le graphique complet une seule fois au démarrage
     output$climate_plot <- renderPlotly({
-      # req() s'assure que les valeurs initiales sont bien chargées
+
       req(ville(), periode(), annee())
       
       # Données pour les normales (ne change pas avec l'année)
       annee_origine <- paste0(annee(), "-01-01")
-      plot_data_normale <- data_stats %>%
+      plot_data_normale <- stats_normales %>%
         filter(city == ville(), periode_ref == periode()) %>%
         mutate(date = as.Date(jour_annee - 1, origin = annee_origine))
       

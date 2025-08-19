@@ -40,7 +40,7 @@ mod_quiz_ui <- function(id) {
   )
 }
 
-mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_season_info_func) {
+mod_quiz_server <- function(id, periode_globale, stats_normales, db_pool) {
   moduleServer(id, function(input, output, session) {
     
     quiz_data <- reactiveVal(NULL)
@@ -50,40 +50,50 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
     # --- NOUVELLE QUESTION ---
     observeEvent(input$new_question_btn, {
       
-      # On récupère les données et probabilités calculées
-      donnees_classees <- data_tmax %>%
-        filter(periode_ref == periode_globale())
+      # On choisit toujours une catégorie au hasard en premier
+      categories_possibles <- c("Au-dessus des normales", "En-dessous des normales", "Dans les normales de saison")
+      prob_vector <- c(0.3, 0.2, 0.5)
+      categorie_choisie <- sample(categories_possibles, size = 1, prob = prob_vector)
       
-      donnees_a_sampler <- if (input$saison_select == "Toutes les saisons") {
-        donnees_classees
-      } else {
+      # On filtre les stats pour la période
+      normales_periode <- stats_normales %>% filter(periode_ref == periode_globale())
+      
+      # On construit la requête de base
+      query <- tbl(db_pool, "temperatures_max")
+      
+      # Filtrage optionnel par saison (se fait dans la BDD, c'est optimisé !)
+      if (input$saison_select != "Toutes les saisons") {
         saison_mois <- switch(input$saison_select,
                               "Hiver"     = c(12, 1, 2),
                               "Printemps" = c(3, 4, 5),
                               "Été"       = c(6, 7, 8),
-                              "Automne"   = c(9, 10, 11)
-        )
-        donnees_classees %>%
-          filter(month(date) %in% saison_mois)
+                              "Automne"   = c(9, 10, 11))
+        query <- query %>% filter(lubridate::month(date) %in% !!saison_mois)
       }
-
-      # On s'assure que l'ordre des catégories est le même pour le tirage au sort
-      categories_possibles <- c("Au-dessus des normales", "En-dessous des normales", "Dans les normales de saison")
       
-      # On définit la probabilité d'occurrence par catégorie : on favorise les valeurs dans les normales (50%), suivi
-      # des températures supérieures aux normales (30%) puis de celles inférieures aux normales (20%)
-      prob_vector <- c(0.3, 0.2, 0.5)
+      # On rapatrie les données filtrées en mémoire avant la jointure
+      temperatures_filtrees <- query %>% collect()
       
-      # Tirage au sort de la catégorie en utilisant les probabilités réelles
-      categorie_choisie <- sample(categories_possibles, size = 1, prob = prob_vector)
+      # On peut maintenant joindre et muter les données en mémoire
+      question_selectionnee <- temperatures_filtrees %>%
+        mutate(date = as.Date(date, origin = "1970-01-01"), 
+               jour_annee = lubridate::yday(date)) %>%
+        left_join(normales_periode, by = c("ville" = "city", "jour_annee")) %>%
+        filter(!is.na(seuil_haut_p90)) %>%
+        mutate(
+          categorie = case_when(
+            temperature_max > seuil_haut_p90 ~ "Au-dessus des normales",
+            temperature_max < seuil_bas_p10  ~ "En-dessous des normales",
+            TRUE                          ~ "Dans les normales de saison"
+          )
+        ) %>%
+        filter(categorie == !!categorie_choisie) %>%
+        slice_sample(n = 1) %>%
+        rename(tmax_celsius = temperature_max)
       
-      # Tirage d'une question au hasard DANS la catégorie choisie
-      question_selectionnee <- donnees_a_sampler %>%
-        filter(categorie == categorie_choisie) %>%
-        sample_n(1)
-      
+      # Le reste de votre code est identique
       quiz_data(list(
-        city = question_selectionnee$city, 
+        city = question_selectionnee$ville, 
         date = question_selectionnee$date, 
         temp = round(question_selectionnee$tmax_celsius, 1),
         correct_answer = question_selectionnee$categorie,
@@ -110,7 +120,7 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
       req(quiz_data(), input$user_answer, periode_globale())
       data <- quiz_data()
       is_correct <- (input$user_answer == data$correct_answer)
-      
+
       if (is_correct && !input$trash_talk_mode) {
         nouveau_score_succes <- score_succes() + 1
         score_succes(nouveau_score_succes)
@@ -152,28 +162,41 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
         
         explication_principale <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", data$normale_moy, "°C) pour la période ", periode_globale(), ".")
         
-        donnees_periode_filtree <- data_tmax %>%
-          filter(periode_ref == periode_globale())
+        # On prépare les éléments du filtre en R
+        jour_quiz_str <- sprintf("%02d", lubridate::day(data$date))
+        mois_quiz_str <- sprintf("%02d", lubridate::month(data$date))
+        annee_debut_str <- as.character(annee_debut)
+        annee_fin_str <- as.character(annee_fin)
         
-        donnees_historiques_jour <- donnees_periode_filtree %>%
+        # Ce code demande à la BDD de faire TOUT le filtrage avant le transfert
+        donnees_historiques_jour <- tbl(db_pool, "temperatures_max") %>%
           filter(
-            city == data$city, 
-            jour_annee == yday(data$date),
-            year(date) >= annee_debut,
-            year(date) <= annee_fin
-          )
-        
+            ville == !!data$city,
+            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") >= !!annee_debut_str,
+            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") <= !!annee_fin_str,
+            dbplyr::sql("STRFTIME('%m', date * 86400, 'unixepoch')") == !!mois_quiz_str,
+            dbplyr::sql("STRFTIME('%d', date * 86400, 'unixepoch')") == !!jour_quiz_str
+          ) %>%
+          collect() %>% # <-- Transfert de ~30 lignes seulement !
+          mutate(date = as.Date(date, origin = "1970-01-01")) %>% # On convertit la date après coup
+          rename(tmax_celsius = temperature_max)
+
         nombre_occurrences_jour <- if (direction == "supérieure") sum(donnees_historiques_jour$tmax_celsius >= data$temp, na.rm = TRUE) else sum(donnees_historiques_jour$tmax_celsius <= data$temp, na.rm = TRUE)
         frequence_jour_text <- if (nombre_occurrences_jour == 0) paste0("Pour ce jour précis, un événement de cette intensité ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".") else paste0("Pour ce jour précis, une température égale ou ", direction, " est arrivée <b>", nombre_occurrences_jour, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
         
-        saison <- get_season_info_func(data$date)
-        donnees_historiques_saison <- donnees_periode_filtree %>%
+        saison <- get_season_info(data$date)
+        mois_saison_str <- sprintf("%02d", saison$mois)
+        
+        donnees_historiques_saison <- tbl(db_pool, "temperatures_max") %>%
           filter(
-            city == data$city, 
-            month(date) %in% saison$mois,
-            year(date) >= annee_debut,
-            year(date) <= annee_fin
-          )
+            ville == !!data$city,
+            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") >= !!annee_debut_str,
+            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") <= !!annee_fin_str,
+            dbplyr::sql("STRFTIME('%m', date * 86400, 'unixepoch')") %in% !!mois_saison_str
+          ) %>%
+          collect() %>%
+          rename(tmax_celsius = temperature_max) %>%
+          mutate(date = as.Date(date, origin = "1970-01-01"))
         
         nombre_occurrences_saison <- if (direction == "supérieure") sum(donnees_historiques_saison$tmax_celsius >= data$temp, na.rm = TRUE) else sum(donnees_historiques_saison$tmax_celsius <= data$temp, na.rm = TRUE)
         frequence_saison_text <- if (nombre_occurrences_saison == 0) paste0("À l'échelle de la saison (", saison$nom, "), une température aussi ", if (direction == "supérieure") "élevée" else "basse", " ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".") else paste0("À l'échelle de la saison (", saison$nom, "), une température égale ou ", direction, " est arrivée en moyenne <b>", round(nombre_occurrences_saison/(annee_fin-annee_debut+1), 0), " fois</b> par an entre ", annee_debut, " et ", annee_fin, ".")
@@ -192,15 +215,22 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
         annees_periode <- as.numeric(unlist(strsplit(periode_globale(), "-")))
         annee_debut <- annees_periode[1]
         annee_fin <- annees_periode[2]
+        jour_quiz_str <- sprintf("%02d", lubridate::day(data_quiz$date))
+        mois_quiz_str <- sprintf("%02d", lubridate::month(data_quiz$date))
+        annee_debut_str <- as.character(annee_debut)
+        annee_fin_str <- as.character(annee_fin)
         
-        donnees_historiques_jour_plot <- data_tmax %>%
+        donnees_historiques_jour_plot <- tbl(db_pool, "temperatures_max") %>%
           filter(
-            periode_ref == periode_globale(),
-            city == data_quiz$city, 
-            jour_annee == yday(data_quiz$date), 
-            year(date) >= annee_debut, 
-            year(date) <= annee_fin
-          )
+            ville == !!data_quiz$city,
+            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") >= !!annee_debut_str,
+            dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") <= !!annee_fin_str,
+            dbplyr::sql("STRFTIME('%m', date * 86400, 'unixepoch')") == !!mois_quiz_str,
+            dbplyr::sql("STRFTIME('%d', date * 86400, 'unixepoch')") == !!jour_quiz_str
+          ) %>%
+          collect() %>% # <-- Transfert de ~30 lignes seulement !
+          mutate(date = as.Date(date, origin = "1970-01-01")) %>% # On convertit la date après coup
+          rename(tmax_celsius = temperature_max)
         
         # Création du graphique
         ggplot(donnees_historiques_jour_plot, aes(x = "", y = tmax_celsius)) +

@@ -26,11 +26,10 @@ server <- function(input, output, session) {
                       max = max(annees_disponibles),
                       value = max(annees_disponibles) -1)
     
-    villes_triees <- tmax_annuelles %>%
-      filter(is.finite(tmax_celsius)) %>%
-      distinct(city) %>%
-      pull(city) %>%
-      sort()
+    villes_triees <- tbl(db_pool, "temperatures_max") %>%
+      distinct(ville) %>%
+      pull(ville) %>%   
+      sort()           
     
     updateSelectInput(session, "ville_select", choices = villes_triees, selected = villes_triees[1])
     updateSelectInput(session, "ville_analyse", choices = villes_triees, selected = villes_triees[1])
@@ -48,14 +47,12 @@ server <- function(input, output, session) {
   # Module Quiz
   mod_quiz_server("quiz_1", 
                   periode_globale = reactive(input$periode_normale),
-                  data_stats = stats_normales, 
-                  data_tmax = tmax_annuelles_precalcule,
-                  get_season_info_func = get_season_info)
+                  stats_normales = stats_normales,
+                  db_pool = db_pool)
   
   # Module Visualisation
   mod_visualisation_server("visu_1", 
-                           data_stats = stats_normales, 
-                           data_tmax = tmax_annuelles,
+                           stats_normales = stats_normales, 
                            ville = reactive(input$ville_select), 
                            periode = reactive(input$periode_select),
                            annee = reactive(input$annee_select))
@@ -64,7 +61,6 @@ server <- function(input, output, session) {
   mod_analyse_server("analyse_1", 
                      ville = reactive(input$ville_analyse),
                      periode = reactive(input$periode_analyse),
-                     data_tmax = tmax_annuelles,
-                     calculer_frequence_func = calculer_frequence)
+                     db_pool = db_pool)
   
 }
