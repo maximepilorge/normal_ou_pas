@@ -135,9 +135,15 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
         score_echecs(nouveau_score_echecs)
       }
       
-      messages_succes <- c("C’est la chance du débutant, j’imagine.", "Tu es vraiment obligé de montrer que tu sais tout mieux que tout le monde.", "Je pourrais presque commencer à t’apprécier, à force.", "Promis, j’arrête d’être désagréable à partir de maintenant car tu l’as bien mérité.")
+      messages_succes <- c("C’est la chance du débutant, j’imagine.", 
+                           "Tu es vraiment obligé de montrer que tu sais tout mieux que tout le monde.", 
+                           "Je pourrais presque commencer à t’apprécier, à force.", 
+                           "Promis, j’arrête d’être désagréable à partir de maintenant car tu l’as bien mérité.")
       message_succes_classique <- "Tu es trop fort !"
-      messages_echecs <- c("Tu feras mieux la prochaine fois, ne t’en fais pas. À vrai dire, tu peux difficilement faire pire.", "Tu ne pouvais pas mieux te tromper, félicitations !", "Ta détermination à échouer force l’admiration.", "Je pourrais être extrêmement désagréable à ce stade mais je m’en voudrais de ruiner ta confiance en toi.")
+      messages_echecs <- c("Tu feras mieux la prochaine fois, ne t’en fais pas. À vrai dire, tu peux difficilement faire pire.", 
+                           "Tu ne pouvais pas mieux te tromper, félicitations !", 
+                           "Ta détermination à échouer force l’admiration.", 
+                           "Je pourrais être extrêmement désagréable à ce stade mais je m’en voudrais de ruiner ta confiance en toi.")
       message_echec_classique <- "Dommage, tu feras mieux la prochaine fois !"
       
       intro_message <- ""
@@ -155,7 +161,7 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
       direction <- if (data$temp > data$normale_moy) "supérieure" else "inférieure"
       
       if (data$correct_answer == "Dans les normales de saison") {
-        explication_text <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", data$normale_moy, "°C) et est considérée comme normale pour un ", format(data$date, "%d %B"), " à ", data$city, ".")
+        explication_text <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", data$normale_moy, "°C) et est considérée comme normale pour un ", paste(format(data$date, "%d"), mois_fr[as.numeric(format(data$date, "%m"))]), " à ", data$city, ".")
       } else {
         annees_periode <- as.numeric(unlist(strsplit(periode_globale(), "-")))
         annee_debut <- annees_periode[1]; annee_fin <- annees_periode[2]
@@ -229,6 +235,7 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
       
       shinyjs::disable("user_answer")
       shinyjs::disable("submit_answer_btn")
+      
     })
   })
 }

@@ -10,8 +10,8 @@ library(tidyr)
 library(here)
 
 # --- 2. Chargement des dépendances du projet ---
-
-source(here("global.R"))
+dirApp <- "C:/Users/maxp1/Documents/guess_climate"
+key_cds <- "9e71b600-abdb-4b74-92f5-94721d1f774f"
 
 #' Analyse la complétude des données de température
 #'

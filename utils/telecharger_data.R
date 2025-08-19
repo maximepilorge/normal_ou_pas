@@ -20,7 +20,8 @@ library(ncdf4)
 library(sf) 
 library(here)
 
-source(here("global.R")) 
+dirApp <- "C:/Users/maxp1/Documents/guess_climate"
+key_cds <- "9e71b600-abdb-4b74-92f5-94721d1f774f"
 
 # -------------------- 
 # 2. Définition de la fonction principale 
@@ -125,122 +126,127 @@ recuperer_donnees_era5 <- function(villes_a_telecharger = NULL) {
   villes_avec_coords_grille <- bind_cols(villes, st_coordinates(sf_grid[indices_plus_proches,])) %>% 
     rename(lon_grille = X, lat_grille = Y) 
   
-  print("Début du téléchargement des données ERA5-Land par année et par mois...") 
+  nom_fichier_assoc <- "villes_et_mailles_associees.rds"
+  chemin_complet_assoc <- file.path(path_to_save, nom_fichier_assoc)
+  saveRDS(villes_avec_coords_grille, file = chemin_complet_assoc)
+  print(paste("Fichier d'association villes/mailles sauvegardé dans :", chemin_complet_assoc))
   
-  # --- Boucle de téléchargement et de traitement des données --- 
-  # On parcourt les années et les mois à partir du point de départ défini précédemment 
+  print("Début du téléchargement des données ERA5-Land par année et par mois...")
+
+  # --- Boucle de téléchargement et de traitement des données ---
+  # On parcourt les années et les mois à partir du point de départ défini précédemment
   # pour télécharger les données incrémentalement
-  for (year_to_download in annee_debut:2024) { 
-    
+  for (year_to_download in annee_debut:2024) {
+
     # Si on est dans l'année de départ, on commence au mois de départ, sinon on commence en janvier (1)
-    mois_depart_annee <- ifelse(year_to_download == annee_debut, mois_debut, 1) 
-    for (month_to_download in mois_depart_annee:12) { 
-      
+    mois_depart_annee <- ifelse(year_to_download == annee_debut, mois_debut, 1)
+    for (month_to_download in mois_depart_annee:12) {
+
       # On s'assure de ne pas essayer de télécharger des données pour un futur mois de l'année en cours
-      if (year_to_download == year(Sys.Date()) && month_to_download > month(Sys.Date())) { 
-        next 
-      } 
-      
-      print(paste("Téléchargement et traitement des données pour l'année :", year_to_download, ", mois :", month_to_download)) 
-      
+      if (year_to_download == year(Sys.Date()) && month_to_download > month(Sys.Date())) {
+        next
+      }
+
+      print(paste("Téléchargement et traitement des données pour l'année :", year_to_download, ", mois :", month_to_download))
+
       # Nom de fichier unique pour chaque mois, pour éviter les conflits
-      nc_file_name <- paste0("era5_data_raw_", year_to_download, "_", month_to_download) 
-      full_nc_file_path <- file.path(path_to_save, nc_file_name) 
-      
-      # Création de la liste de requête pour le mois et l'année en cours. 
-      request_list <- list( 
-        dataset_short_name = "reanalysis-era5-land", 
-        product_type = "reanalysis", 
-        variable = "2m_temperature", 
-        year = as.character(year_to_download), 
-        month = as.character(month_to_download), 
-        day = as.character(1:31), 
-        time = c("00:00", "01:00", "02:00", "03:00", "04:00", "05:00", 
-                 "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", 
-                 "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", 
-                 "18:00", "19:00", "20:00", "21:00", "22:00", "23:00"), 
-        format = "netcdf", 
-        target = nc_file_name, 
-        area = c(max(villes$latitude) + 1, min(villes$longitude) - 1, 
-                 min(villes$latitude) - 1, max(villes$longitude) + 1) 
-      ) 
-      
+      nc_file_name <- paste0("era5_data_raw_", year_to_download, "_", month_to_download)
+      full_nc_file_path <- file.path(path_to_save, nc_file_name)
+
+      # Création de la liste de requête pour le mois et l'année en cours.
+      request_list <- list(
+        dataset_short_name = "reanalysis-era5-land",
+        product_type = "reanalysis",
+        variable = "2m_temperature",
+        year = as.character(year_to_download),
+        month = as.character(month_to_download),
+        day = as.character(1:31),
+        time = c("00:00", "01:00", "02:00", "03:00", "04:00", "05:00",
+                 "06:00", "07:00", "08:00", "09:00", "10:00", "11:00",
+                 "12:00", "13:00", "14:00", "15:00", "16:00", "17:00",
+                 "18:00", "19:00", "20:00", "21:00", "22:00", "23:00"),
+        format = "netcdf",
+        target = nc_file_name,
+        area = c(max(villes$latitude) + 1, min(villes$longitude) - 1,
+                 min(villes$latitude) - 1, max(villes$longitude) + 1)
+      )
+
       # Téléchargement des données via l'API
-      wf_request(user = "maxp17.mp@gmail.com", 
-                 request = request_list, 
-                 path = path_to_save, 
-                 transfer = TRUE, 
-                 verbose = FALSE) 
-      
+      wf_request(user = "maxp17.mp@gmail.com",
+                 request = request_list,
+                 path = path_to_save,
+                 transfer = TRUE,
+                 verbose = FALSE)
+
       # Décompression et renommage du fichier téléchargé
-      downloaded_zip_file <- file.path(path_to_save, paste0(nc_file_name, ".zip")) 
-      
-      if (file.exists(downloaded_zip_file)) { 
-        unzip(zipfile = downloaded_zip_file, exdir = path_to_save) 
-        extracted_nc_file <- file.path(path_to_save, "data_0.nc") 
-        
-        if (file.exists(extracted_nc_file)) { 
-          file.rename(from = extracted_nc_file, to = paste0(full_nc_file_path, ".nc")) 
-          print(paste("Fichier décompressé et renommé :", paste0(full_nc_file_path, ".nc"))) 
-        } else { 
-          stop(paste("Erreur : Le fichier 'data_0.nc' n'a pas été trouvé après la décompression de", downloaded_zip_file)) 
-        } 
-      } 
-      
-      # --- Lecture et traitement des données NetCDF --- 
-      # On ouvre le fichier, extrait les données, les nettoie et les prépare pour l'analyse 
-      nc_path <- paste0(full_nc_file_path, ".nc") 
-      if (file.exists(nc_path)) { 
-        nc <- nc_open(nc_path) 
-        
-        # Extraction des variables (longitude, latitude, température) 
-        lon <- ncvar_get(nc, "longitude") 
-        lat <- ncvar_get(nc, "latitude") 
-        t2m <- ncvar_get(nc, "t2m") 
-        
+      downloaded_zip_file <- file.path(path_to_save, paste0(nc_file_name, ".zip"))
+
+      if (file.exists(downloaded_zip_file)) {
+        unzip(zipfile = downloaded_zip_file, exdir = path_to_save)
+        extracted_nc_file <- file.path(path_to_save, "data_0.nc")
+
+        if (file.exists(extracted_nc_file)) {
+          file.rename(from = extracted_nc_file, to = paste0(full_nc_file_path, ".nc"))
+          print(paste("Fichier décompressé et renommé :", paste0(full_nc_file_path, ".nc")))
+        } else {
+          stop(paste("Erreur : Le fichier 'data_0.nc' n'a pas été trouvé après la décompression de", downloaded_zip_file))
+        }
+      }
+
+      # --- Lecture et traitement des données NetCDF ---
+      # On ouvre le fichier, extrait les données, les nettoie et les prépare pour l'analyse
+      nc_path <- paste0(full_nc_file_path, ".nc")
+      if (file.exists(nc_path)) {
+        nc <- nc_open(nc_path)
+
+        # Extraction des variables (longitude, latitude, température)
+        lon <- ncvar_get(nc, "longitude")
+        lat <- ncvar_get(nc, "latitude")
+        t2m <- ncvar_get(nc, "t2m")
+
         nc_close(nc)
         file.remove(nc_path)
         if (file.exists(downloaded_zip_file)) file.remove(downloaded_zip_file)
-        
+
         # Création d'une séquence de dates et d'heures pour chaque observation
-        month_str <- sprintf("%02d", month_to_download) 
-        day_str <- sprintf("%02d", 1) 
-        date_string <- paste(year_to_download, month_str, day_str, "00:00:00", sep = "-") 
-        start_date_time <- as.POSIXct(date_string, tz = "UTC") 
-        total_timesteps <- length(t2m) / (length(lon) * length(lat)) 
-        dates <- seq.POSIXt(from = start_date_time, by = "hour", length.out = total_timesteps) 
-        
+        month_str <- sprintf("%02d", month_to_download)
+        day_str <- sprintf("%02d", 1)
+        date_string <- paste(year_to_download, month_str, day_str, "00:00:00", sep = "-")
+        start_date_time <- as.POSIXct(date_string, tz = "UTC")
+        total_timesteps <- length(t2m) / (length(lon) * length(lat))
+        dates <- seq.POSIXt(from = start_date_time, by = "hour", length.out = total_timesteps)
+
         # Conversion des températures de Kelvin en Celsius
-        t2m_degC <- t2m - 273.15 
-        
+        t2m_degC <- t2m - 273.15
+
         # Création d'un data frame brut avec toutes les données horaires de la grille
-        df_raw <- as_tibble(expand.grid(lon = lon, lat = lat, time = dates)) %>% 
-          mutate(t2m = as.vector(t2m_degC)) 
-        
+        df_raw <- as_tibble(expand.grid(lon = lon, lat = lat, time = dates)) %>%
+          mutate(t2m = as.vector(t2m_degC))
+
         # Jointure des données de température avec les villes, en utilisant les coordonnées de grille
-        df_final <- df_raw %>% 
-          inner_join(villes_avec_coords_grille, by = c("lon" = "lon_grille", "lat" = "lat_grille")) %>% 
-          select(ville, date = time, temperature = t2m) 
-      
+        df_final <- df_raw %>%
+          inner_join(villes_avec_coords_grille, by = c("lon" = "lon_grille", "lat" = "lat_grille")) %>%
+          select(ville, date = time, temperature = t2m)
+
         # Calcul de la température maximale journalière pour chaque ville
-        df_monthly_daily_max <- df_final %>% 
-          mutate(date = as_date(date)) %>% 
-          group_by(ville, date) %>% 
-          summarise(temperature_max = max(temperature, na.rm = TRUE), .groups = "drop") 
-        
-        # --- Sauvegarde incrémentale --- 
-        # On ajoute les nouvelles données au data frame final et on le sauvegarde. 
-        df_final_daily_max <- bind_rows(df_final_daily_max, df_monthly_daily_max) 
-        saveRDS(df_final_daily_max, full_path_final) 
-        print(paste("Données pour le mois de", month_to_download, "sauvegardées avec succès dans le fichier :", nom_fichier_final)) 
-      } else { 
-        warning(paste("Le fichier NetCDF n'a pas été trouvé pour l'année", year_to_download, "et le mois", month_to_download)) 
-      } 
-    } 
-  } 
-  
-  print("Traitement terminé. Le fichier final est à jour.") 
-  return(df_final_daily_max) 
+        df_monthly_daily_max <- df_final %>%
+          mutate(date = as_date(date)) %>%
+          group_by(ville, date) %>%
+          summarise(temperature_max = max(temperature, na.rm = TRUE), .groups = "drop")
+
+        # --- Sauvegarde incrémentale ---
+        # On ajoute les nouvelles données au data frame final et on le sauvegarde.
+        df_final_daily_max <- bind_rows(df_final_daily_max, df_monthly_daily_max)
+        saveRDS(df_final_daily_max, full_path_final)
+        print(paste("Données pour le mois de", month_to_download, "sauvegardées avec succès dans le fichier :", nom_fichier_final))
+      } else {
+        warning(paste("Le fichier NetCDF n'a pas été trouvé pour l'année", year_to_download, "et le mois", month_to_download))
+      }
+    }
+  }
+
+  print("Traitement terminé. Le fichier final est à jour.")
+  return(df_final_daily_max)
   
 } 
 
