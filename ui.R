@@ -82,7 +82,7 @@ ui <- navbarPage(
                       h3("Code Source 💻"), 
                       p("Pour les plus curieux, le code source complet de cette application est disponible sur GitHub. N'hésitez pas à le consulter, à le réutiliser ou à proposer des améliorations !"), 
                       p(style = "text-align: center; margin-top: 20px;", 
-                        tags$a(href = "https://github.com/maximepilorge/guess_climate", 
+                        tags$a(href = "https://github.com/maximepilorge/normal_ou_pas", 
                                target = "_blank",
                                class = "btn btn-primary btn-lg", 
                                icon("github"),

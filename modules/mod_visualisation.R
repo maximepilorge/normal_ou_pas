@@ -51,11 +51,30 @@ mod_visualisation_server <- function(id, data_stats, data_tmax, ville, periode, 
       
       # Construction du graphique complet
       p <- ggplot() +
+        # Les rubans ne changent pas
         geom_ribbon(data = plot_data_normale, aes(x = date, ymin = t_min, ymax = t_max), fill = "lightblue", alpha = 0.5) +
         geom_ribbon(data = plot_data_normale, aes(x = date, ymin = t_q1, ymax = t_q3), fill = "skyblue", alpha = 0.6) +
-        geom_line(data = plot_data_normale, aes(x = date, y = t_moy, color = "Moyenne normale"), linetype = "dashed", linewidth = 0.6) +
+        
+        # --- Couches pour la moyenne normale ---
+        # 1. On dessine la ligne (simple, sans 'text')
+        geom_line(data = plot_data_normale, aes(x = date, y = t_moy, color = "Moyenne normale"),
+                  linetype = "dashed", linewidth = 0.6) +
+        # 2. On ajoute les points invisibles (alpha=0) juste pour l'infobulle
+        geom_point(data = plot_data_normale, aes(x = date, y = t_moy, 
+                                                 text = paste("Date:", format(date, "%d %b"), "<br>Moyenne normale:", round(t_moy, 1), "°C")),
+                   alpha = 0) +
+        # La courbe de lissage geom_smooth
         geom_smooth(data = plot_data_annee(), aes(x = date, y = tmax_celsius), color = "#8B0000", linetype = "dashed", linewidth = 0.6, method = "loess", span = 0.3, se = FALSE) +
-        geom_line(data = plot_data_annee(), aes(x = date, y = tmax_celsius, color = "Année sélectionnée"), linewidth = 1) +
+        
+        # --- Couches pour l'année sélectionnée ---
+        # 1. On dessine la ligne (simple, sans 'text')
+        geom_line(data = plot_data_annee(), aes(x = date, y = tmax_celsius, color = "Année sélectionnée"), 
+                  linewidth = 1) +
+        # 2. On ajoute les points invisibles (alpha=0) juste pour l'infobulle
+        geom_point(data = plot_data_annee(), aes(x = date, y = tmax_celsius, 
+                                                 text = paste("Date:", format(date, "%d %b"), "<br>Température:", round(tmax_celsius, 1), "°C")),
+                   alpha = 0) +
+        
         scale_color_manual(values = c("Moyenne normale" = "darkblue", "Année sélectionnée" = "#E41A1C")) +
         scale_x_date(date_labels = "%b", date_breaks = "1 month") +
         labs(
@@ -66,7 +85,8 @@ mod_visualisation_server <- function(id, data_stats, data_tmax, ville, periode, 
         theme_minimal(base_size = 14) +
         theme(legend.position = "bottom")
       
-      ggplotly(p, tooltip = c("x", "y"))
+      ggplotly(p, tooltip = "text") %>%
+        config(displayModeBar = FALSE)
     })
     
     # 2. On observe les changements de l'année pour mettre à jour le graphique (après le premier affichage)
