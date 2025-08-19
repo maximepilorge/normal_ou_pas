@@ -10,8 +10,7 @@ mod_visualisation_ui <- function(id) {
         selectInput("ville_select", "Choisissez une ville :", choices = NULL),
         selectInput("periode_select", "Choisissez la période de référence :", choices = NULL),
         sliderInput("annee_select", "Choisissez l'année à comparer :", 
-                    min = 1950, max = 2024, value = 2024, sep = "",
-                    animate = animationOptions(interval = 1000, loop = TRUE)),
+                    min = 1950, max = 2024, value = 2024, sep = ""),
         width = 3
       ),
       mainPanel(
