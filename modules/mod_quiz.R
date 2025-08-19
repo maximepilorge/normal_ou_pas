@@ -167,14 +167,24 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
         donnees_periode_filtree <- donnees_et_probabilites()
         
         donnees_historiques_jour <- donnees_periode_filtree %>%
-          filter(city == data$city, jour_annee == yday(data$date))
+          filter(
+            city == data$city, 
+            jour_annee == yday(data$date),
+            year(date) >= annee_debut,
+            year(date) <= annee_fin
+          )
         
         nombre_occurrences_jour <- if (direction == "supérieure") sum(donnees_historiques_jour$tmax_celsius >= data$temp, na.rm = TRUE) else sum(donnees_historiques_jour$tmax_celsius <= data$temp, na.rm = TRUE)
         frequence_jour_text <- if (nombre_occurrences_jour == 0) paste0("Pour ce jour précis, un événement de cette intensité ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".") else paste0("Pour ce jour précis, une température égale ou ", direction, " est arrivée <b>", nombre_occurrences_jour, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
         
         saison <- get_season_info_func(data$date)
         donnees_historiques_saison <- donnees_periode_filtree %>%
-          filter(city == data$city, month(date) %in% saison$mois)
+          filter(
+            city == data$city, 
+            month(date) %in% saison$mois,
+            year(date) >= annee_debut,
+            year(date) <= annee_fin
+          )
         
         nombre_occurrences_saison <- if (direction == "supérieure") sum(donnees_historiques_saison$tmax_celsius >= data$temp, na.rm = TRUE) else sum(donnees_historiques_saison$tmax_celsius <= data$temp, na.rm = TRUE)
         frequence_saison_text <- if (nombre_occurrences_saison == 0) paste0("À l'échelle de la saison (", saison$nom, "), une température aussi ", if (direction == "supérieure") "élevée" else "basse", " ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".") else paste0("À l'échelle de la saison (", saison$nom, "), une température égale ou ", direction, " est arrivée en moyenne <b>", round(nombre_occurrences_saison/(annee_fin-annee_debut+1), 0), " fois</b> par an entre ", annee_debut, " et ", annee_fin, ".")
