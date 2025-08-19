@@ -70,6 +70,7 @@ mod_analyse_server <- function(id, ville, periode, db_pool) {
           ) %>%
           collect() %>%
           rename(tmax_celsius = temperature_max)
+          
         
         occurrences_sup <- sum(donnees_historiques$tmax_celsius >= input$temp_analyse, na.rm = TRUE)
         

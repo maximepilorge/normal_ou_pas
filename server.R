@@ -20,11 +20,10 @@ server <- function(input, output, session) {
     updateSelectInput(session, "periode_select", choices = periodes_disponibles)
     updateSelectInput(session, "periode_analyse", choices = periodes_disponibles)
     
-    annees_disponibles <- unique(year(tmax_annuelles$date))
     updateSliderInput(session, "annee_select", 
-                      min = min(annees_disponibles), 
-                      max = max(annees_disponibles),
-                      value = max(annees_disponibles) -1)
+                      min = 1950, 
+                      max = 2024,
+                      value = 2024)
     
     villes_triees <- tbl(db_pool, "temperatures_max") %>%
       distinct(ville) %>%

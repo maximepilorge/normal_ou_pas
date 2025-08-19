@@ -195,8 +195,8 @@ mod_quiz_server <- function(id, periode_globale, stats_normales, db_pool) {
             dbplyr::sql("STRFTIME('%m', date * 86400, 'unixepoch')") %in% !!mois_saison_str
           ) %>%
           collect() %>%
-          rename(tmax_celsius = temperature_max) %>%
-          mutate(date = as.Date(date, origin = "1970-01-01"))
+          mutate(date = as.Date(date, origin = "1970-01-01")) %>%
+          rename(tmax_celsius = temperature_max)
         
         nombre_occurrences_saison <- if (direction == "supérieure") sum(donnees_historiques_saison$tmax_celsius >= data$temp, na.rm = TRUE) else sum(donnees_historiques_saison$tmax_celsius <= data$temp, na.rm = TRUE)
         frequence_saison_text <- if (nombre_occurrences_saison == 0) paste0("À l'échelle de la saison (", saison$nom, "), une température aussi ", if (direction == "supérieure") "élevée" else "basse", " ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".") else paste0("À l'échelle de la saison (", saison$nom, "), une température égale ou ", direction, " est arrivée en moyenne <b>", round(nombre_occurrences_saison/(annee_fin-annee_debut+1), 0), " fois</b> par an entre ", annee_debut, " et ", annee_fin, ".")
@@ -229,8 +229,8 @@ mod_quiz_server <- function(id, periode_globale, stats_normales, db_pool) {
             dbplyr::sql("STRFTIME('%d', date * 86400, 'unixepoch')") == !!jour_quiz_str
           ) %>%
           collect() %>% # <-- Transfert de ~30 lignes seulement !
-          mutate(date = as.Date(date, origin = "1970-01-01")) %>% # On convertit la date après coup
-          rename(tmax_celsius = temperature_max)
+          rename(tmax_celsius = temperature_max) %>%
+          mutate(date = as.Date(date, origin = "1970-01-01")) # On convertit la date après coup
         
         # Création du graphique
         ggplot(donnees_historiques_jour_plot, aes(x = "", y = tmax_celsius)) +

@@ -42,11 +42,11 @@ mod_visualisation_server <- function(id, stats_normales, ville, periode, annee) 
           dbplyr::sql("STRFTIME('%Y', date * 86400, 'unixepoch')") == !!annee_str
         ) %>%
         collect() %>%
+        rename(tmax_celsius = temperature_max) %>%
         mutate(
           date = as.Date(date, origin = "1970-01-01"),
           jour_annee = lubridate::yday(date)
-        ) %>%
-        rename(tmax_celsius = temperature_max)
+        )
       
       # On retourne le dataframe
       donnees_preparees
