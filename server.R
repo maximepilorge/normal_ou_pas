@@ -5,6 +5,7 @@ library(dplyr)
 library(lubridate)
 library(plotly)
 library(shinyjs)
+library(dbplyr)
 
 # On charge la logique serveur de chaque module
 source("modules/mod_quiz.R")

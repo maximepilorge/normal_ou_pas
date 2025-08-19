@@ -10,7 +10,8 @@ RUN R -e 'install.packages(c(\
               "tidyr", \
               "DBI", \
               "RSQLite", \
-              "pool"), \
+              "pool", \
+              "dbplyr"), \
             repos="https://packagemanager.rstudio.com/cran/__linux__/focal/2025-08-11"\
           )'
 WORKDIR /home/shinyusr

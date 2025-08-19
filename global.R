@@ -12,6 +12,7 @@ library(bslib)
 library(DBI)
 library(RSQLite)
 library(pool)
+library(dbplyr)
 
 # A travailler :
 # Réduire nombre décimales infobulle dans onglet Explorateur
