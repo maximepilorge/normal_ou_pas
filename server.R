@@ -36,6 +36,13 @@ server <- function(input, output, session) {
     updateSelectInput(session, "ville_analyse", choices = villes_triees, selected = villes_triees[1])
   })
   
+  # Cette fonction s'exécutera automatiquement quand un utilisateur fermera son navigateur
+  session$onSessionEnded(function() {
+    # On force le "ramasse-miettes" de R à nettoyer la mémoire de cette session
+    gc()
+    print("Session terminée et mémoire nettoyée.")
+  })
+  
   # --- APPELS AUX SERVEURS DES MODULES ---
   
   # Module Quiz

@@ -47,24 +47,12 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
     score_succes <- reactiveVal(0)
     score_echecs <- reactiveVal(0)
     
-    # On utilise un reactiveVal pour stocker les données et leur associer une catégorie
-    donnees_et_probabilites <- reactive({
-      
-      req(periode_globale())
-      
-      # Filtrer les stats pré-calculées pour la période choisie
-      donnees_classees <- data_tmax %>%
-        filter(periode_ref == periode_globale())
-      
-      # On retourne une liste contenant les données classées et le tableau des probabilités
-      return(donnees_classees)
-    })
-    
     # --- NOUVELLE QUESTION ---
     observeEvent(input$new_question_btn, {
       
       # On récupère les données et probabilités calculées
-      donnees_classees <- donnees_et_probabilites()
+      donnees_classees <- data_tmax %>%
+        filter(periode_ref == periode_globale())
       
       donnees_a_sampler <- if (input$saison_select == "Toutes les saisons") {
         donnees_classees
@@ -164,7 +152,8 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
         
         explication_principale <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", data$normale_moy, "°C) pour la période ", periode_globale(), ".")
         
-        donnees_periode_filtree <- donnees_et_probabilites()
+        donnees_periode_filtree <- data_tmax %>%
+          filter(periode_ref == periode_globale())
         
         donnees_historiques_jour <- donnees_periode_filtree %>%
           filter(
@@ -204,7 +193,7 @@ mod_quiz_server <- function(id, periode_globale, data_stats, data_tmax, get_seas
         annee_debut <- annees_periode[1]
         annee_fin <- annees_periode[2]
         
-        donnees_historiques_jour_plot <- donnees_et_probabilites() %>%
+        donnees_historiques_jour_plot <- data_tmax %>%
           filter(
             periode_ref == periode_globale(),
             city == data_quiz$city, 
