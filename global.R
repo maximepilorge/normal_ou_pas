@@ -131,3 +131,8 @@ villes <- tibble::tribble(
   "Poitiers", 46.5802, 0.3405,
   "Ajaccio", 41.9207, 8.7397
 )
+
+periodes_disponibles <- tbl(db_pool, "stats_normales") %>%
+  distinct(periode_ref) %>%
+  arrange(periode_ref) %>%
+  pull()

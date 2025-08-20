@@ -49,16 +49,13 @@ mod_quiz_server <- function(id, db_pool) {
     score_echecs <- reactiveVal(0)
     
     observe({
-      periodes_disponibles <- tbl(db_pool, "stats_normales") %>%
-        distinct(periode_ref) %>%
-        arrange(periode_ref) %>%
-        pull()
-      
       updateSelectInput(session, "periode_normale", choices = periodes_disponibles)
     })
     
     # --- NOUVELLE QUESTION ---
     observeEvent(input$new_question_btn, {
+      
+      req(input$periode_normale)
     
       shinyjs::disable("new_question_btn")
       boxplot_data(NULL)
