@@ -12,9 +12,9 @@ mod_visualisation_ui <- function(id) {
         card(
           card_header("Paramètres"),
           selectInput("ville_select", "Choisissez une ville :", choices = NULL),
-          selectInput("periode_select", "Choisissez la période de référence :", choices = NULL),
+          selectInput("periode_select", "Choisissez la période de référence :", choices = periodes_disponibles),
           sliderInput("annee_select", "Choisissez l'année à comparer :", 
-                      min = 1950, max = 2024, value = 2024, sep = "")
+                      min = an_min_data, max = an_max_data, value = an_max_data, sep = "")
         )
       ),
       

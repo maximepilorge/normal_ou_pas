@@ -12,9 +12,9 @@ mod_analyse_ui <- function(id) {
           card_header("Paramètres d'analyse"),
           p("Testez une température pour un jour ou pour l'année entière et découvrez sa fréquence d'occurrence."),
           selectInput("ville_analyse", "Choisissez une ville :", choices = NULL),
-          selectInput("periode_analyse", "Choisissez la période de référence :", choices = NULL),
+          selectInput("periode_analyse", "Choisissez la période de référence :", choices = periodes_disponibles),
           numericInput(ns("temp_analyse"), "Température maximale à tester (°C) :",
-                       value = 35, min = -20, max = 50),
+                       value = 35, min = -50, max = 50),
           hr(),
           checkboxInput(ns("toute_annee_analyse"), "Analyser sur l'année entière", value = FALSE),
           div(id = ns("selecteurs_date"),
@@ -100,7 +100,7 @@ mod_analyse_server <- function(id, ville, periode, db_pool) {
         
         # Calcul pour la saison
         date_selectionnee <- as.Date(paste("2001", input$mois_analyse, input$jour_analyse, sep="-"))
-        saison <- get_season_info(date_selectionnee) # get_season_info() vient de global.R
+        saison <- get_season_info(date_selectionnee)
         mois_saison_str <- sprintf("%02d", saison$mois)
         mois_clause_sql <- paste0("TO_CHAR(TO_TIMESTAMP(date * 86400), 'MM') IN (", paste0("'", mois_saison_str, "'", collapse = ", "), ")")
         

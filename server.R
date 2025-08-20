@@ -16,32 +16,19 @@ server <- function(input, output, session) {
   
   # --- MISE A JOUR DES INPUTS GLOBAUX ---
   observe({
-    
-    periodes_disponibles <- tbl(db_pool, "stats_normales") %>%
-      distinct(periode_ref) %>%
-      arrange(periode_ref) %>%
-      pull()
 
-    updateSelectInput(session, "periode_select", choices = periodes_disponibles)
-    updateSelectInput(session, "periode_analyse", choices = periodes_disponibles)
-    
     updateSliderInput(session, "annee_select", 
-                      min = 1950, 
-                      max = 2024,
-                      value = 2024)
-    
-    villes_triees <- tbl(db_pool, "temperatures_max") %>%
-      distinct(ville) %>%
-      arrange(ville) %>%
-      pull(ville)          
+                      min = an_min_data, 
+                      max = an_max_data,
+                      value = an_max_data)
     
     updateSelectInput(session, "ville_select", choices = villes_triees, selected = villes_triees[1])
     updateSelectInput(session, "ville_analyse", choices = villes_triees, selected = villes_triees[1])
+    
   })
   
   # Cette fonction s'exécutera automatiquement quand un utilisateur fermera son navigateur
   session$onSessionEnded(function() {
-    # On force le "ramasse-miettes" de R à nettoyer la mémoire de cette session
     gc()
     print("Session terminée et mémoire nettoyée.")
   })

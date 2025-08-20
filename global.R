@@ -136,3 +136,11 @@ periodes_disponibles <- tbl(db_pool, "stats_normales") %>%
   distinct(periode_ref) %>%
   arrange(periode_ref) %>%
   pull()
+
+villes_triees <- tbl(db_pool, "temperatures_max") %>%
+  distinct(ville) %>%
+  arrange(ville) %>%
+  pull(ville)
+
+an_min_data <- 1950
+an_max_data <- 2024

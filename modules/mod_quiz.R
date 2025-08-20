@@ -11,7 +11,7 @@ mod_quiz_ui <- function(id) {
         # Première carte pour les paramètres généraux
         card(
           card_header("Paramètres"),
-          selectInput(ns("periode_normale"), "Période de référence climatique", choices = NULL),
+          selectInput(ns("periode_normale"), "Période de référence climatique", choices = periodes_disponibles),
           selectInput(ns("saison_select"), "Filtrer par saison (optionnel) :",
                       choices = c("Toutes les saisons", "Hiver", "Printemps", "Été", "Automne"),
                       selected = "Toutes les saisons")
@@ -48,9 +48,9 @@ mod_quiz_server <- function(id, db_pool) {
     score_succes <- reactiveVal(0)
     score_echecs <- reactiveVal(0)
     
-    observe({
-      updateSelectInput(session, "periode_normale", choices = periodes_disponibles)
-    })
+    # observe({
+    #   updateSelectInput(session, "periode_normale", choices = periodes_disponibles)
+    # })
     
     # --- NOUVELLE QUESTION ---
     observeEvent(input$new_question_btn, {
@@ -62,7 +62,7 @@ mod_quiz_server <- function(id, db_pool) {
         
       # 1. On choisit une catégorie
       categories_possibles <- c("Au-dessus des normales", "En-dessous des normales", "Dans les normales de saison")
-      prob_vector <- c(0.3, 0.2, 0.5)
+      prob_vector <- c(0.3, 0.2, 0.5) # Défini manuellement
       categorie_choisie <- sample(categories_possibles, size = 1, prob = prob_vector)
       
       # 2. On construit une requête de base sur la nouvelle table
