@@ -16,7 +16,9 @@ library(dbplyr)
 
 # A travailler :
 # Corriger bug mode analyse (ne jamais regarder la fréquence pour les températures inférieures au seuil, toujours supérieures... ou alors on ajoute un input pour définir ça)
-# Figer input de la période de référence et de la saison dans le module de quiz quand on a validé la réponse
+# - Avoir une visualisation de l'évolution des températures max journalières entre deux années définies par l'utilisateur + afficher courbe de tendance
+# - Supprimer le fait de définir un jour précis dans le module d'analyse et remplacer par la saison
+# - Réfléchir à comment comparer deux périodes de référence climatique
 
 Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
 

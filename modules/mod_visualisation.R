@@ -37,13 +37,21 @@ mod_visualisation_server <- function(id, db_pool, ville, periode, annee) {
       # On injecte l'ID complet et "namespacé" dans le code JS
       js_code <- sprintf(
         "
-        $(window).on('resize', function(){
-          Shiny.setInputValue('%s', window.innerWidth);
-        });
-        Shiny.setInputValue('%s', window.innerWidth);
-        ",
-        ns("screen_width"), ns("screen_width")
+    function get_screen_width() {
+      Shiny.setInputValue('%s', window.innerWidth, {priority: 'event'});
+    }
+    
+    // Écoute les redimensionnements
+    $(window).on('resize', function(){
+      get_screen_width();
+    });
+    
+    // Déclenche au chargement de la page pour une valeur initiale
+    get_screen_width();
+    ",
+        ns("screen_width")
       )
+      
       shinyjs::runjs(js_code)
     })
     

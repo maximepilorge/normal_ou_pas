@@ -69,7 +69,7 @@ ui <- navbarPage(
                         tags$li(strong("Définition du 'normal' : "), "Pour définir ce qui est 'normal', l'application utilise la méthode des percentiles.",
                                 tags$ol(
                                   tags$li("Pour un jour donné (ex: le 15 août) et une période de référence, l'application analyse la distribution de toutes les températures maximales observées les 15 août de cette période."),
-                                  tags$li("Elle calcule ensuite le 10e percentile (la valeur en dessous de laquelle se trouvent les 10% des jours les plus froids) et le 90e percentile (la valeur au-dessus de laquelle se trouvent les 10% des jours les plus chauds)."),
+                                  tags$li("Elle calcule ensuite le 10e percentile (la valeur en-dessous de laquelle se trouvent les 10% des jours les plus froids) et le 90e percentile (la valeur au-dessus de laquelle se trouvent les 10% des jours les plus chauds)."),
                                   tags$li("Une température est jugée ", strong("'Dans les normales de saison'"), " si elle se situe entre ces deux bornes (le 10e et le 90e percentile)."),
                                   tags$li("Si elle est en-dehors de cette plage, elle est considérée comme 'En-dessous' ou 'Au-dessus' des normales.")
                                 )

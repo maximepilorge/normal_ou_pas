@@ -8,7 +8,7 @@ mod_quiz_ui <- function(id) {
       
       sidebar = sidebar(
         width = "350px",
-        # Première carte pour les paramètres généraux
+        # Carte pour les paramètres généraux
         card(
           card_header("Paramètres"),
           selectInput(ns("periode_normale"), "Période de référence climatique", choices = periodes_disponibles),
@@ -16,23 +16,21 @@ mod_quiz_ui <- function(id) {
                       choices = c("Toutes les saisons", "Hiver", "Printemps", "Été", "Automne"),
                       selected = "Toutes les saisons")
         ),
-        # Deuxième carte pour l'interaction avec le quiz
-        card(
-          card_header("Action"),
-          actionButton(ns("new_question_btn"), "Tirer une température au hasard !", icon = icon("dice"), class = "btn-primary w-100 mb-3"),
-          checkboxInput(ns("trash_talk_mode"), "Me forcer à vous répondre poliment", value = FALSE),
-          hr(),
-          h4("Votre Réponse"),
-          radioButtons(ns("user_answer"), "Cette température est :",
-                       choices = c("En-dessous des normales", "Dans les normales de saison", "Au-dessus des normales"),
-                       selected = character(0)),
-          actionButton(ns("submit_answer_btn"), "Valider", icon = icon("check"), class = "btn-success w-100")
-        )
+        # Le bouton de nouvelle question reste dans la barre latérale pour ne pas encombrer le quiz
+        actionButton(ns("new_question_btn"), "Tirer une température au hasard !", icon = icon("dice"), class = "btn-primary w-100 mb-3"),
+        checkboxInput(ns("trash_talk_mode"), "Me forcer à vous répondre poliment", value = FALSE)
       ),
       
-      # La carte principale pour afficher la question et les résultats
+      # Contenu principal de la page
       card(
         card_header(h3(textOutput(ns("question_text")))),
+        #hr(),
+        # Déplacer les réponses et le bouton de validation dans le corps principal
+        h4("Votre Réponse"),
+        radioButtons(ns("user_answer"), "Cette température est :",
+                     choices = c("En-dessous des normales", "Dans les normales de saison", "Au-dessus des normales"),
+                     selected = character(0)),
+        actionButton(ns("submit_answer_btn"), "Valider", icon = icon("check"), class = "btn-success w-100"),
         hr(),
         uiOutput(ns("feedback_ui"))
       )
@@ -48,9 +46,9 @@ mod_quiz_server <- function(id, db_pool) {
     score_succes <- reactiveVal(0)
     score_echecs <- reactiveVal(0)
     
-    # observe({
-    #   updateSelectInput(session, "periode_normale", choices = periodes_disponibles)
-    # })
+    observeEvent(req(input$periode_normale), {
+      shinyjs::click("new_question_btn")
+    }, once = TRUE)
     
     # --- NOUVELLE QUESTION ---
     observeEvent(input$new_question_btn, {
