@@ -11,10 +11,15 @@ mod_quiz_ui <- function(id) {
         # Carte pour les paramètres généraux
         card(
           card_header("Paramètres"),
-          selectInput(ns("periode_normale"), "Période de référence climatique", choices = periodes_disponibles),
-          selectInput(ns("saison_select"), "Filtrer par saison (optionnel) :",
-                      choices = c("Toutes les saisons", "Hiver", "Printemps", "Été", "Automne"),
-                      selected = "Toutes les saisons")
+          pickerInput(ns("periode_normale"), 
+                      "Période de référence climatique", 
+                      choices = periodes_disponibles, 
+                      options = list('live-search' = FALSE)),
+          pickerInput(ns("saison_select"), 
+                           "Filtrer par saison (optionnel) :",
+                           choices = c("Toutes les saisons", "Hiver", "Printemps", "Été", "Automne"),
+                           selected = "Toutes les saisons",
+                           options = list('live-search' = FALSE))
         ),
         # Le bouton de nouvelle question reste dans la barre latérale pour ne pas encombrer le quiz
         actionButton(ns("new_question_btn"), "Tirer une température au hasard !", icon = icon("dice"), class = "btn-primary w-100 mb-3"),

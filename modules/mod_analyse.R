@@ -11,16 +11,29 @@ mod_analyse_ui <- function(id) {
         card(
           card_header("Paramètres d'analyse"),
           p("Testez une température pour un jour ou pour l'année entière et découvrez sa fréquence d'occurrence."),
-          selectInput("ville_analyse", "Choisissez une ville :", choices = NULL),
-          selectInput("periode_analyse", "Choisissez la période de référence :", choices = periodes_disponibles),
+          pickerInput("ville_analyse", 
+                      "Choisissez une ville :", 
+                      choices = NULL,
+                      options = list('live-search' = FALSE)),
+          pickerInput("periode_analyse", 
+                      "Choisissez la période de référence :", 
+                      choices = periodes_disponibles,
+                      options = list('live-search' = FALSE)),
           numericInput(ns("temp_analyse"), "Température maximale à tester (°C) :",
                        value = 35, min = -50, max = 50),
           hr(),
           checkboxInput(ns("toute_annee_analyse"), "Analyser sur l'année entière", value = FALSE),
           div(id = ns("selecteurs_date"),
-              selectInput(ns("mois_analyse"), "Mois :",
-                          choices = setNames(1:12, mois_fr), selected = 1),
-              selectInput(ns("jour_analyse"), "Jour :", choices = 1:31, selected = 1)
+              pickerInput(ns("mois_analyse"), 
+                          "Mois :",
+                          choices = setNames(1:12, mois_fr), 
+                          selected = 1,
+                          options = list('live-search' = FALSE)),
+              pickerInput(ns("jour_analyse"), 
+                          "Jour :", 
+                          choices = 1:31, 
+                          selected = 1,
+                          options = list('live-search' = FALSE))
           ),
           actionButton(ns("calculer_frequence_btn"), "Calculer la fréquence", icon = icon("calculator"), class = "btn-primary w-100 mt-3")
         )
@@ -46,7 +59,7 @@ mod_analyse_server <- function(id, ville, periode, db_pool) {
     observeEvent(input$mois_analyse, {
       req(input$mois_analyse)
       jours_dans_le_mois <- days_in_month(as.Date(paste("2001", input$mois_analyse, "01", sep="-")))
-      updateSelectInput(session, "jour_analyse", choices = 1:jours_dans_le_mois)
+      updatePickerInput(session, "jour_analyse", choices = 1:jours_dans_le_mois)
     })
     
     observeEvent(input$calculer_frequence_btn, {

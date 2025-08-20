@@ -1,6 +1,7 @@
 # ui.R
 library(shiny)
 library(shinyjs)
+library(shinyWidgets)
 library(plotly)
 library(bslib)
 
@@ -26,7 +27,7 @@ ui <- navbarPage(
     tags$meta(name = "twitter:card", content = "summary_large_image"),
     tags$meta(name = "twitter:title", content = "Climat : Normal ou pas ?"),
     tags$meta(name = "twitter:description", content = "Explorez le changement climatique. Jouez au quiz, comparez les années et analysez si la météo est vraiment 'normale'."),
-    tags$meta(name = "twitter:image", content = "https://normal-ou-pas.com/social_preview.png") # URL à personnaliser !
+    tags$meta(name = "twitter:image", content = "https://normal-ou-pas.com/social_preview.png")
   ),
   
   # -- Onglet 1 : Le Quiz --

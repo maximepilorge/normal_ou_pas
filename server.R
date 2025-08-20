@@ -22,8 +22,8 @@ server <- function(input, output, session) {
                       max = an_max_data,
                       value = an_max_data)
     
-    updateSelectInput(session, "ville_select", choices = villes_triees, selected = villes_triees[1])
-    updateSelectInput(session, "ville_analyse", choices = villes_triees, selected = villes_triees[1])
+    updatePickerInput(session, "ville_select", choices = villes_triees, selected = villes_triees[1])
+    updatePickerInput(session, "ville_analyse", choices = villes_triees, selected = villes_triees[1])
     
   })
   

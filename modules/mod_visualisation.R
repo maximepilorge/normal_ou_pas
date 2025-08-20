@@ -11,8 +11,14 @@ mod_visualisation_ui <- function(id) {
         # On encapsule les contrôles dans une "card" pour un meilleur rendu visuel
         card(
           card_header("Paramètres"),
-          selectInput("ville_select", "Choisissez une ville :", choices = NULL),
-          selectInput("periode_select", "Choisissez la période de référence :", choices = periodes_disponibles),
+          pickerInput("ville_select", 
+                      "Choisissez une ville :", 
+                      choices = NULL,
+                      options = list('live-search' = FALSE)),
+          pickerInput("periode_select", 
+                      "Choisissez la période de référence :", 
+                      choices = periodes_disponibles,
+                      options = list('live-search' = FALSE)),
           sliderInput("annee_select", "Choisissez l'année à comparer :", 
                       min = an_min_data, max = an_max_data, value = an_max_data, sep = "")
         )

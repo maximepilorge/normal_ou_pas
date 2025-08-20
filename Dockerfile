@@ -3,11 +3,12 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     libpq-dev 
 RUN R -e 'install.packages(c(\
               "shiny", \
+              "shinyjs", \
+              "shinyWidgets", \
               "ggplot2", \
               "plotly", \
               "lubridate", \
               "dplyr", \
-              "shinyjs", \
               "here", \
               "tidyr", \
               "DBI", \
