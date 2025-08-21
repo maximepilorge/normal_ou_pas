@@ -192,7 +192,12 @@ mod_analyse_server <- function(id, db_pool) {
         ) %>%
         config(displayModeBar = FALSE)
     }) %>%
-      bindCache(donnees_long_terme(), input$lissage_toggle, resultats_seuil())
+      bindCache(
+        input$ville_analyse,
+        input$annee_range_analyse,
+        input$lissage_toggle,
+        if (is.null(resultats_seuil())) "aucun" else resultats_seuil()$seuil
+      )
     
     observeEvent(list(input$ville_analyse, input$annee_range_analyse, input$saison_analyse), {
       shinyjs::click("reset_analyse_btn")
