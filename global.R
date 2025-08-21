@@ -15,7 +15,6 @@ library(DBI)
 library(RPostgres)
 library(pool)
 library(dbplyr)
-library(zoo)
 
 # A travailler :
 # Corriger bug mode analyse (ne jamais regarder la fréquence pour les températures inférieures au seuil, toujours supérieures... ou alors on ajoute un input pour définir ça)

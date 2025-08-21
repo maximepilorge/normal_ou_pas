@@ -13,7 +13,19 @@ source("modules/mod_analyse.R")
 ui <- navbarPage(
   "Climat : Normal ou pas ?",
   theme = bs_theme(version = 5),
-  header = useShinyjs(),
+  header = tagList(
+    useShinyjs(),
+    # --- AJOUT ---
+    # On étend shinyjs avec des fonctions pour gérer correctement les pickerInput
+    extendShinyjs(text = "
+      shinyjs.disablePicker = function(id) { 
+        $('button[data-id=\"' + id + '\"]').addClass('disabled').prop('disabled', true); 
+      };
+      shinyjs.enablePicker = function(id) { 
+        $('button[data-id=\"' + id + '\"]').removeClass('disabled').prop('disabled', false); 
+      };
+    ", functions = c("disablePicker", "enablePicker"))
+  ),
   
   tags$head(
     # Balises Open Graph (pour LinkedIn, Facebook, etc.)
@@ -41,7 +53,7 @@ ui <- navbarPage(
   ),
   
   # -- Onglet 3 : Analyse d'un événement --
-  tabPanel("Analyse d'un événement 🔍",
+  tabPanel("Evolution globale 🔍",
            mod_analyse_ui("analyse_1")
   ),
   

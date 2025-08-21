@@ -13,12 +13,15 @@ mod_analyse_ui <- function(id) {
           card_header("Paramètres de la série temporelle"),
           pickerInput(ns("ville_analyse"),
                       "Choisissez une ville :", 
-                      choices = NULL,
+                      choices = villes_triees,
+                      selected = villes_triees[1],
                       options = list('live-search' = TRUE)),
-          sliderInput(ns("annee_range_analyse"), "Période d'analyse :", 
-                      min = an_min_data, max = an_max_data, 
-                      value = c(1950, an_max_data), sep = ""),
-          # --- AJOUT : Case à cocher pour le lissage ---
+          sliderInput(ns("annee_range_analyse"), 
+                      "Période d'analyse :", 
+                      min = an_min_data, 
+                      max = an_max_data, 
+                      value = c(1950, an_max_data), 
+                      sep = ""),
           checkboxInput(ns("lissage_toggle"), "Lisser la courbe (moyenne mobile 365 jours)", value = TRUE)
         ),
         card(
@@ -29,10 +32,10 @@ mod_analyse_ui <- function(id) {
           pickerInput(ns("saison_analyse"), 
                       "Filtrer par saison (optionnel) :",
                       choices = c("Toutes les saisons" = "all", 
-                                  "Hiver (Déc, Jan, Fév)" = "hiver", 
-                                  "Printemps (Mar, Avr, Mai)" = "printemps", 
-                                  "Été (Juin, Juil, Aoû)" = "ete", 
-                                  "Automne (Sep, Oct, Nov)" = "automne"),
+                                  "Hiver" = "hiver", 
+                                  "Printemps" = "printemps", 
+                                  "Été" = "ete", 
+                                  "Automne" = "automne"),
                       selected = "all",
                       options = list('live-search' = FALSE)),
           actionButton(ns("lancer_analyse_btn"), "Analyser le seuil", icon = icon("magnifying-glass-chart"), class = "btn-primary w-100 mt-3"),
@@ -60,10 +63,6 @@ mod_analyse_server <- function(id, db_pool) {
     
     ns <- session$ns
     
-    observe({
-      updatePickerInput(session, "ville_analyse", choices = villes_triees, selected = "Paris")
-    })
-    
     analyse_trigger <- reactiveVal(NULL) 
     
     donnees_long_terme <- reactive({
@@ -71,13 +70,16 @@ mod_analyse_server <- function(id, db_pool) {
       
       annee_debut <- input$annee_range_analyse[1]
       annee_fin <- input$annee_range_analyse[2]
+      start_day <- as.numeric(as.Date(paste0(input$annee_range_analyse[1], "-01-01")))
+      end_day <- as.numeric(as.Date(paste0(input$annee_range_analyse[2] + 1, "-01-01")))
       
       tbl(db_pool, "temperatures_max") %>%
         filter(
           ville == !!input$ville_analyse,
-          dbplyr::sql("EXTRACT(YEAR FROM TO_TIMESTAMP(date * 86400))") >= !!annee_debut,
-          dbplyr::sql("EXTRACT(YEAR FROM TO_TIMESTAMP(date * 86400))") <= !!annee_fin
+          date >= !!start_day,
+          date < !!end_day
         ) %>%
+        select(date, temperature_max, tmax_lisse_365j) %>%
         collect() %>%
         rename(tmax_celsius = temperature_max) %>%
         mutate(
@@ -85,10 +87,7 @@ mod_analyse_server <- function(id, db_pool) {
           annee = year(date),
           mois = month(date)
         ) %>%
-        arrange(date) %>%
-        mutate(
-          tmax_lisse_365j = zoo::rollmean(tmax_celsius, k = 365, fill = NA, align = "center")
-        )
+        arrange(date)
       
     }) %>% bindCache(input$ville_analyse, input$annee_range_analyse)
     
@@ -106,7 +105,7 @@ mod_analyse_server <- function(id, db_pool) {
           geom_line(aes(y = tmax_lisse_365j), color = "#1f77b4", linewidth = 0.6, na.rm = TRUE) +
           geom_point(aes(y = tmax_lisse_365j, text = paste("Date:", format(date, "%d %b %Y"), "<br>Temp. lissée:", round(tmax_lisse_365j, 1), "°C")),
                      alpha = 0, na.rm = TRUE) +
-          geom_smooth(aes(y = tmax_lisse_365j, color = "Tendance"), method = "loess", span = 0.2, se = FALSE, linewidth = 1.2, na.rm = TRUE) +
+          geom_smooth(aes(y = tmax_lisse_365j, color = "Tendance"), method = "loess", span = 0.2, se = FALSE, linewidth = 1.2, na.rm = TRUE, linetype = "dashed") +
           scale_color_manual(values = c("Tendance" = "#E41A1C")) +
           labs(
             title = paste("Températures maximales à", input$ville_analyse),
@@ -119,7 +118,7 @@ mod_analyse_server <- function(id, db_pool) {
           geom_line(color = "grey60", linewidth = 0.3) +
           geom_point(aes(text = paste("Date:", format(date, "%d %b %Y"), "<br>Température:", round(tmax_celsius, 1), "°C")),
                      alpha = 0) +
-          geom_smooth(aes(color = "Tendance"), method = "loess", span = 0.2, se = FALSE, linewidth = 1.2, na.rm = TRUE) +
+          geom_smooth(aes(color = "Tendance"), method = "loess", span = 0.2, se = FALSE, linewidth = 1.2, na.rm = TRUE, linetype = "dashed") +
           scale_color_manual(values = c("Tendance" = "#E41A1C")) +
           labs(
             title = paste("Températures maximales à", input$ville_analyse),
@@ -142,6 +141,10 @@ mod_analyse_server <- function(id, db_pool) {
       ggplotly(p, tooltip = "text") %>%
         config(displayModeBar = FALSE)
     })
+    
+    observeEvent(list(input$ville_analyse, input$annee_range_analyse), {
+      shinyjs::click("reset_analyse_btn")
+    }, ignoreInit = TRUE)
     
     observeEvent(input$lancer_analyse_btn, {
       req(donnees_long_terme(), input$temp_seuil_analyse)
@@ -241,7 +244,7 @@ mod_analyse_server <- function(id, db_pool) {
       req(analyse_trigger())
       analyse_trigger()$data %>% arrange(desc(tmax_celsius)) %>% head(5) %>%
         select(Date = date, `Température (°C)` = tmax_celsius) %>%
-        mutate(Date = format(Date, "%d/%m/%Y"), `Température (°C)` = round(`Température (°C)`, 1))
+        mutate(Date = format(Date, "%d/%m/%Y"), `Température (°C)` = sprintf("%.1f", `Température (°C)`))
     }, striped = TRUE, hover = TRUE, bordered = TRUE, spacing = "s", width = "100%")
     
     output$decennie_plot <- renderPlot({

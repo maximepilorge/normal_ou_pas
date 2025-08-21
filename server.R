@@ -6,7 +6,6 @@ library(lubridate)
 library(plotly)
 library(shinyjs)
 library(dbplyr)
-library(zoo)
 
 # On charge la logique serveur de chaque module
 source("modules/mod_quiz.R")
@@ -14,19 +13,6 @@ source("modules/mod_visualisation.R")
 source("modules/mod_analyse.R")
 
 server <- function(input, output, session) {
-  
-  # --- MISE A JOUR DES INPUTS GLOBAUX ---
-  observe({
-
-    updateSliderInput(session, "annee_select", 
-                      min = an_min_data, 
-                      max = an_max_data,
-                      value = an_max_data)
-    
-    updatePickerInput(session, "ville_select", choices = villes_triees, selected = villes_triees[1])
-    updatePickerInput(session, "ville_analyse", choices = villes_triees, selected = villes_triees[1])
-    
-  })
   
   # Cette fonction s'exécutera automatiquement quand un utilisateur fermera son navigateur
   session$onSessionEnded(function() {

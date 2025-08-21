@@ -13,14 +13,18 @@ mod_visualisation_ui <- function(id) {
           card_header("Paramètres"),
           pickerInput("ville_select", 
                       "Choisissez une ville :", 
-                      choices = NULL,
+                      choices = villes_triees,
+                      select = villes_triees[1],
                       options = list('live-search' = FALSE)),
           pickerInput("periode_select", 
                       "Choisissez la période de référence :", 
                       choices = periodes_disponibles,
                       options = list('live-search' = FALSE)),
           sliderInput("annee_select", "Choisissez l'année à comparer :", 
-                      min = an_min_data, max = an_max_data, value = an_max_data, sep = "")
+                      min = an_min_data, 
+                      max = an_max_data, 
+                      value = an_max_data, 
+                      sep = "")
         )
       ),
       
@@ -59,6 +63,7 @@ mod_visualisation_server <- function(id, db_pool, ville, periode, annee) {
       )
       
       shinyjs::runjs(js_code)
+      
     })
     
     observeEvent(input$screen_width, {
@@ -76,13 +81,19 @@ mod_visualisation_server <- function(id, db_pool, ville, periode, annee) {
     
     plot_data_annee <- reactive({
       req(ville(), annee())
+      
+      annee_selectionnee <- annee()
+      start_day <- as.numeric(as.Date(paste0(annee_selectionnee, "-01-01")))
+      end_day <- as.numeric(as.Date(paste0(annee_selectionnee + 1, "-01-01")))
 
       # On prépare l'année en chaîne de caractères pour la requête SQL
       donnees_preparees <- tbl(db_pool, "temperatures_max") %>%
         filter(
           ville == !!ville(),
-          dbplyr::sql("EXTRACT(YEAR FROM TO_TIMESTAMP(date * 86400))") == !!annee()
+          date >= !!start_day,
+          date < !!end_day
         ) %>%
+        select(date, temperature_max) %>%
         collect() %>%
         rename(tmax_celsius = temperature_max) %>%
         mutate(
@@ -124,7 +135,7 @@ mod_visualisation_server <- function(id, db_pool, ville, periode, annee) {
                    alpha = 0) +
         # La courbe de lissage geom_smooth
         geom_smooth(data = plot_data_annee(), 
-                    aes(x = date, y = tmax_celsius, color = "Tendance de l'année"), # <--- On déplace "color" ici
+                    aes(x = date, y = tmax_celsius, color = "Tendance de l'année"),
                     linetype = "dashed", linewidth = 0.6, method = "loess", span = 0.3, se = FALSE) +
         
         # --- Couches pour l'année sélectionnée ---

@@ -14,8 +14,7 @@ RUN R -e 'install.packages(c(\
               "DBI", \
               "RPostgres", \
               "pool", \
-              "dbplyr", \
-              "zoo"), \
+              "dbplyr"), \
             repos="https://packagemanager.rstudio.com/cran/__linux__/focal/2025-08-11"\
           )'
 WORKDIR /home/shinyusr
@@ -23,7 +22,7 @@ COPY global.R global.R
 COPY server.R server.R
 COPY ui.R ui.R
 COPY .Renviron .Renviron
-COPY guess_climate.Rproj guess_climate.Rproj
+COPY normal_ou_pas.Rproj normal_ou_pas.Rproj
 COPY data data
 COPY modules modules
 COPY www www

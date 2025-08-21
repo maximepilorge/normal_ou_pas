@@ -15,6 +15,11 @@ mod_quiz_ui <- function(id) {
                       "Période de référence climatique", 
                       choices = periodes_disponibles, 
                       options = list('live-search' = FALSE)),
+          pickerInput(ns("ville_select_quiz"),
+                      "Filtrer par ville (optionnel) :",
+                      choices = c("Toutes les villes", villes_triees),
+                      selected = "Toutes les villes",
+                      options = list('live-search' = TRUE)),
           pickerInput(ns("saison_select"), 
                            "Filtrer par saison (optionnel) :",
                            choices = c("Toutes les saisons", "Hiver", "Printemps", "Été", "Automne"),
@@ -46,6 +51,8 @@ mod_quiz_ui <- function(id) {
 mod_quiz_server <- function(id, db_pool) {
   moduleServer(id, function(input, output, session) {
     
+    ns <- session$ns
+    
     quiz_data <- reactiveVal(NULL)
     boxplot_data <- reactiveVal(NULL)
     score_succes <- reactiveVal(0)
@@ -74,6 +81,12 @@ mod_quiz_server <- function(id, db_pool) {
           periode_ref == !!input$periode_normale,
           categorie == !!categorie_choisie
         )
+      
+      # On ajoute le filtre sur la ville s'il y a lieu
+      if (input$ville_select_quiz != "Toutes les villes") {
+        requete_base <- requete_base %>%
+          filter(ville == !!input$ville_select_quiz)
+      }
       
       # On ajoute le filtre saisonnier s'il y a lieu
       if (input$saison_select != "Toutes les saisons") {
@@ -105,8 +118,9 @@ mod_quiz_server <- function(id, db_pool) {
       shinyjs::enable("user_answer")
       shinyjs::enable("submit_answer_btn")
       shinyjs::enable("new_question_btn")
-      shinyjs::enable("periode_normale")
-      shinyjs::enable("saison_select")
+      js$enablePicker(ns("periode_normale"))
+      js$enablePicker(ns("ville_select_quiz"))
+      js$enablePicker(ns("saison_select"))
     })
     
     # --- AFFICHAGE QUESTION ---
@@ -123,8 +137,9 @@ mod_quiz_server <- function(id, db_pool) {
       req(quiz_data(), input$user_answer, input$periode_normale)
       
       shinyjs::disable("submit_answer_btn")
-      shinyjs::disable("periode_normale")
-      shinyjs::disable("saison_select")
+      js$disablePicker(ns("periode_normale"))
+      js$disablePicker(ns("ville_select_quiz"))
+      js$disablePicker(ns("saison_select"))
       
       data <- quiz_data()
       is_correct <- (input$user_answer == data$correct_answer)
@@ -187,6 +202,7 @@ mod_quiz_server <- function(id, db_pool) {
           dbplyr::sql("TO_CHAR(TO_TIMESTAMP(date * 86400), 'MM')") == !!mois_quiz_str,
           dbplyr::sql("TO_CHAR(TO_TIMESTAMP(date * 86400), 'DD')") == !!jour_quiz_str
         ) %>%
+        select(date, temperature_max) %>%
         collect() %>%
         mutate(date = as.Date(date, origin = "1970-01-01")) %>% # On convertit la date après coup
         rename(tmax_celsius = temperature_max)
@@ -213,6 +229,7 @@ mod_quiz_server <- function(id, db_pool) {
             dbplyr::sql("EXTRACT(YEAR FROM TO_TIMESTAMP(date * 86400))") <= !!annee_fin_str,
             dbplyr::sql("TO_CHAR(TO_TIMESTAMP(date * 86400), 'MM')") %in% !!mois_saison_str
           ) %>%
+          select(date, temperature_max) %>%
           collect() %>%
           mutate(date = as.Date(date, origin = "1970-01-01")) %>%
           rename(tmax_celsius = temperature_max)
