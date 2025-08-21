@@ -6,6 +6,7 @@ library(lubridate)
 library(plotly)
 library(shinyjs)
 library(dbplyr)
+library(zoo)
 
 # On charge la logique serveur de chaque module
 source("modules/mod_quiz.R")
@@ -48,8 +49,6 @@ server <- function(input, output, session) {
   
   # Module Analyse
   mod_analyse_server("analyse_1", 
-                     ville = reactive(input$ville_analyse),
-                     periode = reactive(input$periode_analyse),
                      db_pool = db_pool)
   
 }

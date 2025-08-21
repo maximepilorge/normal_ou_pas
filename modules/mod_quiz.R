@@ -114,7 +114,7 @@ mod_quiz_server <- function(id, db_pool) {
       req(quiz_data())
       data <- quiz_data()
       formatted_date <- paste(format(data$date, "%d"), mois_fr[as.numeric(format(data$date, "%m"))])
-      paste0('Le ', formatted_date, ', à ', data$city, ', la température maximale observée est de ', data$temp, '°C. Est-ce normal ?')
+      paste0('Le ', formatted_date, ', à ', data$city, ', la température maximale observée est de ', data$temp, '°C. Normal ou pas ?')
     })
     
     # --- ENVOI RÉPONSE ---

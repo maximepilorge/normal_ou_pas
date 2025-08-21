@@ -15,12 +15,12 @@ library(DBI)
 library(RPostgres)
 library(pool)
 library(dbplyr)
+library(zoo)
 
 # A travailler :
 # Corriger bug mode analyse (ne jamais regarder la fréquence pour les températures inférieures au seuil, toujours supérieures... ou alors on ajoute un input pour définir ça)
-# - Avoir une visualisation de l'évolution des températures max journalières entre deux années définies par l'utilisateur + afficher courbe de tendance
-# - Supprimer le fait de définir un jour précis dans le module d'analyse et remplacer par la saison
-# - Réfléchir à comment comparer deux périodes de référence climatique
+# - Ajouter filtre par ville dans le quiz
+# - Statistiques via Google Analytics ?
 
 Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
 
