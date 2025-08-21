@@ -14,7 +14,8 @@ RUN R -e 'install.packages(c(\
               "DBI", \
               "RPostgres", \
               "pool", \
-              "dbplyr"), \
+              "dbplyr", \
+              "zoo"), \
             repos="https://packagemanager.rstudio.com/cran/__linux__/focal/2025-08-11"\
           )'
 WORKDIR /home/shinyusr
