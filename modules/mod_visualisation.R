@@ -152,12 +152,16 @@ mod_visualisation_server <- function(id, db_pool, ville, periode, annee) {
                                       "Tendance de l'année" = "#8B0000")) +
         scale_x_date(date_labels = "%b", date_breaks = "1 month") +
         labs(
-          title = paste("Températures maximales journalières à", ville(), "en", annee()),
+          title = paste("Températures maximales journalières \nà", ville(), "en", annee()),
           subtitle = paste("Comparaison avec la normale climatique", periode()),
           y = "Température maximale (°C)", x = "Jour de l'année", color = "Légende"
         ) +
         theme_minimal(base_size = 14) +
-        theme(legend.position = "bottom")
+        theme(
+          legend.position = "bottom",
+          axis.text.x = element_text(angle = 45, hjust = 1),
+          plot.title = element_text(hjust = 0.5)
+          )
       
       ggplotly(p, tooltip = "text") %>%
         config(displayModeBar = FALSE)
