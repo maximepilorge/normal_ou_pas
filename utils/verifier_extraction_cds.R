@@ -9,10 +9,6 @@ library(lubridate)
 library(tidyr)
 library(here)
 
-# --- 2. Chargement des dépendances du projet ---
-dirApp <- "C:/Users/maxp1/Documents/guess_climate"
-key_cds <- "9e71b600-abdb-4b74-92f5-94721d1f774f"
-
 #' Analyse la complétude des données de température
 #'
 #' @param chemin_fichier_rds Chemin vers le fichier .rds à analyser.

@@ -5,12 +5,23 @@
 library(DBI)
 library(RSQLite)
 library(dplyr)
+library(here)
+library(dotenv)
 
 # --- 2. CONNEXION À LA BASE DE DONNÉES ---
 # Modifiez ce chemin si votre script n'est pas à la racine du projet
-db_path <- "C:/Users/maxp1/Documents/guess_climate/data/temperatures.sqlite"
-con <- dbConnect(RSQLite::SQLite(), db_path)
+load_dot_env(file = here::here(".Renviron"))
+stopifnot(Sys.getenv("DB_HOST") != "")
 nom_table <- "temperatures_max"
+
+con <- dbConnect(
+  RPostgres::Postgres(),
+  dbname = Sys.getenv("DB_NAME"),
+  host = Sys.getenv("DB_HOST"),
+  port = as.integer(Sys.getenv("DB_PORT")),
+  user = Sys.getenv("DB_USER"),
+  password = Sys.getenv("DB_PASS")
+)
 
 # --- 3. PRÉPARATION ET EXÉCUTION DE LA REQUÊTE ---
 # On utilise dplyr pour construire la requête qui sera envoyée à la BDD

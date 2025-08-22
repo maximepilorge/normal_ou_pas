@@ -174,9 +174,6 @@ mod_quiz_server <- function(id, db_pool) {
         intro_message <- if (is_correct) message_succes_classique else message_echec_classique
       }
       
-      diff <- round(abs(data$temp - data$normale_moy), 1)
-      direction <- if (data$temp > data$normale_moy) "supérieure" else "inférieure"
-      
       # On prépare les éléments du filtre
       annees_periode <- as.numeric(unlist(strsplit(input$periode_normale, "-")))
       annee_debut <- annees_periode[1]; annee_fin <- annees_periode[2]
@@ -209,12 +206,15 @@ mod_quiz_server <- function(id, db_pool) {
       
       # On stocke immédiatement les données pour le graphique
       boxplot_data(donnees_historiques_jour)
+      moyenne_reelle <- mean(donnees_historiques_jour$tmax_celsius, na.rm = TRUE)
+      diff <- round(abs(data$temp - moyenne_reelle), 1)
+      direction <- if (data$temp > moyenne_reelle) "supérieure" else "inférieure"
       
       if (data$correct_answer == "Dans les normales de saison") {
-        explication_text <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", data$normale_moy, "°C) et est considérée comme normale pour un ", paste(format(data$date, "%d"), mois_fr[as.numeric(format(data$date, "%m"))]), " à ", data$city, ".")
+        explication_text <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", round(moyenne_reelle, 1), "°C) et est considérée comme normale pour un ", paste(format(data$date, "%d"), mois_fr[as.numeric(format(data$date, "%m"))]), " à ", data$city, ".")
       } else {
         
-        explication_principale <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", data$normale_moy, "°C) pour la période ", input$periode_normale, ".")
+        explication_principale <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", round(moyenne_reelle, 1), "°C) pour la période ", input$periode_normale, ".")
         
         nombre_occurrences_jour <- if (direction == "supérieure") sum(donnees_historiques_jour$tmax_celsius >= data$temp, na.rm = TRUE) else sum(donnees_historiques_jour$tmax_celsius <= data$temp, na.rm = TRUE)
         frequence_jour_text <- if (nombre_occurrences_jour == 0) paste0("Pour ce jour précis, un événement de cette intensité ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".") else paste0("Pour ce jour précis, une température égale ou ", direction, " est arrivée <b>", nombre_occurrences_jour, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
@@ -265,6 +265,8 @@ mod_quiz_server <- function(id, db_pool) {
           geom_boxplot(width = 0.3, fill = "skyblue", alpha = 0.7) +
           # Afficher tous les points historiques avec un peu de jitter
           geom_jitter(width = 0.1, alpha = 0.4, color = "darkblue") +
+          # On ajoute la moyenne avec une forme et une couleur distinctes (losange doré)
+          stat_summary(fun = mean, geom = "point", shape = 23, size = 4, fill = "gold", color = "black") +
           # Ajouter le point de la température du quiz en rouge
           annotate("point", x = "", y = data_quiz$temp, color = "red", size = 5, shape = 18) +
           scale_y_continuous(labels = ~paste(.x, "°C")) +

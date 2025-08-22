@@ -9,8 +9,7 @@ library(leaflet)
 library(sf)
 library(dplyr)
 library(htmlwidgets)
-
-dirApp <- "C:/Users/maxp1/Documents/guess_climate"
+library(here)
 
 # --------------------
 # 2. Définition de la fonction de visualisation
@@ -69,7 +68,7 @@ visualiser_mailles_villes_polygones <- function(villes_avec_grille, taille_maill
 # --------------------
 
 # Définir le chemin vers le fichier de données
-chemin_donnees <- file.path(dirApp, "data", "villes_et_mailles_associees.rds")
+chemin_donnees <- here::here("data", "villes_et_mailles_associees.rds")
 
 if (!file.exists(chemin_donnees)) {
   stop("Le fichier de données '", chemin_donnees, "' n'a pas été trouvé.")

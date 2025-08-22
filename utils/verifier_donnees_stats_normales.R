@@ -2,13 +2,24 @@
 
 # --- 1. CHARGEMENT DES LIBRAIRIES ---
 library(DBI)
-library(RSQLite)
+library(RPostgres)
 library(dplyr)
+library(dotenv)
+library(here)
 
 # --- 2. CONNEXION À LA BASE DE DONNÉES ---
-db_path <- "C:/Users/maxp1/Documents/guess_climate/data/temperatures.sqlite"
-con <- dbConnect(RSQLite::SQLite(), db_path)
+load_dot_env(file = here::here(".Renviron"))
+stopifnot(Sys.getenv("DB_HOST") != "")
 nom_table <- "stats_normales"
+
+con <- dbConnect(
+  RPostgres::Postgres(),
+  dbname = Sys.getenv("DB_NAME"),
+  host = Sys.getenv("DB_HOST"),
+  port = as.integer(Sys.getenv("DB_PORT")),
+  user = Sys.getenv("DB_USER"),
+  password = Sys.getenv("DB_PASS")
+)
 
 # --- 3. REQUÊTE ADAPTÉE À 'stats_normales' ---
 # On groupe par ville et par période de référence

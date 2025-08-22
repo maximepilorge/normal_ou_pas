@@ -19,9 +19,9 @@ library(lubridate)
 library(ncdf4) 
 library(sf) 
 library(here)
+library(dotenv)
 
-dirApp <- "C:/Users/maxp1/Documents/guess_climate"
-key_cds <- "9e71b600-abdb-4b74-92f5-94721d1f774f"
+load_dot_env(file = here::here(".Renviron"))
 
 # -------------------- 
 # 2. Définition de la fonction principale 
@@ -37,7 +37,7 @@ recuperer_donnees_era5 <- function(villes_a_telecharger = NULL) {
   
   # --- Configuration des fichiers et des chemins --- 
   # Définition du chemin de sauvegarde et des noms de fichiers. 
-  path_to_save <- paste0(dirApp, "/data") 
+  path_to_save <- here::here("data")
   dir.create(path_to_save, showWarnings = FALSE) # Crée le répertoire s'il n'existe pas. 
   nom_fichier_final <- "era5_temperatures_france.rds" 
   full_path_final <- file.path(path_to_save, nom_fichier_final) 
@@ -254,7 +254,7 @@ recuperer_donnees_era5 <- function(villes_a_telecharger = NULL) {
 # 3. Exécution du script 
 # -------------------- 
 # On définit d'abord la clé d'API et l'utilisateur pour le service Copernicus
-wf_set_key(key = key_cds, user = "maxp17.mp@gmail.com") 
+wf_set_key(key = Sys.getenv("KEY_CDS"), user = "maxp17.mp@gmail.com") 
 
 # Appel de la fonction pour démarrer le processus de récupération des données
 recuperer_donnees_era5() 
