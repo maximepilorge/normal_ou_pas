@@ -28,7 +28,7 @@ con <- dbConnect(
   password = Sys.getenv("DB_PASS")
 )
 
-tryFinally({
+tryCatch({
   
   chemin_brutes_rds <- here::here("data", "era5_temperatures_france.rds")
 
@@ -45,7 +45,10 @@ tryFinally({
       tmax_lisse_365j = zoo::rollmean(temperature_max, k = 365, fill = NA, align = "center")
     ) %>%
     ungroup() %>%
-    mutate(jour_annee = yday(date))
+    mutate(    
+      mois = month(date),
+      jour_mois = day(date)
+      )
   
   dbWriteTable(con, "temperatures_max", as.data.frame(donnees_brutes), overwrite = TRUE)
   
@@ -75,7 +78,7 @@ tryFinally({
     
     donnees_avec_annee %>%
       filter(annee >= annee_debut & annee <= annee_fin) %>%
-      group_by(ville, jour_annee) %>%
+      group_by(ville, mois, jour_mois) %>%
       summarise(
         t_moy = mean(tmax_celsius, na.rm = TRUE),
         t_min = min(tmax_celsius, na.rm = TRUE),
@@ -112,7 +115,7 @@ tryFinally({
     filter(annee >= annee_debut & annee <= annee_fin) %>%
     select(-annee_debut, -annee_fin) %>%
     # On joint les stats correspondantes
-    left_join(stats_normales, by = c("ville", "jour_annee", "periode_ref")) %>%
+    left_join(stats_normales, by = c("ville", "mois", "jour_mois", "periode_ref")) %>%
     filter(!is.na(seuil_haut_p90)) %>%
     # On calcule la catégorie
     mutate(
@@ -131,12 +134,24 @@ tryFinally({
   dbWriteTable(con, "quiz_data_precalculee", as.data.frame(quiz_data_precalculee), overwrite = TRUE)
   
   
-  # --- Étape 4 : Créer des index pour optimiser les performances ---
-  cat("5/5 - Création des index pour l'optimisation...\n")
-  dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_temp_ville_date ON temperatures_max (ville, jour_annee);")
-  dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_temperatures_max_ville_full_date ON temperatures_max (ville, date);")
-  dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_quiz_main ON quiz_data_precalculee (periode_ref, categorie, mois);")
-  dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_stats_ville_periode ON stats_normales (ville, periode_ref);")
+  # --- Étape finale : Application de la structure sur la base locale ---
+  cat("Application de la structure (Clés, Contraintes, Index) sur la base de données locale...\n")
+  
+  # -- Table: temperatures_max --
+  dbExecute(con, "ALTER TABLE public.temperatures_max ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
+  dbExecute(con, "ALTER TABLE public.temperatures_max ADD CONSTRAINT uc_temperatures_max_ville_date UNIQUE (ville, date);")
+  
+  # -- Table: stats_normales --
+  dbExecute(con, "ALTER TABLE public.stats_normales ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
+  dbExecute(con, "ALTER TABLE public.stats_normales ADD CONSTRAINT uc_stats_normales_ville_jour_periode UNIQUE (ville, mois, jour_mois, periode_ref);")
+  dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_stats_ville_periode ON public.stats_normales (ville, periode_ref);")
+  
+  # -- Table: quiz_data_precalculee --
+  dbExecute(con, "ALTER TABLE public.quiz_data_precalculee ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
+  dbExecute(con, "ALTER TABLE public.quiz_data_precalculee ADD CONSTRAINT uc_quiz_data_ville_date_periode UNIQUE (ville, date, periode_ref);")
+  dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_quiz_main ON public.quiz_data_precalculee (periode_ref, categorie, mois);")
+  
+  cat("✅ Structure appliquée avec succès sur la base locale.\n")
   
 }, finally = {
   cat("Déconnexion de la base de données.\n")

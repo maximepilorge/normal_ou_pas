@@ -107,7 +107,7 @@ mod_quiz_server <- function(id, db_pool) {
       # 4. On utilise les données
       quiz_data(list(
         city = question_selectionnee$ville, 
-        date = as.Date(question_selectionnee$date, origin = "1970-01-01"), 
+        date = question_selectionnee$date, 
         temp = round(question_selectionnee$tmax_celsius, 1),
         correct_answer = question_selectionnee$categorie,
         normale_moy = round(question_selectionnee$t_moy, 1)
@@ -184,29 +184,27 @@ mod_quiz_server <- function(id, db_pool) {
       
       # On prépare les éléments du filtre
       annees_periode <- as.numeric(unlist(strsplit(input$periode_normale, "-")))
-      annee_debut <- annees_periode[1]; annee_fin <- annees_periode[2]
-      jour_quiz_str <- sprintf("%02d", lubridate::day(data$date))
-      mois_quiz_str <- sprintf("%02d", lubridate::month(data$date))
-      annee_debut_str <- as.character(annee_debut)
-      annee_fin_str <- as.character(annee_fin)
+      annee_debut <- annees_periode[1]
+      annee_fin <- annees_periode[2]
+      jour_quiz <- lubridate::day(data$date)
+      mois_quiz <- lubridate::month(data$date)
       
       # Ce code demande à la BDD de faire TOUT le filtrage avant le transfert
       donnees_historiques_jour <- tbl(db_pool, "temperatures_max") %>%
         filter(
           ville == !!data$city,
-          dbplyr::sql("EXTRACT(YEAR FROM TO_TIMESTAMP(date * 86400))") >= !!annee_debut,
-          dbplyr::sql("EXTRACT(YEAR FROM TO_TIMESTAMP(date * 86400))") <= !!annee_fin,
-          dbplyr::sql("TO_CHAR(TO_TIMESTAMP(date * 86400), 'MM')") == !!mois_quiz_str,
-          dbplyr::sql("TO_CHAR(TO_TIMESTAMP(date * 86400), 'DD')") == !!jour_quiz_str
+          year(date) >= !!annee_debut,
+          year(date) <= !!annee_fin,
+          month(date) == !!mois_quiz,
+          day(date) == !!jour_quiz
         ) %>%
         select(date, temperature_max) %>%
         collect() %>%
-        mutate(date = as.Date(date, origin = "1970-01-01")) %>% # On convertit la date après coup
         rename(tmax_celsius = temperature_max)
       
       # On stocke immédiatement les données pour le graphique
       boxplot_data(donnees_historiques_jour)
-      moyenne_reelle <- mean(donnees_historiques_jour$tmax_celsius, na.rm = TRUE)
+      moyenne_reelle <- data$normale_moy
       diff <- round(abs(data$temp - moyenne_reelle), 1)
       direction <- if (data$temp > moyenne_reelle) "supérieure" else "inférieure"
       
@@ -220,18 +218,16 @@ mod_quiz_server <- function(id, db_pool) {
         frequence_jour_text <- if (nombre_occurrences_jour == 0) paste0("Pour ce jour précis, un événement de cette intensité ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".") else paste0("Pour ce jour précis, une température égale ou ", direction, " est arrivée <b>", nombre_occurrences_jour, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
         
         saison <- get_season_info(data$date)
-        mois_saison_str <- sprintf("%02d", saison$mois)
-        
+
         donnees_historiques_saison <- tbl(db_pool, "temperatures_max") %>%
           filter(
             ville == !!data$city,
-            dbplyr::sql("EXTRACT(YEAR FROM TO_TIMESTAMP(date * 86400))") >= !!annee_debut_str,
-            dbplyr::sql("EXTRACT(YEAR FROM TO_TIMESTAMP(date * 86400))") <= !!annee_fin_str,
-            dbplyr::sql("TO_CHAR(TO_TIMESTAMP(date * 86400), 'MM')") %in% !!mois_saison_str
+            year(date) >= !!annee_debut,
+            year(date) <= !!annee_fin,
+            month(date) %in% !!saison$mois
           ) %>%
           select(date, temperature_max) %>%
           collect() %>%
-          mutate(date = as.Date(date, origin = "1970-01-01")) %>%
           rename(tmax_celsius = temperature_max)
         
         nombre_occurrences_saison <- if (direction == "supérieure") sum(donnees_historiques_saison$tmax_celsius >= data$temp, na.rm = TRUE) else sum(donnees_historiques_saison$tmax_celsius <= data$temp, na.rm = TRUE)

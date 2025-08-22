@@ -83,22 +83,19 @@ mod_visualisation_server <- function(id, db_pool, ville, periode, annee) {
       req(ville(), annee())
       
       annee_selectionnee <- annee()
-      start_day <- as.numeric(as.Date(paste0(annee_selectionnee, "-01-01")))
-      end_day <- as.numeric(as.Date(paste0(annee_selectionnee + 1, "-01-01")))
+      start_date <- as.Date(paste0(annee_selectionnee, "-01-01"))
+      end_date <- as.Date(paste0(annee_selectionnee + 1, "-01-01"))
 
       # On prépare l'année en chaîne de caractères pour la requête SQL
       donnees_preparees <- tbl(db_pool, "temperatures_max") %>%
         filter(
           ville == !!ville(),
-          date >= !!start_day,
-          date < !!end_day
+          date >= !!start_date,
+          date < !!end_date
         ) %>%
         select(date, temperature_max) %>%
         collect() %>%
-        rename(tmax_celsius = temperature_max) %>%
-        mutate(
-          date = as.Date(date, origin = "1970-01-01"),
-        )
+        rename(tmax_celsius = temperature_max)
       
       # On retourne le dataframe
       donnees_preparees
@@ -117,7 +114,8 @@ mod_visualisation_server <- function(id, db_pool, ville, periode, annee) {
           periode_ref == !!periode()
           ) %>%
         collect() %>%
-        mutate(date = as.Date(jour_annee - 1, origin = annee_origine))
+        filter(!(mois == 2 & jour_mois == 29 & !leap_year(as.Date(annee_origine)))) %>%
+        mutate(date = as.Date(paste(year(as.Date(annee_origine)), mois, jour_mois, sep = "-")))
       
       # Construction du graphique complet
       p <- ggplot() +

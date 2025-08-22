@@ -16,11 +16,6 @@ library(RPostgres)
 library(pool)
 library(dbplyr)
 
-# A travailler :
-# Corriger bug mode analyse (ne jamais regarder la fréquence pour les températures inférieures au seuil, toujours supérieures... ou alors on ajoute un input pour définir ça)
-# - Ajouter filtre par ville dans le quiz
-# - Statistiques via Google Analytics ?
-
 Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
 
 # --- CHARGEMENT DES DONNÉES ---

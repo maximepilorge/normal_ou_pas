@@ -20,7 +20,7 @@ mod_analyse_ui <- function(id) {
                       "Période d'analyse :", 
                       min = an_min_data, 
                       max = an_max_data, 
-                      value = c(1950, an_max_data), 
+                      value = c(an_min_data, an_max_data), 
                       sep = ""),
           checkboxInput(ns("lissage_toggle"), "Lisser la courbe (moyenne mobile 365 jours)", value = TRUE)
         ),
@@ -72,20 +72,19 @@ mod_analyse_server <- function(id, db_pool) {
       
       annee_debut <- input$annee_range_analyse[1]
       annee_fin <- input$annee_range_analyse[2]
-      start_day <- as.numeric(as.Date(paste0(input$annee_range_analyse[1], "-01-01")))
-      end_day <- as.numeric(as.Date(paste0(input$annee_range_analyse[2] + 1, "-01-01")))
+      start_date <- as.Date(paste0(input$annee_range_analyse[1], "-01-01"))
+      end_date <- as.Date(paste0(input$annee_range_analyse[2] + 1, "-01-01"))
       
       tbl(db_pool, "temperatures_max") %>%
         filter(
           ville == !!input$ville_analyse,
-          date >= !!start_day,
-          date < !!end_day
+          date >= !!start_date,
+          date < !!end_date
         ) %>%
         select(date, temperature_max, tmax_lisse_365j) %>%
         collect() %>%
         rename(tmax_celsius = temperature_max) %>%
         mutate(
-          date = as.Date(date, origin = "1970-01-01"),
           annee = year(date),
           mois = month(date)
         ) %>%
