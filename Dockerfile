@@ -21,8 +21,6 @@ WORKDIR /home/shinyusr
 COPY global.R global.R
 COPY server.R server.R
 COPY ui.R ui.R
-COPY .Renviron .Renviron
-COPY normal_ou_pas.Rproj normal_ou_pas.Rproj
 COPY data data
 COPY modules modules
 COPY www www

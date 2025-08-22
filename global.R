@@ -20,7 +20,6 @@ library(dbplyr)
 # Corriger bug mode analyse (ne jamais regarder la fréquence pour les températures inférieures au seuil, toujours supérieures... ou alors on ajoute un input pour définir ça)
 # - Ajouter filtre par ville dans le quiz
 # - Statistiques via Google Analytics ?
-# - Checker le calcul du nombre d'occurrences dans le quiz car j'ai un doute sur le fait qu'il soit correct
 
 Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
 

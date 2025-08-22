@@ -266,13 +266,13 @@ mod_quiz_server <- function(id, db_pool) {
           # Afficher tous les points historiques avec un peu de jitter
           geom_jitter(width = 0.1, alpha = 0.4, color = "darkblue") +
           # On ajoute la moyenne avec une forme et une couleur distinctes (losange doré)
-          stat_summary(fun = mean, geom = "point", shape = 23, size = 4, fill = "gold", color = "black") +
+          stat_summary(fun = mean, geom = "point", shape = 4, size = 4, color = "black") +
           # Ajouter le point de la température du quiz en rouge
-          annotate("point", x = "", y = data_quiz$temp, color = "red", size = 5, shape = 18) +
+          annotate("point", x = "", y = data_quiz$temp, color = "red", size = 4, shape = 4) +
           scale_y_continuous(labels = ~paste(.x, "°C")) +
           labs(
             title = paste("Distribution historique pour un", paste(format(data_quiz$date, "%d"), mois_fr[as.numeric(format(data_quiz$date, "%m"))]), "à", data_quiz$city),
-            subtitle = paste("Période", input$periode_normale, "- Le point rouge est la température du quiz."),
+            subtitle = paste("Période", input$periode_normale, "- Croix rouge : température du quiz. Croix noire : température moyenne."),
             x = "",
             y = "Température Maximale"
           ) +
