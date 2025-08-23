@@ -67,6 +67,8 @@ mod_quiz_server <- function(id, db_pool) {
       
       req(input$periode_normale)
     
+      message("Génération d'une nouvelle question !")
+      
       shinyjs::disable("new_question_btn")
       boxplot_data(NULL)
         
@@ -97,39 +99,20 @@ mod_quiz_server <- function(id, db_pool) {
       }
       
       # 3. On tire une ligne au hasard
-      total_count <- requete_base %>%
-        count() %>%
-        pull()
+      ids_possibles <- requete_base %>% pull(id)
+      message(paste0("Nombre de lignes renvoyées : ", length(ids_possibles)))
+      id_aleatoire <- sample(ids_possibles, 1)
+      message(paste0("ID ligne sélectionnée : ", id_aleatoire))
       
-      total_count <- as.integer(total_count)
-
-      req(total_count > 0)
-      
-      # Étape B: Choisir une position au hasard.
-      random_position <- sample.int(total_count, 1)
-      
-      # Étape C: Sélectionner l'ID de la ligne à cette position.
-      id_aleatoire <- requete_base %>%
-        # On spécifie l'ordre AVANT de numéroter les lignes
-        arrange(id) %>%
-        # row_number() utilisera implicitement l'ordre défini par arrange()
-        mutate(rn = row_number()) %>% 
-        filter(rn == !!random_position) %>%
-        pull(id)
-      
-      # S'assurer qu'on a bien récupéré un ID.
       req(id_aleatoire)
       
-      # Étape B: Récupérer la ligne complète correspondant à cet ID.
-      # C'est une requête par clé primaire, donc quasi-instantanée.
-      # On utilise la table complète car on a déjà l'ID, pas besoin de repartir de 'requete_base'.
+      # 4. On récupère les informations associées à la ligne sélectionnée au hasard
       question_selectionnee <- tbl(db_pool, "quiz_data_precalculee") %>%
         filter(id == !!id_aleatoire) %>%
         collect()
       
       req(nrow(question_selectionnee) > 0)
-      
-      # 4. On utilise les données
+
       quiz_data(list(
         city = question_selectionnee$ville, 
         date = question_selectionnee$date, 
@@ -137,6 +120,10 @@ mod_quiz_server <- function(id, db_pool) {
         correct_answer = question_selectionnee$categorie,
         normale_moy = round(question_selectionnee$t_moy, 1)
       ))
+      
+      message(paste0("Ville : ", question_selectionnee$ville))
+      message(paste0("Date : ", question_selectionnee$date))
+      message(paste0("Température : ", round(question_selectionnee$tmax_celsius, 1)))
       
       updateRadioButtons(session, "user_answer", selected = character(0))
       output$feedback_ui <- renderUI(NULL)

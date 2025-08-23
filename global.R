@@ -15,6 +15,7 @@ library(DBI)
 library(RPostgres)
 library(pool)
 library(dbplyr)
+library(glue)
 
 Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
 

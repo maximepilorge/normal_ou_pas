@@ -39,15 +39,6 @@ ALTER TABLE IF EXISTS public.quiz_data_precalculee RENAME TO quiz_data_precalcul
 -- 3. Mettre en production la nouvelle table
 ALTER TABLE preparation.quiz_data_precalculee SET SCHEMA public;
 
-
--- --- OPTIMISATION ---
--- Mettre à jour les statistiques pour le planificateur de requêtes après le changement massif de données.
-RAISE NOTICE 'Mise à jour des statistiques...';
-VACUUM ANALYZE public.temperatures_max;
-VACUUM ANALYZE public.stats_normales;
-VACUUM ANALYZE public.quiz_data_precalculee;
-
-
 RAISE NOTICE 'Déploiement terminé avec succès !';
 -- Validation de toutes les opérations ci-dessus
 COMMIT;
