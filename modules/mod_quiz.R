@@ -176,14 +176,6 @@ mod_quiz_server <- function(id, db_pool) {
       
       # On prépare les éléments du filtre
       annees_periode <- as.numeric(unlist(strsplit(input$periode_normale, "-")))
-      annee_debut <- annees_periode[1]; annee_fin <- annees_periode[2]
-      jour_quiz_str <- sprintf("%02d", lubridate::day(data$date))
-      mois_quiz_str <- sprintf("%02d", lubridate::month(data$date))
-      annee_debut_str <- as.character(annee_debut)
-      annee_fin_str <- as.character(annee_fin)
-      
-      # On prépare les éléments du filtre
-      annees_periode <- as.numeric(unlist(strsplit(input$periode_normale, "-")))
       annee_debut <- annees_periode[1]
       annee_fin <- annees_periode[2]
       jour_quiz <- lubridate::day(data$date)
@@ -239,41 +231,70 @@ mod_quiz_server <- function(id, db_pool) {
       feedback_body <- paste0("<b>", intro_message, "</b><br><br>", explication_text)
       
       # --- BOXPLOT ---
-      output$feedback_boxplot <- renderPlot({
+      output$feedback_boxplot <- renderPlotly({
         
         req(boxplot_data())
         
         data_quiz <- quiz_data()
         donnees_historiques_jour_plot <- boxplot_data()
+
+        main_title <- paste("Distribution historique pour un", paste(format(data_quiz$date, "%d"), mois_fr[as.numeric(format(data_quiz$date, "%m"))]), "à", data_quiz$city)
+        subtitle_text <- paste("Période", input$periode_normale)
+        full_title <- paste0(main_title, "<br><sup>", subtitle_text, "</sup><br>")
         
-        # Filtrer les données historiques pour le jour et la ville du quiz
-        annees_periode <- as.numeric(unlist(strsplit(input$periode_normale, "-")))
-        annee_debut <- annees_periode[1]
-        annee_fin <- annees_periode[2]
-        jour_quiz_str <- sprintf("%02d", lubridate::day(data_quiz$date))
-        mois_quiz_str <- sprintf("%02d", lubridate::month(data_quiz$date))
-        annee_debut_str <- as.character(annee_debut)
-        annee_fin_str <- as.character(annee_fin)
+        points_specifiques <- data.frame(
+          normale_moy = data_quiz$normale_moy,
+          temp_quiz = data_quiz$temp
+        )
         
         # Création du graphique
-        ggplot(donnees_historiques_jour_plot, aes(x = "", y = tmax_celsius)) +
+        p <- ggplot(donnees_historiques_jour_plot, aes(x = "", y = tmax_celsius)) +
           # Boxplot basé sur les données historiques
           geom_boxplot(width = 0.3, fill = "skyblue", alpha = 0.7) +
           # Afficher tous les points historiques avec un peu de jitter
-          geom_jitter(width = 0.1, alpha = 0.4, color = "darkblue") +
-          # On ajoute la moyenne avec une forme et une couleur distinctes (losange doré)
-          stat_summary(fun = mean, geom = "point", shape = 4, size = 4, color = "black") +
+          geom_jitter(
+            aes(text = paste(
+              "Date :", format(date, "%d %b %Y"),
+              "<br>Température :", round(tmax_celsius, 1), "°C"
+            )),
+            width = 0.1, alpha = 0.4, color = "darkblue"
+          ) +
+          # On ajoute la moyenne avec une forme et une couleur distinctes
+          geom_point(
+            data = points_specifiques,
+            aes(x = "", y = normale_moy, text = paste(
+              "Moyenne historique :", normale_moy, "°C"
+            )),
+            shape = 4,
+            size = 4, 
+            color = "black"
+          ) +
           # Ajouter le point de la température du quiz en rouge
-          annotate("point", x = "", y = data_quiz$temp, color = "red", size = 4, shape = 4) +
+          geom_point(
+            data = points_specifiques,
+            aes(x = "", y = temp_quiz, text = paste(
+              "Votre observation :", temp_quiz, "°C"
+            )),
+            color = "red", size = 4, shape = 4, stroke = 1.5
+          ) +
           scale_y_continuous(labels = ~paste(.x, "°C")) +
           labs(
-            title = paste("Distribution historique pour un", paste(format(data_quiz$date, "%d"), mois_fr[as.numeric(format(data_quiz$date, "%m"))]), "à", data_quiz$city),
-            subtitle = paste("Période", input$periode_normale, "- Croix rouge : température du quiz. Croix noire : température moyenne."),
+            title = main_title,
             x = "",
             y = "Température Maximale"
           ) +
           theme_minimal(base_size = 14) +
           theme(plot.title = element_text(face = "bold"))
+        
+        ggplotly(p, tooltip = "text") %>%
+          # On verrouille les axes pour désactiver le zoom et le déplacement
+          layout(
+            title = list(text = full_title, x = 0.5),
+            xaxis = list(fixedrange = TRUE),
+            yaxis = list(fixedrange = TRUE)
+          ) %>%
+          config(displayModeBar = FALSE)
+        
       })
       
       # --- Affichage du texte et du graphique dans l'UI ---
@@ -282,7 +303,7 @@ mod_quiz_server <- function(id, db_pool) {
           HTML(feedback_body),
           hr(),               
           h4("Visualisation de la distribution"),
-          plotOutput(session$ns("feedback_boxplot"))
+          plotlyOutput(session$ns("feedback_boxplot"))
         )
       })
       
