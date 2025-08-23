@@ -59,7 +59,7 @@ tryCatch({
     table_prod_id <- Id(schema = "preparation", table = nom_table)
     dbWriteTable(con_prod, table_prod_id, donnees, overwrite = TRUE)
     
-    cat("     Écriture terminée.\n")
+    cat("Écriture terminée.\n")
   }
   
   cat("\n✅ Transfert de toutes les tables terminé avec succès !\n")
@@ -67,23 +67,26 @@ tryCatch({
   cat("\nApplication de la structure (Clés, Contraintes, Index) sur le schéma 'preparation'...\n")
   
   # -- Table: temperatures_max --
+  cat("\nTable 'temperatures_max'...\n")
   dbExecute(con_prod, "ALTER TABLE preparation.temperatures_max ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
   dbExecute(con_prod, "ALTER TABLE preparation.temperatures_max ADD CONSTRAINT uc_temperatures_max_ville_date UNIQUE (ville, date);")
-  dbExecute(con, "VACUUM ANALYZE preparation.temperatures_max;")
+  dbExecute(con, "CREATE INDEX idx_temp_recherche_jour ON preparation.temperatures_max (ville, mois, jour_mois, annee);")
+  dbExecute(con_prod, "VACUUM ANALYZE preparation.temperatures_max;")
   
   # -- Table: stats_normales --
+  cat("\nTable 'stats_normales'...\n")
   dbExecute(con_prod, "ALTER TABLE preparation.stats_normales ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
   dbExecute(con_prod, "ALTER TABLE preparation.stats_normales ADD CONSTRAINT uc_stats_normales_ville_jour_periode UNIQUE (ville, mois, jour_mois, periode_ref);")
   dbExecute(con_prod, "CREATE INDEX IF NOT EXISTS idx_stats_ville_periode ON preparation.stats_normales (ville, periode_ref);")
-  dbExecute(con, "VACUUM ANALYZE preparation.stats_normales;")
+  dbExecute(con_prod, "VACUUM ANALYZE preparation.stats_normales;")
   
   # -- Table: quiz_data_precalculee --
+  cat("\nTable 'quiz_data_precalculee'...\n")
   dbExecute(con_prod, "ALTER TABLE preparation.quiz_data_precalculee ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
   dbExecute(con_prod, "ALTER TABLE preparation.quiz_data_precalculee ADD CONSTRAINT uc_quiz_data_ville_date_periode UNIQUE (ville, date, periode_ref);")
-  dbExecute(con, "CREATE INDEX idx_quiz_optimise ON preparation.quiz_data_precalculee (periode_ref, categorie, ville, mois);")
-  dbExecute(con, "CREATE INDEX idx_quiz_saison ON preparation.quiz_data_precalculee (periode_ref, categorie, mois);")
-  dbExecute(con, "CREATE INDEX idx_quiz_couvrant_perf ON preparation.quiz_data_precalculee USING btree (periode_ref, categorie, id);")
-  dbExecute(con, "VACUUM ANALYZE preparation.quiz_data_precalculee;")
+  dbExecute(con_prod, "CREATE INDEX idx_quiz_optimise ON preparation.quiz_data_precalculee (periode_ref, categorie, ville, mois, jour_mois);")
+  dbExecute(con_prod, "CREATE INDEX idx_quiz_saison ON preparation.quiz_data_precalculee (periode_ref, categorie, mois);")
+  dbExecute(con_prod, "VACUUM ANALYZE preparation.quiz_data_precalculee;")
   
   cat("✅ Structure appliquée avec succès.\n")
   

@@ -67,7 +67,7 @@ mod_quiz_server <- function(id, db_pool) {
       
       req(input$periode_normale)
       
-      message("Génération d'une nouvelle question (méthode par tirage de valeur) !")
+      message("Génération d'une nouvelle question !")
       
       shinyjs::disable("new_question_btn")
       boxplot_data(NULL)
@@ -100,7 +100,7 @@ mod_quiz_server <- function(id, db_pool) {
           prob = c(0.3, 0.2, 0.5)
         )
         
-        # On tire un jour et un mois au hasard (sur une année bissextile pour inclure le 29/02)
+        # On tire un jour et un mois au hasard
         date_aleatoire <- jours_possibles %>% sample_n(1) %>% pull(date)
         jour_aleatoire <- day(date_aleatoire)
         mois_aleatoire <- month(date_aleatoire)
@@ -117,8 +117,8 @@ mod_quiz_server <- function(id, db_pool) {
             periode_ref == !!input$periode_normale,
             categorie == !!categorie_choisie,
             ville == !!ville_choisie,
-            month(date) == !!mois_aleatoire,
-            day(date) == !!jour_aleatoire
+            mois == !!mois_aleatoire,
+            jour_mois == !!jour_aleatoire
           )
         
         # --- ÉTAPE 3 : Récupérer min, max et moyenne en une seule requête ---
@@ -235,17 +235,16 @@ mod_quiz_server <- function(id, db_pool) {
       annees_periode <- as.numeric(unlist(strsplit(input$periode_normale, "-")))
       annee_debut <- annees_periode[1]
       annee_fin <- annees_periode[2]
+      annees_a_filtrer <- seq(annee_debut, annee_fin)
       jour_quiz <- lubridate::day(data$date)
       mois_quiz <- lubridate::month(data$date)
       
-      # Ce code demande à la BDD de faire TOUT le filtrage avant le transfert
       donnees_historiques_jour <- tbl(db_pool, "temperatures_max") %>%
         filter(
           ville == !!data$city,
-          year(date) >= !!annee_debut,
-          year(date) <= !!annee_fin,
-          month(date) == !!mois_quiz,
-          day(date) == !!jour_quiz
+          annee %in% !!annees_a_filtrer,
+          mois == !!mois_quiz,
+          jour_mois == !!jour_quiz
         ) %>%
         select(date, temperature_max) %>%
         collect() %>%
@@ -271,9 +270,8 @@ mod_quiz_server <- function(id, db_pool) {
         donnees_historiques_saison <- tbl(db_pool, "temperatures_max") %>%
           filter(
             ville == !!data$city,
-            year(date) >= !!annee_debut,
-            year(date) <= !!annee_fin,
-            month(date) %in% !!saison$mois
+            annee %in% !!annees_a_filtrer,
+            mois %in% !!saison$mois
           ) %>%
           select(date, temperature_max) %>%
           collect() %>%

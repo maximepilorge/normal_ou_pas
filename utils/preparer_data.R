@@ -46,6 +46,7 @@ tryCatch({
     ) %>%
     ungroup() %>%
     mutate(    
+      annee = year(date),
       mois = month(date),
       jour_mois = day(date)
       )
@@ -57,8 +58,7 @@ tryCatch({
   
   # On ajoute l'année aux données brutes pour pouvoir filtrer
   donnees_avec_annee <- donnees_brutes %>%
-    rename(tmax_celsius = temperature_max) %>%
-    mutate(annee = year(date))
+    rename(tmax_celsius = temperature_max)
   
   # On définit les périodes de référence
   periodes_ref <- list(
@@ -125,7 +125,7 @@ tryCatch({
     ) %>%
     select(
       ville, date, tmax_celsius, periode_ref, 
-      categorie, mois, t_moy
+      categorie, mois, jour_mois, t_moy
     )
   
   dbWriteTable(con, "quiz_data_precalculee", as.data.frame(quiz_data_precalculee), overwrite = TRUE)
@@ -135,22 +135,25 @@ tryCatch({
   cat("Application de la structure (Clés, Contraintes, Index) sur la base de données locale...\n")
   
   # -- Table: temperatures_max --
+  cat("\nTable 'temperatures_max'...\n")
   dbExecute(con, "ALTER TABLE public.temperatures_max ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
   dbExecute(con, "ALTER TABLE public.temperatures_max ADD CONSTRAINT uc_temperatures_max_ville_date UNIQUE (ville, date);")
+  dbExecute(con, "CREATE INDEX idx_temp_recherche_jour ON public.temperatures_max (ville, mois, jour_mois, annee);")
   dbExecute(con, "VACUUM ANALYZE public.temperatures_max;")
   
   # -- Table: stats_normales --
+  cat("\nTable 'stats_normales'...\n")
   dbExecute(con, "ALTER TABLE public.stats_normales ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
   dbExecute(con, "ALTER TABLE public.stats_normales ADD CONSTRAINT uc_stats_normales_ville_jour_periode UNIQUE (ville, mois, jour_mois, periode_ref);")
   dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_stats_ville_periode ON public.stats_normales (ville, periode_ref);")
   dbExecute(con, "VACUUM ANALYZE public.stats_normales;")
   
   # -- Table: quiz_data_precalculee --
+  cat("\nTable 'quiz_data_precalculee'...\n")
   dbExecute(con, "ALTER TABLE public.quiz_data_precalculee ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
   dbExecute(con, "ALTER TABLE public.quiz_data_precalculee ADD CONSTRAINT uc_quiz_data_ville_date_periode UNIQUE (ville, date, periode_ref);")
-  dbExecute(con, "CREATE INDEX idx_quiz_optimise ON public.quiz_data_precalculee (periode_ref, categorie, ville, mois);")
+  dbExecute(con, "CREATE INDEX idx_quiz_optimise ON public.quiz_data_precalculee (periode_ref, categorie, ville, mois, jour_mois);")
   dbExecute(con, "CREATE INDEX idx_quiz_saison ON public.quiz_data_precalculee (periode_ref, categorie, mois);")
-  dbExecute(con, "CREATE INDEX idx_quiz_couvrant_perf ON public.quiz_data_precalculee USING btree (periode_ref, categorie, id)")
   dbExecute(con, "VACUUM ANALYZE public.quiz_data_precalculee;")
   
   cat("✅ Structure appliquée avec succès sur la base locale.\n")
