@@ -1,34 +1,53 @@
--- deploy.sql
--- Script pour mettre en production les nouvelles tables
--- préparées dans le schéma "preparation".
+-- ====================================================================
+-- SCRIPT DE DEPLOIEMENT ATOMIQUE (BLUE/GREEN)
+-- Met en production les tables du schéma 'preparation'.
+-- Stratégie :
+-- 1. Nettoie l'ancien backup (_old).
+-- 2. Archive la version actuelle (public -> _old).
+-- 3. Déploie la nouvelle version (preparation -> public).
+-- ====================================================================
 
--- Début de la transaction
+-- Début de la transaction. Tout ou rien.
 BEGIN;
 
 -- --- Table: temperatures_max ---
-ALTER TABLE public.temperatures_max RENAME CONSTRAINT temperatures_max_pkey TO temperatures_max_pkey_old;
-ALTER TABLE public.temperatures_max RENAME CONSTRAINT uc_temperatures_max_ville_date TO uc_temperatures_max_ville_date_old;
-ALTER TABLE public.temperatures_max RENAME TO temperatures_max_old;
+RAISE NOTICE 'Déploiement de la table temperatures_max...';
+-- 1. Supprimer l'ancienne table de backup (CASCADE supprime aussi séquences, index et contraintes associés)
+DROP TABLE IF EXISTS public.temperatures_max_old CASCADE;
+-- 2. Archiver la table de production actuelle en la renommant (si elle existe)
+ALTER TABLE IF EXISTS public.temperatures_max RENAME TO temperatures_max_old;
+-- 3. Mettre en production la nouvelle table en la déplaçant du schéma 'preparation'
 ALTER TABLE preparation.temperatures_max SET SCHEMA public;
 
+
 -- --- Table: stats_normales ---
-ALTER TABLE public.stats_normales RENAME CONSTRAINT stats_normales_pkey TO stats_normales_pkey_old;
-ALTER TABLE public.stats_normales RENAME CONSTRAINT uc_stats_normales_ville_jour_periode TO uc_stats_normales_ville_jour_periode_old;
-ALTER INDEX public.idx_stats_ville_periode RENAME TO idx_stats_ville_periode_old;
-ALTER TABLE public.stats_normales RENAME TO stats_normales_old;
+RAISE NOTICE 'Déploiement de la table stats_normales...';
+-- 1. Supprimer l'ancienne table de backup
+DROP TABLE IF EXISTS public.stats_normales_old CASCADE;
+-- 2. Archiver la table de production actuelle
+ALTER TABLE IF EXISTS public.stats_normales RENAME TO stats_normales_old;
+-- 3. Mettre en production la nouvelle table
 ALTER TABLE preparation.stats_normales SET SCHEMA public;
 
+
 -- --- Table: quiz_data_precalculee ---
-ALTER TABLE public.quiz_data_precalculee RENAME CONSTRAINT quiz_data_precalculee_pkey TO quiz_data_precalculee_pkey_old;
-ALTER TABLE public.quiz_data_precalculee RENAME CONSTRAINT uc_quiz_data_ville_date_periode TO uc_quiz_data_ville_date_periode_old;
-ALTER INDEX public.idx_quiz_main RENAME TO idx_quiz_main_old;
-ALTER TABLE public.quiz_data_precalculee RENAME TO quiz_data_precalculee_old;
+RAISE NOTICE 'Déploiement de la table quiz_data_precalculee...';
+-- 1. Supprimer l'ancienne table de backup
+DROP TABLE IF EXISTS public.quiz_data_precalculee_old CASCADE;
+-- 2. Archiver la table de production actuelle
+ALTER TABLE IF EXISTS public.quiz_data_precalculee RENAME TO quiz_data_precalculee_old;
+-- 3. Mettre en production la nouvelle table
 ALTER TABLE preparation.quiz_data_precalculee SET SCHEMA public;
 
+
+-- --- OPTIMISATION ---
+-- Mettre à jour les statistiques pour le planificateur de requêtes après le changement massif de données.
+RAISE NOTICE 'Mise à jour des statistiques...';
+VACUUM ANALYZE public.temperatures_max;
+VACUUM ANALYZE public.stats_normales;
+VACUUM ANALYZE public.quiz_data_precalculee;
+
+
+RAISE NOTICE 'Déploiement terminé avec succès !';
 -- Validation de toutes les opérations ci-dessus
 COMMIT;
-
--- --- NETTOYAGE ---
--- DROP TABLE public.temperatures_max_old;
--- DROP TABLE public.stats_normales_old;
--- DROP TABLE public.quiz_data_precalculee_old;

@@ -111,9 +111,7 @@ tryCatch({
   
   # Jointure pour associer chaque année à TOUTES les périodes de référence auxquelles elle appartient
   quiz_data_precalculee <- donnees_avec_annee %>%
-    inner_join(periods_df, by = character()) %>%
-    filter(annee >= annee_debut & annee <= annee_fin) %>%
-    select(-annee_debut, -annee_fin) %>%
+    cross_join(tibble(periode_ref = names(periodes_ref))) %>%
     # On joint les stats correspondantes
     left_join(stats_normales, by = c("ville", "mois", "jour_mois", "periode_ref")) %>%
     filter(!is.na(seuil_haut_p90)) %>%
@@ -124,7 +122,6 @@ tryCatch({
         tmax_celsius < seuil_bas_p10  ~ "En-dessous des normales",
         TRUE                          ~ "Dans les normales de saison"
       ),
-      mois = month(date)
     ) %>%
     select(
       ville, date, tmax_celsius, periode_ref, 

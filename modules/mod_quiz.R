@@ -97,9 +97,34 @@ mod_quiz_server <- function(id, db_pool) {
       }
       
       # 3. On tire une ligne au hasard
-      question_selectionnee <- requete_base %>%
-        arrange(dbplyr::sql("RANDOM()")) %>%
-        head(1) %>%
+      total_count <- requete_base %>%
+        count() %>%
+        pull()
+      
+      total_count <- as.integer(total_count)
+
+      req(total_count > 0)
+      
+      # Étape B: Choisir une position au hasard.
+      random_position <- sample.int(total_count, 1)
+      
+      # Étape C: Sélectionner l'ID de la ligne à cette position.
+      id_aleatoire <- requete_base %>%
+        # On spécifie l'ordre AVANT de numéroter les lignes
+        arrange(id) %>%
+        # row_number() utilisera implicitement l'ordre défini par arrange()
+        mutate(rn = row_number()) %>% 
+        filter(rn == !!random_position) %>%
+        pull(id)
+      
+      # S'assurer qu'on a bien récupéré un ID.
+      req(id_aleatoire)
+      
+      # Étape B: Récupérer la ligne complète correspondant à cet ID.
+      # C'est une requête par clé primaire, donc quasi-instantanée.
+      # On utilise la table complète car on a déjà l'ID, pas besoin de repartir de 'requete_base'.
+      question_selectionnee <- tbl(db_pool, "quiz_data_precalculee") %>%
+        filter(id == !!id_aleatoire) %>%
         collect()
       
       req(nrow(question_selectionnee) > 0)
