@@ -71,6 +71,12 @@ mod_quiz_server <- function(id, db_pool) {
       
       shinyjs::disable("new_question_btn")
       boxplot_data(NULL)
+      
+      # ÉTAPE 1 : Emprunter une connexion au pool IMMÉDIATEMENT
+      con <- pool::poolCheckout(db_pool)
+      
+      # ÉTAPE 2 : S'assurer que la connexion est retournée à la fin
+      on.exit(pool::poolReturn(con))
         
       # 1. On choisit une catégorie
       categories_possibles <- c("Au-dessus des normales", "En-dessous des normales", "Dans les normales de saison")
@@ -78,7 +84,7 @@ mod_quiz_server <- function(id, db_pool) {
       categorie_choisie <- sample(categories_possibles, size = 1, prob = prob_vector)
       
       # 2. On construit une requête de base sur la nouvelle table
-      requete_base <- tbl(db_pool, "quiz_data_precalculee") %>%
+      requete_base <- tbl(con, "quiz_data_precalculee") %>%
         filter(
           periode_ref == !!input$periode_normale,
           categorie == !!categorie_choisie
@@ -99,15 +105,30 @@ mod_quiz_server <- function(id, db_pool) {
       }
       
       # 3. On tire une ligne au hasard
-      ids_possibles <- requete_base %>% pull(id)
-      message(paste0("Nombre de lignes renvoyées : ", length(ids_possibles)))
-      id_aleatoire <- sample(ids_possibles, 1)
-      message(paste0("ID ligne sélectionnée : ", id_aleatoire))
+      requete_ids_base <- requete_base %>% select(id)
       
+      total_lignes <- requete_ids_base %>% 
+        count() %>% 
+        pull(n)
+      
+      total_lignes <- as.integer(total_lignes)
+      req(total_lignes > 0)
+      
+      # 4. On choisit un offset
+      offset_aleatoire <- sample(0:(total_lignes - 1), 1)
+      
+      # 5. On génère la requête SQL. sql_render voit maintenant 'con' et fonctionne.
+      requete_sql_ids <- dbplyr::sql_render(requete_ids_base)
+      
+      # 6. On construit la requête finale
+      requete_sql_finale_id <- glue::glue(
+        "{requete_sql_ids} ORDER BY id OFFSET {offset_aleatoire} LIMIT 1"
+      )
+      id_aleatoire <- DBI::dbGetQuery(con, requete_sql_finale_id)$id
+      
+      # 7. On exécute la requête en utilisant 'con'
       req(id_aleatoire)
-      
-      # 4. On récupère les informations associées à la ligne sélectionnée au hasard
-      question_selectionnee <- tbl(db_pool, "quiz_data_precalculee") %>%
+      question_selectionnee <- tbl(con, "quiz_data_precalculee") %>%
         filter(id == !!id_aleatoire) %>%
         collect()
       
@@ -285,7 +306,7 @@ mod_quiz_server <- function(id, db_pool) {
           geom_point(
             data = points_specifiques,
             aes(x = "", y = temp_quiz, text = paste(
-              "Votre observation :", temp_quiz, "°C"
+              "Température du quiz :", temp_quiz, "°C"
             )),
             color = "red", size = 4, shape = 4, stroke = 1.5
           ) +

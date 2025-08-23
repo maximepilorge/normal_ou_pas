@@ -150,6 +150,7 @@ tryCatch({
   dbExecute(con, "ALTER TABLE public.quiz_data_precalculee ADD CONSTRAINT uc_quiz_data_ville_date_periode UNIQUE (ville, date, periode_ref);")
   dbExecute(con, "CREATE INDEX idx_quiz_optimise ON public.quiz_data_precalculee (periode_ref, categorie, ville, mois);")
   dbExecute(con, "CREATE INDEX idx_quiz_saison ON public.quiz_data_precalculee (periode_ref, categorie, mois);")
+  dbExecute(con, "CREATE INDEX idx_quiz_couvrant_perf ON public.quiz_data_precalculee USING btree (periode_ref, categorie, id)")
   dbExecute(con, "VACUUM ANALYZE public.quiz_data_precalculee;")
   
   cat("✅ Structure appliquée avec succès sur la base locale.\n")
