@@ -19,7 +19,7 @@ mod_quiz_ui <- function(id) {
                       "Filtrer par ville (optionnel) :",
                       choices = c("Toutes les villes", villes_triees),
                       selected = "Toutes les villes",
-                      options = list('live-search' = TRUE)),
+                      options = list('live-search' = FALSE)),
           pickerInput(ns("saison_select"), 
                            "Filtrer par saison (optionnel) :",
                            choices = c("Toutes les saisons", "Hiver", "Printemps", "Été", "Automne"),
@@ -66,86 +66,110 @@ mod_quiz_server <- function(id, db_pool) {
     observeEvent(input$new_question_btn, {
       
       req(input$periode_normale)
-    
-      message("Génération d'une nouvelle question !")
+      
+      message("Génération d'une nouvelle question (méthode par tirage de valeur) !")
       
       shinyjs::disable("new_question_btn")
       boxplot_data(NULL)
       
-      # ÉTAPE 1 : Emprunter une connexion au pool IMMÉDIATEMENT
-      con <- pool::poolCheckout(db_pool)
+      # Boucle de robustesse : on essaie jusqu'à 10 fois de trouver un combo valide
+      # pour éviter une boucle infinie si les filtres sont trop stricts.
+      question_valide <- NULL
       
-      # ÉTAPE 2 : S'assurer que la connexion est retournée à la fin
-      on.exit(pool::poolReturn(con))
-        
-      # 1. On choisit une catégorie
-      categories_possibles <- c("Au-dessus des normales", "En-dessous des normales", "Dans les normales de saison")
-      prob_vector <- c(0.3, 0.2, 0.5) # Défini manuellement
-      categorie_choisie <- sample(categories_possibles, size = 1, prob = prob_vector)
+      # On prépare la liste des jours possibles en amont de la boucle
+      # 1. On crée une table de tous les jours d'une année bissextile
+      tous_les_jours <- tibble(date = seq(as.Date("2024-01-01"), as.Date("2024-12-31"), by = "day")) %>%
+        mutate(mois = month(date))
       
-      # 2. On construit une requête de base sur la nouvelle table
-      requete_base <- tbl(con, "quiz_data_precalculee") %>%
-        filter(
-          periode_ref == !!input$periode_normale,
-          categorie == !!categorie_choisie
-        )
-      
-      # On ajoute le filtre sur la ville s'il y a lieu
-      if (input$ville_select_quiz != "Toutes les villes") {
-        requete_base <- requete_base %>%
-          filter(ville == !!input$ville_select_quiz)
-      }
-      
-      # On ajoute le filtre saisonnier s'il y a lieu
-      if (input$saison_select != "Toutes les saisons") {
+      # 2. On filtre cette table si une saison est sélectionnée
+      jours_possibles <- if (input$saison_select != "Toutes les saisons") {
         saison_mois <- switch(input$saison_select,
-                              "Hiver"     = c(12, 1, 2), "Printemps" = c(3, 4, 5),
-                              "Été"       = c(6, 7, 8), "Automne"   = c(9, 10, 11))
-        requete_base <- requete_base %>% filter(mois %in% !!saison_mois)
+                              "Hiver"   = c(12, 1, 2), "Printemps" = c(3, 4, 5),
+                              "Été"     = c(6, 7, 8), "Automne"   = c(9, 10, 11))
+        tous_les_jours %>% filter(mois %in% saison_mois)
+      } else {
+        tous_les_jours
       }
       
-      # 3. On tire une ligne au hasard
-      requete_ids_base <- requete_base %>% select(id)
+      for (i in 1:10) {
+        
+        # --- ÉTAPE 1 : Tirer une réponse, un jour et une ville ---
+        categorie_choisie <- sample(
+          c("Au-dessus des normales", "En-dessous des normales", "Dans les normales de saison"),
+          size = 1,
+          prob = c(0.3, 0.2, 0.5)
+        )
+        
+        # On tire un jour et un mois au hasard (sur une année bissextile pour inclure le 29/02)
+        date_aleatoire <- jours_possibles %>% sample_n(1) %>% pull(date)
+        jour_aleatoire <- day(date_aleatoire)
+        mois_aleatoire <- month(date_aleatoire)
+        
+        ville_choisie <- if (input$ville_select_quiz == "Toutes les villes") {
+          sample(villes_triees, 1)
+        } else {
+          input$ville_select_quiz
+        }
+        
+        # --- ÉTAPE 2 : Filtrer les données ---
+        requete_base <- tbl(db_pool, "quiz_data_precalculee") %>%
+          filter(
+            periode_ref == !!input$periode_normale,
+            categorie == !!categorie_choisie,
+            ville == !!ville_choisie,
+            month(date) == !!mois_aleatoire,
+            day(date) == !!jour_aleatoire
+          )
+        
+        # --- ÉTAPE 3 : Récupérer min, max et moyenne en une seule requête ---
+        bornes_et_moyenne <- requete_base %>%
+          summarise(
+            min_temp = min(tmax_celsius, na.rm = TRUE),
+            max_temp = max(tmax_celsius, na.rm = TRUE),
+            normale_moy = min(t_moy, na.rm = TRUE)
+          ) %>%
+          collect()
+        
+        # On vérifie si on a un résultat valide
+        if (nrow(bornes_et_moyenne) > 0 && is.finite(bornes_et_moyenne$min_temp)) {
+          question_valide <- list(
+            bornes = bornes_et_moyenne,
+            categorie = categorie_choisie,
+            ville = ville_choisie,
+            date = date_aleatoire
+          )
+          break # On a trouvé, on sort de la boucle
+        }
+      }
       
-      total_lignes <- requete_ids_base %>% 
-        count() %>% 
-        pull(n)
+      req(question_valide, cancelOutput = TRUE)
       
-      total_lignes <- as.integer(total_lignes)
-      req(total_lignes > 0)
+      # --- ÉTAPE 4 : Tirer une température au hasard entre les bornes ---
+      min_val <- round(question_valide$bornes$min_temp, 1)
+      max_val <- round(question_valide$bornes$max_temp, 1)
       
-      # 4. On choisit un offset
-      offset_aleatoire <- sample(0:(total_lignes - 1), 1)
-      
-      # 5. On génère la requête SQL. sql_render voit maintenant 'con' et fonctionne.
-      requete_sql_ids <- dbplyr::sql_render(requete_ids_base)
-      
-      # 6. On construit la requête finale
-      requete_sql_finale_id <- glue::glue(
-        "{requete_sql_ids} ORDER BY id OFFSET {offset_aleatoire} LIMIT 1"
-      )
-      id_aleatoire <- DBI::dbGetQuery(con, requete_sql_finale_id)$id
-      
-      # 7. On exécute la requête en utilisant 'con'
-      req(id_aleatoire)
-      question_selectionnee <- tbl(con, "quiz_data_precalculee") %>%
-        filter(id == !!id_aleatoire) %>%
-        collect()
-      
-      req(nrow(question_selectionnee) > 0)
+      temp_selectionnee <- if (min_val == max_val) {
+        min_val
+      } else {
+        # On crée une séquence de valeurs possibles avec un pas de 0.1
+        valeurs_possibles <- seq(min_val, max_val, by = 0.1)
+        sample(valeurs_possibles, 1)
+      }
 
+      # --- ÉTAPE 5 : Alimenter quiz_data avec ces informations ---
       quiz_data(list(
-        city = question_selectionnee$ville, 
-        date = question_selectionnee$date, 
-        temp = round(question_selectionnee$tmax_celsius, 1),
-        correct_answer = question_selectionnee$categorie,
-        normale_moy = round(question_selectionnee$t_moy, 1)
+        city = question_valide$ville,
+        date = question_valide$date,
+        temp = temp_selectionnee,
+        correct_answer = question_valide$categorie,
+        normale_moy = round(question_valide$bornes$normale_moy, 1)
       ))
       
-      message(paste0("Ville : ", question_selectionnee$ville))
-      message(paste0("Date : ", question_selectionnee$date))
-      message(paste0("Température : ", round(question_selectionnee$tmax_celsius, 1)))
+      message(paste0("Ville : ", quiz_data()$city))
+      message(paste0("Date (jour/mois) : ", format(quiz_data()$date, "%d/%m")))
+      message(paste0("Température générée : ", quiz_data()$temp))
       
+      # On met à jour l'UI
       updateRadioButtons(session, "user_answer", selected = character(0))
       output$feedback_ui <- renderUI(NULL)
       shinyjs::enable("user_answer")
@@ -256,7 +280,14 @@ mod_quiz_server <- function(id, db_pool) {
           rename(tmax_celsius = temperature_max)
         
         nombre_occurrences_saison <- if (direction == "supérieure") sum(donnees_historiques_saison$tmax_celsius >= data$temp, na.rm = TRUE) else sum(donnees_historiques_saison$tmax_celsius <= data$temp, na.rm = TRUE)
-        frequence_saison_text <- if (nombre_occurrences_saison == 0) paste0("À l'échelle de la saison (", saison$nom, "), une température aussi ", if (direction == "supérieure") "élevée" else "basse", " ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".") else paste0("À l'échelle de la saison (", saison$nom, "), une température égale ou ", direction, " est arrivée en moyenne <b>", round(nombre_occurrences_saison/(annee_fin-annee_debut+1), 0), " fois</b> par an entre ", annee_debut, " et ", annee_fin, ".")
+        message_occurrence_saison <- if (round(nombre_occurrences_saison/(annee_fin-annee_debut+1) >= 1)) {
+           paste0(round(nombre_occurrences_saison/(annee_fin-annee_debut+1), 0))
+        } else if (round(nombre_occurrences_saison/(annee_fin-annee_debut+1) > 0)) {
+          "moins d'une"
+        } else {
+          "0"
+        }
+        frequence_saison_text <- if (nombre_occurrences_saison == 0) paste0("À l'échelle de la saison (", saison$nom, "), une température aussi ", if (direction == "supérieure") "élevée" else "basse", " ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".") else paste0("À l'échelle de la saison (", saison$nom, "), une température égale ou ", direction, " est arrivée en moyenne <b>", message_occurrence_saison, " fois</b> par an entre ", annee_debut, " et ", annee_fin, ".")
         
         explication_text <- paste(explication_principale, frequence_jour_text, frequence_saison_text, sep = "<br><br>")
       }
