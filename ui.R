@@ -10,7 +10,9 @@ source("modules/mod_quiz.R")
 source("modules/mod_visualisation.R")
 source("modules/mod_analyse.R")
 
-ui <- tagList( # On utilise tagList comme conteneur principal
+ui <- fluidPage( # On utilise tagList comme conteneur principal
+  
+  theme = bs_theme(version = 5),
   
   # --- HEADER ---
   tags$head(
@@ -38,6 +40,52 @@ ui <- tagList( # On utilise tagList comme conteneur principal
       }
       #cookie-banner p { margin: 0; }
       #accept-cookie-btn { margin-left: 20px; white-space: nowrap; }
+      
+      /* Met en valeur l'onglet actif */
+      .navbar .nav-item .nav-link.active {
+        color: #007bff !important; /* Couleur bleue vive pour l'icône et le texte */
+      }
+      
+          /* Règle pour les écrans de petite taille (max 767px), version Bootstrap 3 */
+      @media (max-width: 767px) {
+        /* 1. On cache le bouton hamburger de Bootstrap 3 */
+        .navbar .navbar-toggle {
+          display: none !important;
+        }
+
+        /* 2. On force l'affichage du conteneur des liens */
+        .navbar-collapse.collapse {
+          display: block !important;
+          height: auto !important;
+          overflow: visible !important;
+        }
+
+        /* 3. On s'assure que les liens sont bien alignés horizontalement */
+        .navbar-nav {
+          display: flex;
+          flex-direction: row !important;
+          justify-content: space-around !important;
+          width: 100%;
+          margin: 0;
+        }
+        .navbar-nav > li {
+            float: none; /* Annule un style par défaut de Bootstrap 3 */
+        }
+        
+        /* 4. On cache le titre de l'app */
+        .navbar-brand {
+          display: none;
+        }
+
+        /* 5. On ajuste le style des onglets */
+        .navbar .nav-item .nav-link {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          font-size: 0.75rem;
+          padding: 5px !important;
+        }
+      }
     ")),
     
     # 3. Logique des cookies
@@ -106,9 +154,9 @@ ui <- tagList( # On utilise tagList comme conteneur principal
   
   
   # --- INTERFACE PRINCIPALE DE L'APPLICATION ---
-  navbarPage(
-    "Climat : Normal ou pas ?",
-    theme = bs_theme(version = 5),
+  page_navbar(
+    title = "Climat : Normal ou pas ?",
+    #position = "fixed-top",
     header = tagList(
       useShinyjs(),
       extendShinyjs(text = "
@@ -118,58 +166,72 @@ ui <- tagList( # On utilise tagList comme conteneur principal
     ),
     
     # -- Onglets de l'application --
-    tabPanel("Le Quiz 🧐", mod_quiz_ui("quiz_1")),
-    tabPanel("Comparer les années 📊", mod_visualisation_ui("visu_1")),
-    tabPanel("Evolution globale 🔍", mod_analyse_ui("analyse_1")),
-    tabPanel("Méthodologie 📝",
-             fluidPage(
-               titlePanel("Choix méthodologiques"),
-               fluidRow(
-                 column(10, offset = 1,
-                        
-                        h3("Source et attribution des données 🌡️"),
-                        p("La méthodologie de l'application repose sur des données publiques et des techniques de traitement géospatial standards."),
-                        tags$ul(
-                          tags$li(strong("Source des données : "), "Les températures proviennent du jeu de données ERA5-Land, accessible via le Copernicus Climate Change Service (C3S). C'est une base de données de 'réanalyse' climatique qui combine des observations passées avec des modèles météorologiques pour créer un enregistrement climatique complet et cohérent."),
-                          tags$li(strong("Granularité : "), "Les données sont initialement téléchargées à une fréquence horaire puis agrégées pour ne conserver que la température maximale de chaque journée. La période couverte s'étend de 1950 à aujourd'hui."),
-                          tags$li(strong("Attribution des données à une ville : "), "Les données ERA5-Land sont fournies sur une grille géographique avec des mailles de 9x9km. Pour chaque ville, l'application identifie la maille la plus proche et toutes les données de température proviennent ensuite exclusivement de cette maille."),
-                          tags$li(strong("Important - Ce que cette température représente : "), "La valeur affichée correspond à la température moyenne sur l'ensemble d'une maille de 81 km² (9x9 km). Elle peut donc différer de la température que vous lisez sur un thermomètre chez vous ou de celle annoncée dans les prévisions météo, qui correspondent souvent à des mesures plus locales (aéroport, station météo spécifique).")
-                        ),
-                        
-                        hr(),
-                        
-                        h3("Calcul et définition des 'Normales de saison' 📊"),
-                        p("L'application se base sur le calcul de normales climatiques, conformément aux standards internationaux."),
-                        tags$ul(
-                          tags$li(strong("Périodes de référence : "), "Les normales sont calculées pour différentes périodes de 30 ans (ex: 1961-1990, 1991-2020), comme le recommande l'Organisation Météorologique Mondiale (OMM), afin de permettre la comparaison et de visualiser l'évolution du climat."),
-                          tags$li(strong("Définition du 'normal' : "), "Pour définir ce qui est 'normal', l'application utilise la méthode des percentiles.",
-                                  tags$ol(
-                                    tags$li("Pour un jour donné (ex: le 15 août) et une période de référence, l'application analyse la distribution de toutes les températures maximales observées les 15 août de cette période."),
-                                    tags$li("Elle calcule ensuite le 10e percentile (la valeur en-dessous de laquelle se trouvent les 10% des jours les plus froids) et le 90e percentile (la valeur au-dessus de laquelle se trouvent les 10% des jours les plus chauds)."),
-                                    tags$li("Une température est jugée ", strong("'Dans les normales de saison'"), " si elle se situe entre ces deux bornes (le 10e et le 90e percentile)."),
-                                    tags$li("Si elle est en-dehors de cette plage, elle est considérée comme 'En-dessous' ou 'Au-dessus' des normales.")
-                                  )
-                          )
-                        ),
-                        
-                        # Le paragraphe est maintenant à l'extérieur de la liste
-                        p("Cette méthode signifie qu'environ 80% des températures de la période de référence sont considérées comme 'normales'."),
-                        
-                        hr(),
-                        
-                        h3("Code Source 💻"),
-                        p("Pour les plus curieux, le code source complet de cette application est disponible sur GitHub. N'hésitez pas à le consulter, à le réutiliser ou à proposer des améliorations !"),
-                        p(style = "text-align: center; margin-top: 20px;",
-                          tags$a(href = "https://github.com/maximepilorge/normal_ou_pas",
-                                 target = "_blank",
-                                 class = "btn btn-primary btn-lg",
-                                 icon("github"),
-                                 "Voir le code sur GitHub"
-                          )
-                        )
+    nav_panel(
+      "Le Quiz", 
+      mod_quiz_ui("quiz_1"),
+      icon = icon("question-circle")
+      ),
+    nav_panel(
+      "Comparaison", 
+      mod_visualisation_ui("visu_1"),
+      icon = icon("chart-bar")
+      ),
+    nav_panel(
+      "Evolution", 
+      mod_analyse_ui("analyse_1"),
+      icon = icon("chart-line")
+      ),
+    nav_panel(
+      "Méthodo",
+      fluidPage(
+        titlePanel("Choix méthodologiques"),
+        fluidRow(
+          column(10, offset = 1,
+                 
+                 h3("Source et attribution des données 🌡️"),
+                 p("La méthodologie de l'application repose sur des données publiques et des techniques de traitement géospatial standards."),
+                 tags$ul(
+                   tags$li(strong("Source des données : "), "Les températures proviennent du jeu de données ERA5-Land, accessible via le Copernicus Climate Change Service (C3S). C'est une base de données de 'réanalyse' climatique qui combine des observations passées avec des modèles météorologiques pour créer un enregistrement climatique complet et cohérent."),
+                   tags$li(strong("Granularité : "), "Les données sont initialement téléchargées à une fréquence horaire puis agrégées pour ne conserver que la température maximale de chaque journée. La période couverte s'étend de 1950 à aujourd'hui."),
+                   tags$li(strong("Attribution des données à une ville : "), "Les données ERA5-Land sont fournies sur une grille géographique avec des mailles de 9x9km. Pour chaque ville, l'application identifie la maille la plus proche et toutes les données de température proviennent ensuite exclusivement de cette maille."),
+                   tags$li(strong("Important - Ce que cette température représente : "), "La valeur affichée correspond à la température moyenne sur l'ensemble d'une maille de 81 km² (9x9 km). Elle peut donc différer de la température que vous lisez sur un thermomètre chez vous ou de celle annoncée dans les prévisions météo, qui correspondent souvent à des mesures plus locales (aéroport, station météo spécifique).")
+                 ),
+                 
+                 hr(),
+                 
+                 h3("Calcul et définition des 'Normales de saison' 📊"),
+                 p("L'application se base sur le calcul de normales climatiques, conformément aux standards internationaux."),
+                 tags$ul(
+                   tags$li(strong("Périodes de référence : "), "Les normales sont calculées pour différentes périodes de 30 ans (ex: 1961-1990, 1991-2020), comme le recommande l'Organisation Météorologique Mondiale (OMM), afin de permettre la comparaison et de visualiser l'évolution du climat."),
+                   tags$li(strong("Définition du 'normal' : "), "Pour définir ce qui est 'normal', l'application utilise la méthode des percentiles.",
+                           tags$ol(
+                             tags$li("Pour un jour donné (ex: le 15 août) et une période de référence, l'application analyse la distribution de toutes les températures maximales observées les 15 août de cette période."),
+                             tags$li("Elle calcule ensuite le 10e percentile (la valeur en-dessous de laquelle se trouvent les 10% des jours les plus froids) et le 90e percentile (la valeur au-dessus de laquelle se trouvent les 10% des jours les plus chauds)."),
+                             tags$li("Une température est jugée ", strong("'Dans les normales de saison'"), " si elle se situe entre ces deux bornes (le 10e et le 90e percentile)."),
+                             tags$li("Si elle est en-dehors de cette plage, elle est considérée comme 'En-dessous' ou 'Au-dessus' des normales.")
+                           )
+                   )
+                 ),
+                 
+                 # Le paragraphe est maintenant à l'extérieur de la liste
+                 p("Cette méthode signifie qu'environ 80% des températures de la période de référence sont considérées comme 'normales'."),
+                 
+                 hr(),
+                 
+                 h3("Code Source 💻"),
+                 p("Pour les plus curieux, le code source complet de cette application est disponible sur GitHub. N'hésitez pas à le consulter, à le réutiliser ou à proposer des améliorations !"),
+                 p(style = "text-align: center; margin-top: 20px;",
+                   tags$a(href = "https://github.com/maximepilorge/normal_ou_pas",
+                          target = "_blank",
+                          class = "btn btn-primary btn-lg",
+                          icon("github"),
+                          "Voir le code sur GitHub"
+                   )
                  )
-               )
-             )
+          )
+        )
+      ),
+      icon = icon("book")
     )
   ),
   

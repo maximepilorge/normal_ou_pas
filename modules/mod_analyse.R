@@ -6,6 +6,7 @@ mod_analyse_ui <- function(id) {
   tagList(
     page_sidebar(
       title = "Analyser l'évolution des températures",
+      fillable = FALSE,
       
       sidebar = sidebar(
         width = "350px",

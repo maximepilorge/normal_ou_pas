@@ -5,6 +5,7 @@ mod_quiz_ui <- function(id) {
   tagList(
     page_sidebar(
       title = "Testez votre intuition climatique",
+      fillable = FALSE,
       
       sidebar = sidebar(
         width = "350px",

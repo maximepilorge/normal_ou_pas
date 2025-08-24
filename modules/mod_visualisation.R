@@ -5,6 +5,7 @@ mod_visualisation_ui <- function(id) {
   tagList(
     page_sidebar(
       title = "Visualiser le changement climatique",
+      fillable = FALSE,
       
       sidebar = sidebar(
         width = "350px",
