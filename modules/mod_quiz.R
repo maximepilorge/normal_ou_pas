@@ -373,5 +373,11 @@ mod_quiz_server <- function(id, db_pool) {
       shinyjs::disable("submit_answer_btn")
       
     })
+    
+    return(list(
+      successes = score_succes,
+      failures = score_echecs
+    ))
+    
   })
 }

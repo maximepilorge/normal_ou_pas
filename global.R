@@ -1,3 +1,10 @@
+# Améliorations:
+# - Ajouter la possibilité de comparer la distribution de deux années complètes sur une ville et éventuellement une saison spécifique (onglet "Comparer les années" ?)
+# Une idée peut etre d'ajouter une seconde courbe optionnelle au graphique existant mais ça peut polluer visuellement. Sinon, à la suite, on ajoute un boxplot mettant les deux années cote à cote
+# Ca signifie ajouter un input pour choisir l'autre année
+# - Ajouter le nombre de records de chaleur dans l'onglet d'évolution globale avec l'analyse du réchauffement (graphique par année ?). Nécessiterait
+# de construire une table avec le nombre de records enregistrés par an (début historique = 1950 ici cependant)
+
 # Librairies
 library(shiny)
 library(shinyWidgets)
