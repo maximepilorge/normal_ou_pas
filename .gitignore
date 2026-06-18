@@ -9,3 +9,19 @@
 
 # Fichier de variables d'environnement
 .Renviron
+
+# Caches de données locaux — la source de vérité est la BDD PostgreSQL
+# On ignore le contenu mais on garde le dossier (via .gitkeep) pour que
+# `COPY data data` du Dockerfile fonctionne lors du build Render.
+data/*
+!data/.gitkeep
+
+# Fichiers temporaires R
+.RDataTmp
+
+# Configuration locale Claude Code
+/.claude/
+
+# Scripts d'analyse exploratoire station Bron (hors app)
+utils/extraire_station_bron.R
+utils/generer_excel_bron.py

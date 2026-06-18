@@ -27,7 +27,13 @@ tryCatch({
   )
   
   # 1. Lire le contenu du fichier SQL
-  sql_content <- readr::read_file(here::here("utils", "deploy.sql"))
+  sql_path <- here::here("utils", "deploy.sql")
+  if (!file.exists(sql_path)) {
+    stop("Le fichier SQL de déploiement est introuvable : ", sql_path)
+  }
+  
+  cat("Lecture du fichier SQL...\n")
+  sql_content <- readr::read_file(sql_path)
   
   # 2. Séparer le contenu en commandes individuelles
   #    On sépare par ';' suivi d'un éventuel retour à la ligne.
@@ -40,8 +46,9 @@ tryCatch({
   
   # 4. Exécuter chaque commande individuellement
   for (cmd in commands) {
+    clean_cmd <- trimws(cmd)
     # Ignorer les lignes vides ou les commentaires
-    if (nchar(trimws(cmd)) > 0 && !startsWith(trimws(cmd), "--")) {
+    if (nchar(clean_cmd) > 0 && !startsWith(clean_cmd, "--")) {
       cat(paste(" -> Exécution:", substr(cmd, 1, 70), "...\n"))
       dbExecute(con_prod, cmd)
     }

@@ -43,25 +43,25 @@ con_prod <- dbConnect(
 tryCatch({
   
   cat("Début du transfert des tables.\n")
-  
+
   for (nom_table in tables_a_transferer) {
-    
+
     # 1. Lire la table depuis la base locale
     cat(paste0("  -> Lecture de la table '", nom_table, "' depuis la source locale...\n"))
-    
+
     table_locale_id <- Id(schema = "public", table = nom_table)
     donnees <- dbReadTable(con_local, table_locale_id)
     donnees$id <- NULL
     cat(paste0("     ", nrow(donnees), " lignes lues.\n"))
-    
+
     # 2. Écrire la table dans le schéma 'preparation' de la base de production
     cat(paste0("  -> Écriture de la table '", nom_table, "' vers la destination production (schéma preparation)...\n"))
     table_prod_id <- Id(schema = "preparation", table = nom_table)
     dbWriteTable(con_prod, table_prod_id, donnees, overwrite = TRUE)
-    
+
     cat("Écriture terminée.\n")
   }
-  
+
   cat("\n✅ Transfert de toutes les tables terminé avec succès !\n")
   
   cat("\nApplication de la structure (Clés, Contraintes, Index) sur le schéma 'preparation'...\n")
@@ -70,7 +70,7 @@ tryCatch({
   cat("\nTable 'temperatures_max'...\n")
   dbExecute(con_prod, "ALTER TABLE preparation.temperatures_max ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
   dbExecute(con_prod, "ALTER TABLE preparation.temperatures_max ADD CONSTRAINT uc_temperatures_max_ville_date UNIQUE (ville, date);")
-  dbExecute(con, "CREATE INDEX idx_temp_recherche_jour ON preparation.temperatures_max (ville, mois, jour_mois, annee);")
+  dbExecute(con_prod, "CREATE INDEX idx_temp_recherche_jour ON preparation.temperatures_max (ville, mois, jour_mois, annee);")
   dbExecute(con_prod, "VACUUM ANALYZE preparation.temperatures_max;")
   
   # -- Table: stats_normales --
