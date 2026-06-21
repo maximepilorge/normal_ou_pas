@@ -9,7 +9,6 @@ library(lubridate)
 library(DBI)
 library(RPostgres)
 library(dotenv)
-library(zoo)
 library(here)
 
 cat("Début de la préparation complète de la base de données...\n")
@@ -37,20 +36,15 @@ tryCatch({
   donnees_brutes_initiales <- readRDS(chemin_brutes_rds) %>%
     filter(is.finite(temperature_max))
   
-  cat("2/5 - Calcul de la moyenne mobile sur 365 jours...\n")
+  cat("2/5 - Préparation des données brutes...\n")
   donnees_brutes <- donnees_brutes_initiales %>%
     arrange(ville, date) %>%
-    group_by(ville) %>%
     mutate(
-      tmax_lisse_365j = zoo::rollmean(temperature_max, k = 365, fill = NA, align = "center")
-    ) %>%
-    ungroup() %>%
-    mutate(    
       annee = year(date),
       mois = month(date),
       jour_mois = day(date)
-      )
-  
+    )
+
   dbWriteTable(con, "temperatures_max", as.data.frame(donnees_brutes), overwrite = TRUE)
   
   # --- Étape 2 : Pré-calcul des normales climatiques ---
@@ -69,15 +63,44 @@ tryCatch({
     "1991-2020" = c(1991, 2020)
   )
   
-  # On boucle sur chaque période pour calculer les stats correctement
+  # --- Fenêtre glissante de ±7 jours ---
+  # Les percentiles d'un jour calendaire estimés sur ~30 valeurs (1 par an) sont
+  # très bruités. On les calcule sur une fenêtre centrée de ±7 jours (≈ 450
+  # valeurs) pour des seuils stables, conformément à la pratique (ETCCDI).
+  FENETRE <- 7
+
+  # Indice de jour 1..366 via une année bissextile fixe (2000) : ordre cohérent
+  # incluant le 29 février, indépendant de l'année d'observation.
+  ref_jours <- data.frame(date_ref = seq(as.Date("2000-01-01"), as.Date("2000-12-31"), by = "day")) %>%
+    mutate(jour_ref = yday(date_ref), mois = month(date_ref), jour_mois = day(date_ref)) %>%
+    select(jour_ref, mois, jour_mois)
+
+  # Pour chaque jour cible, les indices sources de sa fenêtre (circulaire sur 366).
+  fenetre_map <- expand.grid(jour_cible = 1:366, offset = -FENETRE:FENETRE) %>%
+    mutate(jour_ref = ((jour_cible - 1 + offset) %% 366) + 1) %>%
+    select(jour_cible, jour_ref)
+
+  # Indice de jour attaché à chaque observation.
+  donnees_avec_jr <- donnees_avec_annee %>%
+    left_join(ref_jours, by = c("mois", "jour_mois"))
+
+  # On boucle sur chaque période en combinant deux calculs :
+  #  - stats du JOUR EXACT (moyenne, min, quartiles, max) : utilisées par le
+  #    graphique de comparaison, où l'on veut voir les pics du jour précis ;
+  #  - seuils p10/p90 LISSÉS sur la fenêtre ±7 j : utilisés pour classer une
+  #    température (au-dessus / normal / en-dessous) dans le quiz, de façon robuste.
   liste_stats <- lapply(names(periodes_ref), function(nom_periode) {
     annee_debut <- periodes_ref[[nom_periode]][1]
     annee_fin <- periodes_ref[[nom_periode]][2]
-    
-    cat(paste("    -> Calcul pour la période", nom_periode, "\n"))
-    
-    donnees_avec_annee %>%
-      filter(annee >= annee_debut & annee <= annee_fin) %>%
+
+    cat(paste("    -> Calcul pour la période", nom_periode,
+              "(jour exact + seuils ±", FENETRE, "j)\n"))
+
+    donnees_periode <- donnees_avec_jr %>%
+      filter(annee >= annee_debut & annee <= annee_fin)
+
+    # Stats du jour exact (pour le graphique de comparaison).
+    stats_jour <- donnees_periode %>%
       group_by(ville, mois, jour_mois) %>%
       summarise(
         t_moy = mean(tmax_celsius, na.rm = TRUE),
@@ -85,10 +108,24 @@ tryCatch({
         t_q1 = quantile(tmax_celsius, probs = 0.25, na.rm = TRUE),
         t_q3 = quantile(tmax_celsius, probs = 0.75, na.rm = TRUE),
         t_max = max(tmax_celsius, na.rm = TRUE),
+        .groups = "drop"
+      )
+
+    # Seuils p10/p90 lissés sur la fenêtre ±7 j (chaque observation contribue à
+    # tous les jours cibles dont la fenêtre la contient).
+    seuils_fenetre <- donnees_periode %>%
+      inner_join(fenetre_map, by = "jour_ref", relationship = "many-to-many") %>%
+      group_by(ville, jour_cible) %>%
+      summarise(
         seuil_bas_p10 = quantile(tmax_celsius, probs = 0.1, na.rm = TRUE),
         seuil_haut_p90 = quantile(tmax_celsius, probs = 0.9, na.rm = TRUE),
         .groups = "drop"
       ) %>%
+      left_join(ref_jours, by = c("jour_cible" = "jour_ref")) %>%
+      select(-jour_cible)
+
+    stats_jour %>%
+      left_join(seuils_fenetre, by = c("ville", "mois", "jour_mois")) %>%
       mutate(periode_ref = nom_periode)
   })
   

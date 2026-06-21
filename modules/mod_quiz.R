@@ -95,10 +95,12 @@ mod_quiz_server <- function(id, db_pool) {
       for (i in 1:10) {
         
         # --- ÉTAPE 1 : Tirer une réponse, un jour et une ville ---
+        # Tirage équilibré : 1/3 par catégorie (la réponse est tirée avant la
+        # température, donc ceci garantit ~33 % de chances pour chaque réponse).
         categorie_choisie <- sample(
           c("Au-dessus des normales", "En-dessous des normales", "Dans les normales de saison"),
           size = 1,
-          prob = c(0.3, 0.2, 0.5)
+          prob = rep(1/3, 3)
         )
         
         # On tire un jour et un mois au hasard
@@ -239,32 +241,37 @@ mod_quiz_server <- function(id, db_pool) {
       annees_a_filtrer <- seq(annee_debut, annee_fin)
       jour_quiz <- lubridate::day(data$date)
       mois_quiz <- lubridate::month(data$date)
-      
+
+      # Fenêtre ±7 jours autour de la date, cohérente avec la classification du
+      # quiz (seuils p10/p90 lissés sur ±7 j). On filtre sur l'ensemble des
+      # couples (mois, jour) de la fenêtre via une clé mois*100 + jour.
+      jours_fenetre <- data$date + (-7:7)
+      cles_fenetre <- unique(lubridate::month(jours_fenetre) * 100 + lubridate::day(jours_fenetre))
+
       donnees_historiques_jour <- tbl(db_pool, "temperatures_max") %>%
         filter(
           ville == !!data$city,
           annee %in% !!annees_a_filtrer,
-          mois == !!mois_quiz,
-          jour_mois == !!jour_quiz
+          (mois * 100L + jour_mois) %in% !!cles_fenetre
         ) %>%
         select(date, temperature_max) %>%
         collect() %>%
         rename(tmax_celsius = temperature_max)
-      
-      # On stocke immédiatement les données pour le graphique
+
+      # On stocke immédiatement les données (fenêtre ±7 j) pour le graphique
       boxplot_data(donnees_historiques_jour)
       moyenne_reelle <- data$normale_moy
       diff <- round(abs(data$temp - moyenne_reelle), 1)
       direction <- if (data$temp > moyenne_reelle) "supérieure" else "inférieure"
       
       if (data$correct_answer == "Dans les normales de saison") {
-        explication_text <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", round(moyenne_reelle, 1), "°C) et est considérée comme normale pour un ", paste(format(data$date, "%d"), mois_fr[as.numeric(format(data$date, "%m"))]), " à ", data$city, ".")
+        explication_text <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", round(moyenne_reelle, 1), "°C) et est considérée comme normale à cette période de l'année (autour du ", paste(format(data$date, "%d"), mois_fr[as.numeric(format(data$date, "%m"))]), ") à ", data$city, ".")
       } else {
         
         explication_principale <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", round(moyenne_reelle, 1), "°C) pour la période ", input$periode_normale, ".")
         
         nombre_occurrences_jour <- if (direction == "supérieure") sum(donnees_historiques_jour$tmax_celsius >= data$temp, na.rm = TRUE) else sum(donnees_historiques_jour$tmax_celsius <= data$temp, na.rm = TRUE)
-        frequence_jour_text <- if (nombre_occurrences_jour == 0) paste0("Pour ce jour précis, un événement de cette intensité ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".") else paste0("Pour ce jour précis, une température égale ou ", direction, " est arrivée <b>", nombre_occurrences_jour, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
+        frequence_jour_text <- if (nombre_occurrences_jour == 0) paste0("Autour de cette date (fenêtre de ±7 jours), un événement de cette intensité ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".") else paste0("Autour de cette date (fenêtre de ±7 jours), une température égale ou ", direction, " est arrivée <b>", nombre_occurrences_jour, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
         
         saison <- get_season_info(data$date)
 
@@ -301,7 +308,7 @@ mod_quiz_server <- function(id, db_pool) {
         data_quiz <- quiz_data()
         donnees_historiques_jour_plot <- boxplot_data()
 
-        main_title <- paste("Distribution historique pour un", paste(format(data_quiz$date, "%d"), mois_fr[as.numeric(format(data_quiz$date, "%m"))]), "à", data_quiz$city)
+        main_title <- paste("Distribution historique autour du", paste(format(data_quiz$date, "%d"), mois_fr[as.numeric(format(data_quiz$date, "%m"))]), "(±7 j) à", data_quiz$city)
         subtitle_text <- paste("Période", input$periode_normale)
         full_title <- paste0(main_title, "<br><sup>", subtitle_text, "</sup><br>")
         
