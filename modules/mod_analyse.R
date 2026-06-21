@@ -17,13 +17,18 @@ mod_analyse_ui <- function(id) {
                       choices = villes_triees,
                       selected = villes_triees[1],
                       options = list('live-search' = FALSE)),
-          sliderInput(ns("annee_range_analyse"), 
-                      "Période d'analyse :", 
-                      min = an_min_data, 
-                      max = an_max_data, 
-                      value = c(an_min_data, an_max_data), 
+          sliderInput(ns("annee_range_analyse"),
+                      "Période d'analyse :",
+                      min = an_min_data,
+                      max = an_max_data,
+                      value = c(an_min_data, an_max_data),
                       sep = ""),
-          checkboxInput(ns("lissage_toggle"), "Lisser la courbe (moyenne mobile 365 jours)", value = TRUE)
+          pickerInput(ns("periode_ref_analyse"),
+                      "Période de référence (normale) :",
+                      choices = periodes_disponibles,
+                      selected = periodes_disponibles[1],
+                      options = list('live-search' = FALSE)),
+          helpText("Chaque barre indique l'écart de la moyenne annuelle des températures maximales par rapport à la normale de la période de référence choisie.")
         ),
         card(
           card_header("Analyser un seuil de température"),
@@ -46,8 +51,20 @@ mod_analyse_ui <- function(id) {
       
       card(
         full_screen = TRUE,
-        card_header("Évolution des températures maximales journalières"),
-        plotlyOutput(ns("evolution_plot"), height = "500px")
+        card_header("Évolution des températures maximales annuelles (écart à la normale)"),
+        plotlyOutput(ns("evolution_plot"), height = "500px"),
+        card_footer(
+          class = "small text-muted",
+          icon("circle-info"),
+          HTML(paste(
+            "Ces indicateurs reposent sur les températures <b>maximales</b> journalières",
+            "(réanalyse ERA5-Land), choisies pour leur lisibilité par le grand public.",
+            "Les références climatiques officielles (Météo-France, GIEC) s'appuient sur la",
+            "température <b>moyenne</b> et sur des séries de stations homogénéisées.",
+            "Ces valeurs ne sont donc pas directement comparables aux chiffres officiels :",
+            "elles illustrent des tendances, et non des références absolues."
+          ))
+        )
       ),
       
       uiOutput(ns("resultats_defaut_ui")),
@@ -82,7 +99,7 @@ mod_analyse_server <- function(id, db_pool) {
           date >= !!start_date,
           date < !!end_date
         ) %>%
-        select(date, temperature_max, tmax_lisse_365j) %>%
+        select(date, temperature_max) %>%
         collect() %>%
         rename(tmax_celsius = temperature_max) %>%
         mutate(
@@ -90,28 +107,85 @@ mod_analyse_server <- function(id, db_pool) {
           mois = month(date)
         ) %>%
         arrange(date)
-      
+
     }) %>% bindCache(input$ville_analyse, input$annee_range_analyse)
+
+    # Anomalies annuelles : écart de la moyenne annuelle des températures
+    # maximales par rapport à la normale de la période de référence choisie.
+    anomalies_annuelles <- reactive({
+      req(input$ville_analyse, input$periode_ref_analyse)
+      df <- donnees_long_terme()
+      req(nrow(df) > 0)
+
+      # Normales JOURNALIÈRES (par jour calendaire) pour la période de référence.
+      # On compare ainsi chaque jour observé à la normale du même jour : une année
+      # partielle (ex. janvier-juin) est confrontée aux seules normales de ces
+      # jours, et non à la normale annuelle complète qui inclut l'été.
+      normales_jour <- tbl(db_pool, "stats_normales") %>%
+        filter(
+          ville == !!input$ville_analyse,
+          periode_ref == !!input$periode_ref_analyse
+        ) %>%
+        select(mois, jour_mois, t_moy) %>%
+        collect()
+
+      req(nrow(normales_jour) > 0)
+
+      # Seule la dernière année de l'historique peut être partielle : on la repère
+      # si ses données ne vont pas jusqu'au 31 décembre.
+      derniere_date <- max(df$date)
+      fin_derniere_annee <- as.Date(sprintf("%d-12-31", year(derniere_date)))
+      annee_incomplete <- if (derniere_date < fin_derniere_annee) year(derniere_date) else NA_integer_
+
+      df %>%
+        mutate(jour_mois = day(date)) %>%
+        inner_join(normales_jour, by = c("mois", "jour_mois")) %>%
+        group_by(annee) %>%
+        summarise(
+          moy_annuelle = mean(tmax_celsius, na.rm = TRUE),
+          # Normale moyenne sur exactement les mêmes jours que ceux observés.
+          normale = mean(t_moy, na.rm = TRUE),
+          n_jours = n(),
+          .groups = "drop"
+        ) %>%
+        mutate(
+          anomalie = moy_annuelle - normale,
+          complete = is.na(annee_incomplete) | annee != annee_incomplete,
+          signe = ifelse(anomalie >= 0, "Au-dessus de la normale", "En-dessous de la normale")
+        )
+    }) %>% bindCache(input$ville_analyse, input$annee_range_analyse, input$periode_ref_analyse)
     
     observeEvent(donnees_long_terme(), {
       
       df_analyse <- donnees_long_terme()
       req(nrow(df_analyse) > 0) # S'assurer qu'on a des données
-      
-      annee_debut <- min(df_analyse$annee)
-      annee_fin <- max(df_analyse$annee)
-      
-      # 1. Calcul de l'analyse du réchauffement (identique à avant)
+
+      # 1. Calcul de l'analyse du réchauffement
+      # On exclut la dernière année si elle est partielle (données n'allant pas
+      # jusqu'au 31/12) : une année incomplète fausserait la moyenne de la
+      # dernière trentaine d'années (mois chauds manquants).
+      derniere_date <- max(df_analyse$date)
+      fin_derniere_annee <- as.Date(sprintf("%d-12-31", year(derniere_date)))
+      annee_incomplete <- if (derniere_date < fin_derniere_annee) year(derniere_date) else NA_integer_
+      df_complet <- if (!is.na(annee_incomplete)) {
+        df_analyse %>% filter(annee != annee_incomplete)
+      } else {
+        df_analyse
+      }
+
+      annee_debut <- min(df_complet$annee)
+      annee_fin <- max(df_complet$annee)
+
       stats_30ans <- NULL
       if ((annee_fin - annee_debut) >= 29) {
-        moyenne_debut_periode <- df_analyse %>%
+        moyenne_debut_periode <- df_complet %>%
           filter(annee >= annee_debut, annee <= annee_debut + 29) %>%
           summarise(moyenne = mean(tmax_celsius, na.rm = TRUE)) %>% pull(moyenne)
-        
-        moyenne_fin_periode <- df_analyse %>%
+
+        moyenne_fin_periode <- df_complet %>%
           filter(annee >= annee_fin - 29, annee <= annee_fin) %>%
           summarise(moyenne = mean(tmax_celsius, na.rm = TRUE)) %>% pull(moyenne)
-        
+
         stats_30ans <- list(
           periode1_str = paste0(annee_debut, "-", annee_debut + 29), moyenne1 = moyenne_debut_periode,
           periode2_str = paste0(annee_fin - 29, "-", annee_fin), moyenne2 = moyenne_fin_periode
@@ -135,68 +209,77 @@ mod_analyse_server <- function(id, db_pool) {
     }, ignoreNULL = TRUE)
     
     output$evolution_plot <- renderPlotly({
-      df <- donnees_long_terme()
-      req(df)
-      
-      # --- DÉBUT DE LA MODIFICATION ---
-      # On construit un graphique entièrement séparé pour chaque cas de figure
-      
-      if (input$lissage_toggle) {
-        # GRAPHIQUE POUR LA VUE LISSÉE
-        p <- ggplot(df, aes(x = date)) +
-          geom_line(aes(y = tmax_lisse_365j), color = "#1f77b4", linewidth = 0.6, na.rm = TRUE) +
-          geom_point(aes(y = tmax_lisse_365j, text = paste("Date:", format(date, "%d %b %Y"), "<br>Temp. lissée:", round(tmax_lisse_365j, 1), "°C")),
-                     alpha = 0, na.rm = TRUE) +
-          geom_smooth(aes(y = tmax_lisse_365j, color = "Tendance"), method = "loess", span = 0.2, se = FALSE, linewidth = 1.2, na.rm = TRUE, linetype = "dashed") +
-          scale_color_manual(values = c("Tendance" = "#E41A1C")) +
-          labs(
-            title = paste("Températures maximales \nà", input$ville_analyse),
-            y = "Température (°C)", x = "Année", color = ""
+      df_anom <- anomalies_annuelles()
+      req(nrow(df_anom) > 0)
+
+      # Infobulle : valeur de l'anomalie, moyenne annuelle et normale de référence.
+      df_anom <- df_anom %>%
+        mutate(
+          text = paste0(
+            "Année : ", annee,
+            "<br>Écart à la normale : ", sprintf("%+.2f", anomalie), " °C",
+            "<br>Moyenne annuelle : ", round(moy_annuelle, 1), " °C",
+            "<br>Normale (", input$periode_ref_analyse, ") : ", round(normale, 1), " °C",
+            ifelse(complete, "", "<br><i>année incomplète</i>")
           )
-        
-      } else {
-        # GRAPHIQUE POUR LA VUE BRUTE
-        p <- ggplot(df, aes(x = date, y = tmax_celsius)) +
-          geom_line(color = "grey60", linewidth = 0.3) +
-          geom_point(aes(text = paste("Date:", format(date, "%d %b %Y"), "<br>Température:", round(tmax_celsius, 1), "°C")),
-                     alpha = 0) +
-          geom_smooth(aes(color = "Tendance"), method = "loess", span = 0.2, se = FALSE, linewidth = 1.2, na.rm = TRUE, linetype = "dashed") +
-          scale_color_manual(values = c("Tendance" = "#E41A1C")) +
-          labs(
-            title = paste("Températures maximales \nà", input$ville_analyse),
-            y = "Température (°C)", x = "Année", color = ""
+        )
+
+      p <- ggplot(df_anom, aes(x = annee, y = anomalie)) +
+        # Barres colorées bleu (sous la normale) / rouge (au-dessus),
+        # transparence réduite pour les années incomplètes.
+        geom_col(aes(fill = signe, alpha = complete, text = text), width = 0.8) +
+        # Ligne de référence : la normale (anomalie nulle).
+        geom_hline(yintercept = 0, color = "#343a40", linewidth = 0.5) +
+        # Tendance de fond pour visualiser la trajectoire de réchauffement.
+        geom_smooth(method = "loess", se = FALSE, color = "#343a40",
+                    linewidth = 0.9, linetype = "dashed", na.rm = TRUE) +
+        scale_fill_manual(
+          values = c(
+            "Au-dessus de la normale" = "#E41A1C",
+            "En-dessous de la normale" = "#1f77b4"
           )
-      }
-      
-      # On ajoute les éléments de thème communs aux deux graphiques
-      p <- p +
-        scale_x_date(date_labels = "%Y", date_breaks = "5 years") +
+        ) +
+        scale_alpha_manual(values = c("TRUE" = 1, "FALSE" = 0.4), guide = "none") +
+        scale_x_continuous(breaks = scales::breaks_width(10)) +
+        labs(y = "Écart à la normale (°C)", x = "Année", fill = "") +
         theme_minimal(base_size = 14) +
         theme(
           legend.position = "bottom",
-          axis.text.x = element_text(angle = 45, hjust = 1),
-          plot.title = element_text(hjust = 0.5)
-          )
-      # --- FIN DE LA MODIFICATION ---
-      
-      if (!is.null(resultats_seuil()) && !input$lissage_toggle) {
-        seuil_val <- resultats_seuil()$seuil
-        p <- p + geom_hline(yintercept = seuil_val, linetype = "dotdash", color = "#343a40", linewidth = 0.8)
-      }
-      
-      ggplotly(p, tooltip = "text") %>%
+          axis.text.x = element_text(angle = 45, hjust = 1)
+        )
+
+      gp <- ggplotly(p, tooltip = "text") %>%
         # On verrouille les axes pour désactiver le zoom et le déplacement
         layout(
           xaxis = list(fixedrange = TRUE),
           yaxis = list(fixedrange = TRUE)
         ) %>%
         config(displayModeBar = FALSE)
+
+      # ggplotly combine les esthétiques fill+alpha dans les libellés de légende
+      # (ex. "(Au-dessus de la normale,TRUE)"). On retire la partie TRUE/FALSE et
+      # les parenthèses, puis on masque les entrées en double ainsi générées.
+      deja_vu <- character(0)
+      for (i in seq_along(gp$x$data)) {
+        nom <- gp$x$data[[i]]$name
+        if (is.null(nom)) next
+        nom <- gsub("[()]", "", nom)
+        nom <- trimws(gsub(",?(TRUE|FALSE)", "", nom))
+        gp$x$data[[i]]$name <- nom
+        gp$x$data[[i]]$legendgroup <- nom
+        if (nom == "" || nom %in% deja_vu) {
+          gp$x$data[[i]]$showlegend <- FALSE
+        } else {
+          deja_vu <- c(nom, deja_vu)
+        }
+      }
+
+      gp
     }) %>%
       bindCache(
         input$ville_analyse,
         input$annee_range_analyse,
-        input$lissage_toggle,
-        if (is.null(resultats_seuil())) "aucun" else resultats_seuil()$seuil
+        input$periode_ref_analyse
       )
     
     observeEvent(list(input$ville_analyse, input$annee_range_analyse, input$saison_analyse), {
