@@ -23,39 +23,10 @@ library(dotenv)
 
 load_dot_env(file = here::here(".Renviron"))
 
-villes <- tibble::tribble(
-  ~ville, ~latitude, ~longitude,
-  "Paris", 48.8566, 2.3522,
-  "Marseille", 43.2965, 5.3698,
-  "Lyon", 45.7640, 4.8357,
-  "Toulouse", 43.6047, 1.4442,
-  "Nice", 43.7102, 7.2620,
-  "Nantes", 47.2184, -1.5536,
-  "Strasbourg", 48.5833, 7.7458,
-  "Montpellier", 43.6108, 3.8767,
-  "Bordeaux", 44.8378, -0.5792,
-  "Lille", 50.6292, 3.0573,
-  "Rennes", 48.1173, -1.6778,
-  "Reims", 49.2583, 4.0317,
-  "Le Havre", 49.4944, 0.1079,
-  "Saint-Étienne", 45.4397, 4.3872,
-  "Toulon", 43.1242, 5.9280,
-  "Angers", 47.4784, -0.5632,
-  "Dijon", 47.3220, 5.0415,
-  "Brest", 48.3904, -4.4869,
-  "Clermont-Ferrand", 45.7772, 3.0870,
-  "Limoges", 45.8336, 1.2611,
-  "Tours", 47.3941, 0.6849,
-  "Amiens", 49.8941, 2.2958,
-  "Metz", 49.1193, 6.1757,
-  "Besançon", 47.2378, 6.0240,
-  "Perpignan", 42.6887, 2.8948,
-  "La Rochelle", 46.1603, -1.1511,
-  "Avignon", 43.9493, 4.8068,
-  "Carcassonne", 43.2105, 2.3486,
-  "Poitiers", 46.5802, 0.3405,
-  "Ajaccio", 41.9207, 8.7397
-)
+# Liste des villes (+ code INSEE) et fonctions d'association maille/commune.
+# Le `source` ne déclenche pas le bloc autonome du fichier (cf. sys.nframe()).
+source(here::here("utils", "definir_mailles_communes.R"))
+villes <- villes_insee
 
 # -------------------- 
 # 2. Définition de la fonction principale 
@@ -148,18 +119,14 @@ recuperer_donnees_era5 <- function(villes_a_telecharger = NULL) {
   nc_close(nc_grid) 
   file.remove(nc_grid_path) # Nettoyage du fichier temporaire
   
-  # Conversion des données de villes et de grille en objets géospatiaux `sf` 
-  # pour trouver les mailles les plus proches. 
-  sf_villes <- st_as_sf(villes, coords = c("longitude", "latitude"), crs = 4326) 
-  sf_grid <- st_as_sf(expand.grid(lon = lon_grid, lat = lat_grid), coords = c("lon", "lat"), crs = 4326) 
-  
-  # Utilisation de `st_nearest_feature` pour trouver l'index de la grille la plus proche pour chaque ville
-  indices_plus_proches <- st_nearest_feature(sf_villes, sf_grid) 
-  
-  # On ajoute les coordonnées de grille correspondantes aux données des villes 
-  villes_avec_coords_grille <- bind_cols(villes, st_coordinates(sf_grid[indices_plus_proches,])) %>% 
-    rename(lon_grille = X, lat_grille = Y) 
-  
+  # --- Association ville -> mailles ERA5 par emprise communale ---
+  # On construit les mailles réelles de la grille (rectangles 0,1° centrés sur
+  # les points de grille), puis on retient pour chaque ville TOUTES les mailles
+  # qui intersectent sa commune, avec un poids = part de surface couverte.
+  # Plusieurs lignes par ville (lon_grille, lat_grille, poids).
+  sf_cells <- construire_cellules_era5(lon_grid, lat_grid)
+  villes_avec_coords_grille <- associer_mailles_communes(villes, sf_cells)
+
   nom_fichier_assoc <- "villes_et_mailles_associees.rds"
   chemin_complet_assoc <- file.path(path_to_save, nom_fichier_assoc)
   saveRDS(villes_avec_coords_grille, file = chemin_complet_assoc)
@@ -257,16 +224,20 @@ recuperer_donnees_era5 <- function(villes_a_telecharger = NULL) {
         df_raw <- as_tibble(expand.grid(lon = lon, lat = lat, time = dates)) %>%
           mutate(t2m = as.vector(t2m_degC))
 
-        # Jointure des données de température avec les villes, en utilisant les coordonnées de grille
+        # Jointure des données de température avec les mailles associées à chaque ville
         df_final <- df_raw %>%
           inner_join(villes_avec_coords_grille, by = c("lon" = "lon_grille", "lat" = "lat_grille")) %>%
-          select(ville, date = time, temperature = t2m)
+          select(ville, lon, lat, poids, date = time, temperature = t2m)
 
-        # Calcul de la température maximale journalière pour chaque ville
+        # Calcul de la température maximale journalière pour chaque ville, en deux temps :
         df_monthly_daily_max <- df_final %>%
           mutate(date = as_date(date)) %>%
+          # 1) maximum journalier de chaque maille
+          group_by(ville, lon, lat, poids, date) %>%
+          summarise(tmax_maille = max(temperature, na.rm = TRUE), .groups = "drop") %>%
+          # 2) moyenne spatiale pondérée par la surface communale couverte
           group_by(ville, date) %>%
-          summarise(temperature_max = max(temperature, na.rm = TRUE), .groups = "drop")
+          summarise(temperature_max = weighted.mean(tmax_maille, poids), .groups = "drop")
 
         # --- Sauvegarde incrémentale ---
         # On ajoute les nouvelles données au data frame final et on le sauvegarde.
