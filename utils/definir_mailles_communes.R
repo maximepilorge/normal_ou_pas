@@ -77,18 +77,22 @@ construire_cellules_era5 <- function(lon_grid, lat_grid, pas = 0.1) {
 }
 
 # --- Récupère le contour d'une commune (GeoJSON) via geo.api.gouv.fr ---
-charger_contour_commune <- function(insee) {
+charger_contour_commune <- function(insee, essais = 3, pause = 2) {
   url <- sprintf(
     "https://geo.api.gouv.fr/communes?code=%s&fields=contour&format=geojson&geometry=contour",
     insee
   )
-  dst <- tempfile(fileext = ".geojson")
-  ok <- tryCatch({ download.file(url, dst, quiet = TRUE); TRUE }, error = function(e) FALSE)
-  if (!ok) return(NULL)
-  commune <- tryCatch(st_read(dst, quiet = TRUE), error = function(e) NULL)
-  unlink(dst)
-  if (is.null(commune) || nrow(commune) == 0) return(NULL)
-  st_make_valid(commune)
+  # Plusieurs tentatives : l'API peut échouer ponctuellement (réseau), et un
+  # contour manquant ferait disparaître toute une ville du jeu de données.
+  for (tentative in seq_len(essais)) {
+    dst <- tempfile(fileext = ".geojson")
+    ok <- tryCatch({ download.file(url, dst, quiet = TRUE); TRUE }, error = function(e) FALSE)
+    commune <- if (ok) tryCatch(st_read(dst, quiet = TRUE), error = function(e) NULL) else NULL
+    unlink(dst)
+    if (!is.null(commune) && nrow(commune) > 0) return(st_make_valid(commune))
+    if (tentative < essais) Sys.sleep(pause)
+  }
+  NULL
 }
 
 # --- Associe à chaque ville l'ensemble de ses mailles + poids surfacique ---
@@ -119,7 +123,16 @@ associer_mailles_communes <- function(villes_insee, sf_cells, seuil_poids = 0.02
       select(ville, lon_grille, lat_grille, poids)
     out
   })
-  bind_rows(res)
+  assoc <- bind_rows(res)
+
+  # Garde-fou : on refuse une association incomplète (une ville sans maille
+  # produirait silencieusement un jeu de données amputé d'une ville entière).
+  manquantes <- setdiff(villes_insee$ville, unique(assoc$ville))
+  if (length(manquantes) > 0) {
+    stop("Association incomplète — aucune maille pour : ", paste(manquantes, collapse = ", "),
+         ". Vérifier la connexion à geo.api.gouv.fr puis relancer.")
+  }
+  assoc
 }
 
 # =================================================================
