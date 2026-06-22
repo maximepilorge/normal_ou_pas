@@ -329,6 +329,11 @@ mod_quiz_server <- function(id, db_pool) {
             )),
             width = 0.1, alpha = 0.4, color = "darkblue"
           ) +
+          # Ligne de référence à la température tirée : on voit ainsi clairement
+          # quels points historiques l'atteignent ou la dépassent (le marqueur
+          # rouge peut masquer un point situé exactement à cette hauteur).
+          geom_hline(yintercept = data_quiz$temp, color = "red",
+                     linetype = "dashed", linewidth = 0.7) +
           # On ajoute la moyenne avec une forme et une couleur distinctes
           geom_point(
             data = points_specifiques,
@@ -345,7 +350,7 @@ mod_quiz_server <- function(id, db_pool) {
             aes(x = "", y = temp_quiz, text = paste(
               "Température du quiz :", temp_quiz, "°C"
             )),
-            color = "red", size = 4, shape = 4, stroke = 1.5
+            color = "red", size = 4, shape = 4, stroke = 1.5, alpha = 0.85
           ) +
           scale_y_continuous(labels = ~paste(.x, "°C")) +
           labs(

@@ -58,7 +58,7 @@ mod_analyse_ui <- function(id) {
           icon("circle-info"),
           HTML(paste(
             "Ces indicateurs reposent sur les températures <b>maximales</b> journalières",
-            "(réanalyse ERA5-Land), choisies pour leur lisibilité par le grand public.",
+            "(réanalyse ERA5-Land), choisies pour leur lisibilité.",
             "Les références climatiques officielles (Météo-France, GIEC) s'appuient sur la",
             "température <b>moyenne</b> et sur des séries de stations homogénéisées.",
             "Ces valeurs ne sont donc pas directement comparables aux chiffres officiels :",
