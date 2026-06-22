@@ -8,8 +8,9 @@
 #    statistics`, calculées à la demande et beaucoup trop lentes/congestionnées.
 #  - Téléchargement par SEMESTRE (6 mois = plus grande granularité acceptée par
 #    le CDS) : ~154 requêtes au lieu de ~924, moins d'overhead.
-#  - Requêtes CONCURRENTES via wf_request_batch (workers) : c'est le vrai levier,
-#    le temps total étant dominé par l'attente côté CDS.
+#  - Traitement SÉQUENTIEL avec intégration immédiate après chaque semestre :
+#    robuste aux rejets (un semestre raté est sauté puis repris au run suivant
+#    par le détecteur de trous) et sans perte en cas d'interruption.
 #  - Le max journalier est calculé localement à partir des heures (par maille),
 #    puis agrégé en moyenne spatiale pondérée par la surface communale couverte.
 
@@ -178,20 +179,16 @@ recuperer_donnees_era5 <- function(villes_a_telecharger = NULL) {
 
   # (traiter_fichier_horaire est défini au niveau supérieur, en début de script.)
 
-  # --- Téléchargement CONCURRENT (dataset HORAIRE archivé, par semestre) ---
+  # --- Téléchargement (dataset HORAIRE archivé, par semestre) ---
   # Le dataset horaire reanalysis-era5-land (archivé) se récupère bien plus vite
   # que les statistiques journalières calculées à la demande. On télécharge par
-  # SEMESTRE (6 mois = plus grande granularité acceptée par le CDS), on
-  # parallélise via wf_request_batch, et on sauvegarde après chaque lot
-  # (points de reprise).
-  print("Début du téléchargement concurrent ERA5-Land (horaire, par semestre)...")
+  # SEMESTRE (6 mois = plus grande granularité acceptée par le CDS), de façon
+  # séquentielle, avec intégration et sauvegarde immédiates après chaque semestre.
+  print("Début du téléchargement ERA5-Land (horaire, par semestre)...")
   zone <- c(max(villes$latitude) + 1, min(villes$longitude) - 1,
             min(villes$latitude) - 1, max(villes$longitude) + 1)
   annee_courante <- year(Sys.Date())
   heures_24 <- sprintf("%02d:00", 0:23)
-
-  WORKERS    <- 6    # requêtes CDS simultanées (à ajuster selon ce que le serveur accepte)
-  TAILLE_LOT <- 12   # unités (semestres) par lot (sauvegarde après chaque lot)
 
   # Liste des semestres ATTENDUS (1950 -> aujourd'hui), puis on ne retient que
   # ceux manquants ou incomplets : on compare les jours réellement présents dans
@@ -269,40 +266,45 @@ recuperer_donnees_era5 <- function(villes_a_telecharger = NULL) {
     res
   }
 
-  lots <- split(unites, ceiling(seq_along(unites) / TAILLE_LOT))
+  # Téléchargement SÉQUENTIEL robuste : chaque semestre est téléchargé, puis
+  # intégré et sauvegardé IMMÉDIATEMENT. Un semestre rejeté/en échec est
+  # simplement sauté (il sera repris au prochain run par le détecteur de trous).
+  # Avantages : pas de lot tout-ou-rien, pas de blocage sur une requête rejetée,
+  # et une interruption ne perd au pire que le semestre en cours.
+  for (u in unites) {
+    etiquette <- paste0(u$an, "/S", u$sem)
+    print(paste0("Téléchargement ", etiquette, " (mois ", paste(u$mois, collapse = ","), ")..."))
 
-  for (lot in lots) {
-    etiquette <- paste0(lot[[1]]$an, "/S", lot[[1]]$sem, " -> ",
-                        lot[[length(lot)]]$an, "/S", lot[[length(lot)]]$sem)
-    print(paste0("Lot ", etiquette, " (", length(lot), " requêtes, workers = ", WORKERS, ")..."))
-    requetes <- lapply(lot, construire_requete)
+    f <- file.path(path_to_save, u$target)
+    if (file.exists(f)) file.remove(f)  # repartir d'un fichier propre
 
-    # On n'interrompt pas tout le run si un lot échoue partiellement : on agrège
-    # ensuite ce qui a effectivement été téléchargé.
-    tryCatch(
-      wf_request_batch(request_list = requetes, workers = WORKERS,
-                       user = "maxp17.mp@gmail.com", path = path_to_save, time_out = 7200),
-      error = function(e) warning("Échec (partiel ?) du lot ", etiquette, " : ", conditionMessage(e))
-    )
+    ok <- tryCatch({
+      wf_request(user = "maxp17.mp@gmail.com", request = construire_requete(u),
+                 path = path_to_save, transfer = TRUE, verbose = FALSE)
+      TRUE
+    }, error = function(e) {
+      warning("Échec du téléchargement ", etiquette, " : ", conditionMessage(e)); FALSE
+    })
+    if (!ok) next
 
-    df_lot <- bind_rows(lapply(lot, agreger_unite))
-    if (nrow(df_lot) > 0) {
-      # Garde-fou de plausibilité : un lot couvrant des mois d'été doit présenter
-      # des maxima nettement positifs. Des valeurs toutes ~0 trahiraient une
-      # mauvaise variable lue (cf. number/expver) ou une conversion ratée.
-      if (max(df_lot$temperature_max, na.rm = TRUE) < 10) {
-        warning("Valeurs suspectes pour le lot ", etiquette,
-                " (max = ", round(max(df_lot$temperature_max, na.rm = TRUE), 1),
-                " °C) : vérifier la variable lue dans le NetCDF.")
-      }
-      df_final_daily_max <- bind_rows(df_final_daily_max, df_lot)
-      saveRDS(df_final_daily_max, full_path_final)
-      print(paste0("  Lot sauvegardé (", nrow(df_lot), " lignes ville-jour, max ",
-                   round(max(df_lot$temperature_max, na.rm = TRUE), 1), " °C). Total cumulé : ",
-                   nrow(df_final_daily_max)))
-    } else {
-      warning("Aucune donnée agrégée pour le lot ", etiquette)
+    df_unit <- agreger_unite(u)
+    if (is.null(df_unit) || nrow(df_unit) == 0) { warning("Aucune donnée agrégée pour ", etiquette); next }
+
+    # Garde-fou de plausibilité : des maxima d'été doivent être nettement
+    # positifs ; des valeurs ~0 trahiraient une mauvaise variable lue.
+    if (max(df_unit$temperature_max, na.rm = TRUE) < 10) {
+      warning("Valeurs suspectes pour ", etiquette,
+              " (max = ", round(max(df_unit$temperature_max, na.rm = TRUE), 1),
+              " °C) : semestre ignoré.")
+      next
     }
+
+    # Intégration + sauvegarde immédiate (checkpoint après CHAQUE semestre).
+    df_final_daily_max <- bind_rows(df_final_daily_max, df_unit)
+    saveRDS(df_final_daily_max, full_path_final)
+    print(paste0("  ✅ ", etiquette, " intégré (", nrow(df_unit), " lignes, max ",
+                 round(max(df_unit$temperature_max, na.rm = TRUE), 1), " °C). Total : ",
+                 nrow(df_final_daily_max)))
   }
 
   print("Traitement terminé. Le fichier final est à jour.")
