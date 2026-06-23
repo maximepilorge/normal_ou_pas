@@ -286,7 +286,7 @@ mod_analyse_server <- function(id, db_pool) {
           xaxis = list(fixedrange = TRUE),
           yaxis = list(fixedrange = TRUE)
         ) %>%
-        config(displayModeBar = FALSE)
+        config(displayModeBar = FALSE, responsive = TRUE)
 
       # ggplotly combine les esthétiques fill+alpha dans les libellés de légende
       # (ex. "(Au-dessus de la normale,TRUE)"). On retire la partie TRUE/FALSE et

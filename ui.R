@@ -48,45 +48,71 @@ ui <- fluidPage( # On utilise tagList comme conteneur principal
         color: #007bff !important; /* Couleur bleue vive pour l'icône et le texte */
       }
       
-          /* Règle pour les écrans de petite taille (max 767px), version Bootstrap 3 */
+          /* Règles pour les écrans de petite taille (max 767px). */
       @media (max-width: 767px) {
-        /* 1. On cache le bouton hamburger de Bootstrap 3 */
-        .navbar .navbar-toggle {
+        /* 1. On cache le bouton hamburger (Bootstrap 3 ET 5) */
+        .navbar .navbar-toggle,
+        .navbar .navbar-toggler {
           display: none !important;
         }
 
         /* 2. On force l'affichage du conteneur des liens */
-        .navbar-collapse.collapse {
+        .navbar-collapse.collapse,
+        .navbar-collapse {
           display: block !important;
           height: auto !important;
           overflow: visible !important;
         }
 
-        /* 3. On s'assure que les liens sont bien alignés horizontalement */
+        /* 3. Barre d'onglets sur une seule ligne, défilable horizontalement.
+              Avec 6 onglets, on évite que les libellés ne s'écrasent : chaque
+              onglet garde une largeur lisible et l'utilisateur fait défiler. */
         .navbar-nav {
           display: flex;
           flex-direction: row !important;
-          justify-content: space-around !important;
+          flex-wrap: nowrap !important;
+          justify-content: flex-start;
           width: 100%;
           margin: 0;
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none; /* Firefox : barre de défilement masquée */
         }
+        .navbar-nav::-webkit-scrollbar { display: none; } /* WebKit : idem */
         .navbar-nav > li {
-            float: none; /* Annule un style par défaut de Bootstrap 3 */
+            float: none;
         }
-        
+
         /* 4. On cache le titre de l'app */
         .navbar-brand {
           display: none;
         }
 
-        /* 5. On ajuste le style des onglets */
+        /* 5. Onglets compacts : icône au-dessus du libellé, sans rétrécissement */
         .navbar .nav-item .nav-link {
           display: flex;
           flex-direction: column;
           align-items: center;
-          font-size: 0.75rem;
-          padding: 5px !important;
+          text-align: center;
+          flex: 0 0 auto;
+          min-width: 60px;
+          font-size: 0.7rem;
+          line-height: 1.1;
+          padding: 6px 8px !important;
         }
+        .navbar .nav-item .nav-link i {
+          font-size: 1rem;
+          margin-bottom: 2px;
+        }
+
+        /* 6. Confort tactile : barre latérale moins large, graphiques contenus */
+        .bslib-sidebar-layout > .sidebar {
+          --_sidebar-width: min(85vw, 320px);
+        }
+        .leaflet-container {
+          max-height: 70vh;
+        }
+        .card { margin-bottom: 0.75rem; }
       }
     ")),
     

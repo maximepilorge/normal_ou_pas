@@ -163,7 +163,7 @@ mod_visualisation_server <- function(id, db_pool, ville, periode, annee) {
           )
       
       ggplotly(p, tooltip = "text") %>%
-        config(displayModeBar = FALSE)
+        config(displayModeBar = FALSE, responsive = TRUE)
     })
     
     # 2. On observe les changements de l'année pour mettre à jour le graphique (après le premier affichage)
@@ -185,7 +185,17 @@ mod_visualisation_server <- function(id, db_pool, ville, periode, annee) {
         plotlyProxyInvoke("relayout", list(
           title = paste("Températures maximales journalières à", ville(), "en", annee())
         ))
-      
+
+      # Bug mobile : après la mise à jour des données de l'année, on RÉ-APPLIQUE
+      # la visibilité mobile. Sans cela, les traces masquées sur petit écran
+      # (tendance/points) réapparaissent au changement d'année. Sur grand écran
+      # (!is_mobile = TRUE) cela restaure simplement l'affichage normal.
+      if (!is.null(input$screen_width)) {
+        is_mobile <- input$screen_width < 768
+        plotlyProxy("climate_plot", session) %>%
+          plotlyProxyInvoke("restyle", list(visible = !is_mobile), as.list(5:6))
+      }
+
     }, ignoreInit = TRUE)
     
   })

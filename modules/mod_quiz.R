@@ -380,7 +380,7 @@ mod_quiz_server <- function(id, db_pool) {
             xaxis = list(fixedrange = TRUE),
             yaxis = list(fixedrange = TRUE)
           ) %>%
-          config(displayModeBar = FALSE)
+          config(displayModeBar = FALSE, responsive = TRUE)
         
       })
       
