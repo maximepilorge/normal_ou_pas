@@ -6,9 +6,8 @@
 -- 2. Archive la version actuelle (public -> _old).
 -- 3. Déploie la nouvelle version (preparation -> public).
 -- ====================================================================
-
--- Début de la transaction
-BEGIN;
+-- Note : la transaction (BEGIN/COMMIT/ROLLBACK) est gérée par
+-- deployer_production.R, pas ici, pour éviter un double commit.
 
 -- --- Table: temperatures_max ---
 DROP TABLE IF EXISTS public.temperatures_max;
@@ -22,5 +21,3 @@ ALTER TABLE preparation.stats_normales SET SCHEMA public;
 -- --- Table: quiz_data_precalculee ---
 DROP TABLE IF EXISTS public.quiz_data_precalculee;
 ALTER TABLE preparation.quiz_data_precalculee SET SCHEMA public;
-
-COMMIT;

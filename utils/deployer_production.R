@@ -46,11 +46,15 @@ tryCatch({
   
   # 4. Exécuter chaque commande individuellement
   for (cmd in commands) {
-    clean_cmd <- trimws(cmd)
-    # Ignorer les lignes vides ou les commentaires
-    if (nchar(clean_cmd) > 0 && !startsWith(clean_cmd, "--")) {
-      cat(paste(" -> Exécution:", substr(cmd, 1, 70), "...\n"))
-      dbExecute(con_prod, cmd)
+    # Retirer les lignes de commentaire SQL à l'intérieur de la commande,
+    # sinon une commande précédée d'un commentaire serait ignorée à tort.
+    lignes <- strsplit(cmd, "\n")[[1]]
+    lignes <- lignes[!grepl("^\\s*--", lignes)]
+    clean_cmd <- trimws(paste(lignes, collapse = "\n"))
+    # Ignorer les commandes vides
+    if (nchar(clean_cmd) > 0) {
+      cat(paste(" -> Exécution:", substr(clean_cmd, 1, 70), "...\n"))
+      dbExecute(con_prod, clean_cmd)
     }
   }
   
