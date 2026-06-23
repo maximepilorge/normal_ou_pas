@@ -266,14 +266,17 @@ mod_quiz_server <- function(id, db_pool) {
       diff <- round(abs(data$temp - moyenne_reelle), 1)
       direction <- if (data$temp > moyenne_reelle) "supérieure" else "inférieure"
 
-      # On mémorise les paramètres du résultat pour la carte de partage.
+      # On mémorise les paramètres du résultat pour la carte de partage,
+      # y compris si la réponse de l'utilisateur était correcte.
       dernier_resultat(list(
         ville = data$city,
         date = data$date,
         temp = data$temp,
         normale_moy = moyenne_reelle,
         periode_ref = input$periode_normale,
-        categorie = data$correct_answer
+        categorie = data$correct_answer,
+        juste = is_correct,
+        reponse_utilisateur = input$user_answer
       ))
       
       if (data$correct_answer == "Dans les normales de saison") {

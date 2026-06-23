@@ -30,13 +30,14 @@ BASE_URL <- Sys.getenv("PUBLIC_BASE_URL", "https://normal-ou-pas.com")
     temp = suppressWarnings(as.numeric(query$temp %||% 0)),
     normale_moy = suppressWarnings(as.numeric(query$normale %||% 0)),
     periode_ref = query$periode %||% "",
-    categorie = query$cat %||% "Dans les normales de saison"
+    categorie = query$cat %||% "Dans les normales de saison",
+    juste = { v <- query$juste; if (is.null(v)) NA else isTRUE(v %in% c("1", "true", "TRUE", "oui")) }
   )
 }
 
 # Encode les paramètres pour les réinjecter dans l'URL de l'image.
 .querystring <- function(query) {
-  champs <- c("ville", "date", "temp", "normale", "periode", "cat")
+  champs <- c("ville", "date", "temp", "normale", "periode", "cat", "juste")
   morceaux <- vapply(champs, function(k) {
     v <- query[[k]]
     if (is.null(v)) "" else paste0(k, "=", utils::URLencode(as.character(v), reserved = TRUE))
