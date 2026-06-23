@@ -48,6 +48,9 @@ onStop(function() {
 })
 
 # --- FONCTIONS ---
+# Générateur de la carte de résultat partageable du quiz (fonction pure ggplot).
+source(here::here("utils", "render_partage.R"))
+
 get_season_info <- function(date_input) {
   mois <- month(date_input)
   if (mois %in% c(12, 1, 2)) {

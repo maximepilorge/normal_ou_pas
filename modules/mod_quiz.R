@@ -58,6 +58,8 @@ mod_quiz_server <- function(id, db_pool) {
     boxplot_data <- reactiveVal(NULL)
     score_succes <- reactiveVal(0)
     score_echecs <- reactiveVal(0)
+    # Paramètres du dernier résultat validé (pour la carte de partage).
+    dernier_resultat <- reactiveVal(NULL)
     
     observeEvent(req(input$periode_normale), {
       shinyjs::click("new_question_btn")
@@ -263,6 +265,16 @@ mod_quiz_server <- function(id, db_pool) {
       moyenne_reelle <- data$normale_moy
       diff <- round(abs(data$temp - moyenne_reelle), 1)
       direction <- if (data$temp > moyenne_reelle) "supérieure" else "inférieure"
+
+      # On mémorise les paramètres du résultat pour la carte de partage.
+      dernier_resultat(list(
+        ville = data$city,
+        date = data$date,
+        temp = data$temp,
+        normale_moy = moyenne_reelle,
+        periode_ref = input$periode_normale,
+        categorie = data$correct_answer
+      ))
       
       if (data$correct_answer == "Dans les normales de saison") {
         explication_text <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", round(moyenne_reelle, 1), "°C) et est considérée comme normale à cette période de l'année (autour du ", paste(format(data$date, "%d"), mois_fr[as.numeric(format(data$date, "%m"))]), ") à ", data$city, ".")
@@ -376,9 +388,18 @@ mod_quiz_server <- function(id, db_pool) {
       output$feedback_ui <- renderUI({
         tagList(
           HTML(feedback_body),
-          hr(),               
+          hr(),
           h4("Visualisation de la distribution"),
-          plotlyOutput(session$ns("feedback_boxplot"))
+          plotlyOutput(session$ns("feedback_boxplot")),
+          hr(),
+          div(
+            class = "text-center",
+            p(class = "text-muted small mb-2",
+              "Partagez ce repère de température autour de vous :"),
+            downloadButton(session$ns("telecharger_partage"),
+                           "Partager mon résultat (image)",
+                           icon = icon("share-nodes"), class = "btn-primary")
+          )
         )
       })
       
@@ -387,10 +408,25 @@ mod_quiz_server <- function(id, db_pool) {
       
     })
     
+    # --- Téléchargement de la carte de résultat partageable (PNG 1200×630) ---
+    output$telecharger_partage <- downloadHandler(
+      filename = function() {
+        res <- dernier_resultat()
+        ville <- if (!is.null(res)) gsub("[^A-Za-z0-9]+", "_", res$ville) else "resultat"
+        paste0("normal-ou-pas_", ville, ".png")
+      },
+      content = function(file) {
+        res <- dernier_resultat()
+        req(res)
+        sauver_carte_partage(res, file)
+      },
+      contentType = "image/png"
+    )
+
     return(list(
       successes = score_succes,
       failures = score_echecs
     ))
-    
+
   })
 }
