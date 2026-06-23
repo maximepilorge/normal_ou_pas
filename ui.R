@@ -177,7 +177,10 @@ ui <- fluidPage( # On utilise tagList comme conteneur principal
         setCookie("cookie_consent", "true", 365);
         $("#cookie-banner").hide();
       });
-    )'))
+    )')),
+
+    # 4. Logique de partage de la carte de résultat du quiz
+    tags$script(src = "partage.js")
   ),
   
   

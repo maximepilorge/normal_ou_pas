@@ -58,7 +58,7 @@ mod_carte_server <- function(id, db_pool) {
     pal <- colorNumeric("YlOrRd", domain = domaine, na.color = "#9aa0a6")
 
     construire_popups <- function(df) {
-      lignes <- vapply(seq_len(nrow(df)), function(i) {
+      vapply(seq_len(nrow(df)), function(i) {
         r <- df[i, ]
         rech <- if (is.finite(r$rechauffement)) sprintf("+%.1f °C", r$rechauffement) else "n/d"
         html <- paste0("<b>", r$ville, "</b><br>Réchauffement : <b>", rech, "</b>")
@@ -70,36 +70,49 @@ mod_carte_server <- function(id, db_pool) {
         }
         html
       }, character(1))
-      lignes
     }
 
-    # Carte de base (tuiles + cadrage France), dessinée une seule fois.
+    # Ajoute les pastilles des villes à une carte (leaflet) ou à un proxy
+    # (leafletProxy). Factorisé pour servir au 1er rendu ET aux mises à jour.
+    ajouter_marqueurs <- function(carte, df) {
+      if (nrow(df) == 0) return(carte)
+      rayon <- if (all(is.na(df$rechauffement))) rep(9, nrow(df)) else
+        scales::rescale(df$rechauffement, to = c(8, 20), from = domaine)
+      addCircleMarkers(
+        carte, data = df, lng = ~longitude, lat = ~latitude, group = "villes",
+        radius = rayon, stroke = TRUE, color = "#444444", weight = 1,
+        fillColor = ~pal(rechauffement), fillOpacity = 0.85,
+        label = ~ville, popup = construire_popups(df)
+      )
+    }
+
+    selection_courante <- function() {
+      sel <- input$villes_carte
+      if (is.null(sel)) villes_coords$ville else sel
+    }
+
+    # Carte de base + pastilles de la sélection initiale. Dessiner les marqueurs
+    # ICI (et non seulement via le proxy) évite la race condition où le proxy se
+    # déclenche avant que la carte de l'onglet ne soit rendue : sans cela, seul
+    # le fond s'affichait. On lit la sélection en isolate pour ne pas re-rendre
+    # toute la carte à chaque changement de filtre (géré par l'observeEvent).
     output$carte <- renderLeaflet({
+      df0 <- villes_rechauffement %>% filter(ville %in% isolate(selection_courante()))
       leaflet(options = leafletOptions(minZoom = 4)) %>%
         addProviderTiles(providers$CartoDB.Positron) %>%
         fitBounds(-5.5, 41.0, 9.8, 51.5) %>%
         addLegend("bottomright", pal = pal, values = domaine,
-                  title = "Réchauffement (°C)", opacity = 0.9)
+                  title = "Réchauffement (°C)", opacity = 0.9) %>%
+        ajouter_marqueurs(df0)
     })
 
     # Mise à jour des pastilles selon le filtre, sans redessiner la carte.
     observeEvent(input$villes_carte, {
       df <- villes_rechauffement %>% filter(ville %in% input$villes_carte)
-
-      proxy <- leafletProxy("carte", session) %>% clearGroup("villes")
-      if (nrow(df) > 0) {
-        rayon <- if (all(is.na(df$rechauffement))) rep(8, nrow(df)) else
-          scales::rescale(df$rechauffement, to = c(7, 20),
-                          from = domaine)
-        proxy %>%
-          addCircleMarkers(
-            data = df, lng = ~longitude, lat = ~latitude, group = "villes",
-            radius = rayon, stroke = TRUE, color = "#444444", weight = 1,
-            fillColor = ~pal(rechauffement), fillOpacity = 0.85,
-            label = ~ville, popup = construire_popups(df)
-          )
-      }
-    }, ignoreNULL = FALSE)
+      leafletProxy("carte", session) %>%
+        clearGroup("villes") %>%
+        ajouter_marqueurs(df)
+    }, ignoreNULL = FALSE, ignoreInit = TRUE)
 
   })
 }

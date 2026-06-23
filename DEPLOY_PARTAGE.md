@@ -4,10 +4,19 @@ Deux niveaux, indépendants.
 
 ## 1. Partage par image (actif)
 
-Le bouton **« Partager mon résultat »** du quiz télécharge une image PNG 1200×630
-générée côté serveur ([utils/render_partage.R](utils/render_partage.R)). Rien à
-configurer : fonctionne dans l'app Shiny telle quelle. Sur mobile, l'image
-téléchargée peut être partagée via la feuille native du système.
+Le bouton **« Partager mon résultat »** du quiz génère une image PNG 1200×630
+côté serveur ([utils/render_partage.R](utils/render_partage.R)), l'encode en
+base64 et l'envoie au client. Le script [www/partage.js](www/partage.js) choisit
+alors le meilleur canal, en cascade :
+
+1. **Partage natif** (Web Share API avec fichier) — feuille de partage du système
+   sur mobile et Safari macOS : envoi direct vers réseaux sociaux, messagerie, etc.
+2. **Copie dans le presse-papiers** (ClipboardItem) — sur navigateurs de bureau
+   compatibles (Chrome, Edge) : l'image est copiée, prête à coller.
+3. **Téléchargement** — repli si aucune des deux API n'est disponible.
+
+Rien à configurer ; fonctionne dans l'app Shiny telle quelle (contexte HTTPS
+requis pour le presse-papiers et le partage natif).
 
 ## 2. Aperçu social Open Graph dynamique (optionnel, non activé)
 

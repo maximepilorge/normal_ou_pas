@@ -396,9 +396,9 @@ mod_quiz_server <- function(id, db_pool) {
             class = "text-center",
             p(class = "text-muted small mb-2",
               "Partagez ce repère de température autour de vous :"),
-            downloadButton(session$ns("telecharger_partage"),
-                           "Partager mon résultat (image)",
-                           icon = icon("share-nodes"), class = "btn-primary")
+            actionButton(session$ns("partager_btn"),
+                         "Partager mon résultat",
+                         icon = icon("share-nodes"), class = "btn-primary")
           )
         )
       })
@@ -408,20 +408,36 @@ mod_quiz_server <- function(id, db_pool) {
       
     })
     
-    # --- Téléchargement de la carte de résultat partageable (PNG 1200×630) ---
-    output$telecharger_partage <- downloadHandler(
-      filename = function() {
-        res <- dernier_resultat()
-        ville <- if (!is.null(res)) gsub("[^A-Za-z0-9]+", "_", res$ville) else "resultat"
-        paste0("normal-ou-pas_", ville, ".png")
-      },
-      content = function(file) {
-        res <- dernier_resultat()
-        req(res)
-        sauver_carte_partage(res, file)
-      },
-      contentType = "image/png"
-    )
+    # --- Partage de la carte de résultat (PNG 1200×630) ---
+    # On génère l'image côté serveur, on l'encode en base64 et on l'envoie au
+    # client, qui choisit le meilleur canal : partage natif, presse-papiers ou
+    # téléchargement (cf. www/partage.js).
+    observeEvent(input$partager_btn, {
+      res <- dernier_resultat()
+      req(res)
+
+      f <- tempfile(fileext = ".png")
+      sauver_carte_partage(res, f)
+      on.exit(unlink(f), add = TRUE)
+      b64 <- jsonlite::base64_enc(readBin(f, "raw", n = file.info(f)$size))
+
+      ecart <- round(res$temp - res$normale_moy, 1)
+      sens <- if (ecart > 0) "au-dessus" else if (ecart < 0) "en-dessous" else "dans"
+      texte <- if (ecart == 0) {
+        paste0(res$temp, "°C à ", res$ville, " : exactement dans la normale de saison. Et vous, sauriez-vous situer ce qui est normal ?")
+      } else {
+        paste0(res$temp, "°C à ", res$ville, " : ", sprintf("%+.1f", ecart),
+               "°C ", sens, " de la normale de saison. Et vous, sauriez-vous situer ce qui est normal ?")
+      }
+      ville_fichier <- gsub("[^A-Za-z0-9]+", "_", res$ville)
+
+      session$sendCustomMessage("partage_resultat", list(
+        image = paste0("data:image/png;base64,", b64),
+        filename = paste0("normal-ou-pas_", ville_fichier, ".png"),
+        titre = "Climat : Normal ou pas ?",
+        texte = texte
+      ))
+    })
 
     return(list(
       successes = score_succes,
