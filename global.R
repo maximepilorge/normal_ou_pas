@@ -144,17 +144,8 @@ table_existe <- function(nom) {
 canicules_disponibles <- table_existe("canicules")
 indicateurs_disponibles <- table_existe("indicateurs_annuels")
 
-# Période de référence la plus récente (ex. "1991-2020") et utilitaire pour
-# associer une année au cycle de 30 ans qui la représente le mieux. Servent à
-# l'onglet « Ma référence » (ancrage mémoriel / baseline glissante).
+# Utilitaire : bornes (début, fin) d'un libellé de période "AAAA-AAAA".
 .periode_bornes <- function(p) as.numeric(strsplit(p, "-")[[1]])
-periode_recente <- periodes_disponibles[which.max(vapply(periodes_disponibles,
-  function(p) .periode_bornes(p)[2], numeric(1)))]
-
-periode_pour_annee <- function(annee) {
-  milieux <- vapply(periodes_disponibles, function(p) mean(.periode_bornes(p)), numeric(1))
-  periodes_disponibles[which.min(abs(milieux - annee))]
-}
 
 # --- Données pour la carte comparée des villes (onglet « Carte ») ---
 # Coordonnées WGS84 des villes (source de vérité : utils/definir_mailles_communes.R,
@@ -194,45 +185,22 @@ villes_coords <- tibble::tribble(
   "Ajaccio",          41.9207,  8.7397
 )
 
-# Réchauffement par ville = écart de la tmax annuelle moyenne entre une période
-# de référence ancienne (1961-1990) et récente (1991-2020). Calculé une fois au
-# démarrage ; gardé contre toute erreur pour ne jamais bloquer le lancement.
-villes_rechauffement <- tryCatch({
-  moy_periode <- function(a1, a2, col) {
-    tbl(db_pool, "temperatures_max") %>%
-      filter(annee >= a1, annee <= a2) %>%
-      group_by(ville) %>%
-      summarise(m = mean(temperature_max, na.rm = TRUE), .groups = "drop") %>%
-      collect() %>%
-      rename(!!col := m)
-  }
-  ref <- moy_periode(1961, 1990, "moy_ref")
-  rec <- moy_periode(1991, 2020, "moy_rec")
+# Référence pour la carte temporelle : on cartographie, par ville et par année,
+# l'écart à la normale d'une période ANCIENNE (la plus ancienne disponible, p. ex.
+# 1951-1980), afin de visualiser le réchauffement progresser dans le temps. On
+# pré-charge les normales JOURNALIÈRES de cette période : l'anomalie d'une année se
+# calcule en comparant chaque jour observé à la normale du même jour calendaire
+# (robuste aux années partielles). Gardé contre toute erreur pour ne pas bloquer
+# le lancement.
+periode_ref_carte <- periodes_disponibles[which.min(
+  vapply(periodes_disponibles, function(p) .periode_bornes(p)[1], numeric(1)))]
 
-  rech <- villes_coords %>%
-    left_join(ref, by = "ville") %>%
-    left_join(rec, by = "ville") %>%
-    mutate(rechauffement = moy_rec - moy_ref)
-
-  # Enrichissements optionnels pour les popups (si le pipeline tmin a tourné).
-  if (canicules_disponibles) {
-    nb_can <- tryCatch(
-      tbl(db_pool, "canicules") %>% group_by(ville) %>%
-        summarise(nb_canicules = n(), .groups = "drop") %>% collect(),
-      error = function(e) NULL)
-    if (!is.null(nb_can)) rech <- rech %>% left_join(nb_can, by = "ville")
-  }
-  if (indicateurs_disponibles) {
-    nt <- tryCatch(
-      tbl(db_pool, "indicateurs_annuels") %>% filter(annee >= 2011) %>%
-        group_by(ville) %>%
-        summarise(nuits_trop_recent = mean(nuits_tropicales, na.rm = TRUE), .groups = "drop") %>%
-        collect(),
-      error = function(e) NULL)
-    if (!is.null(nt)) rech <- rech %>% left_join(nt, by = "ville")
-  }
-  rech
-}, error = function(e) {
-  warning("Calcul du réchauffement par ville indisponible : ", conditionMessage(e))
-  villes_coords %>% mutate(moy_ref = NA_real_, moy_rec = NA_real_, rechauffement = NA_real_)
-})
+normales_jour_ref <- tryCatch(
+  tbl(db_pool, "stats_normales") %>%
+    filter(periode_ref == !!periode_ref_carte) %>%
+    select(ville, mois, jour_mois, t_moy) %>%
+    collect(),
+  error = function(e) {
+    warning("Normales journalières (carte) indisponibles : ", conditionMessage(e))
+    NULL
+  })

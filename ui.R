@@ -9,7 +9,6 @@ library(bslib)
 source("modules/mod_quiz.R")
 source("modules/mod_visualisation.R")
 source("modules/mod_analyse.R")
-source("modules/mod_memoire.R")
 source("modules/mod_carte.R")
 
 ui <- fluidPage( # On utilise tagList comme conteneur principal
@@ -206,11 +205,6 @@ ui <- fluidPage( # On utilise tagList comme conteneur principal
       "Comparaison",
       mod_visualisation_ui("visu_1"),
       icon = icon("chart-bar")
-      ),
-    nav_panel(
-      "Ma référence",
-      mod_memoire_ui("memoire_1"),
-      icon = icon("hourglass-half")
       ),
     nav_panel(
       "Evolution",
