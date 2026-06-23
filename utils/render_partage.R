@@ -34,7 +34,7 @@ dessiner_carte_partage <- function(params) {
                    else if (grepl("En-dessous", categorie)) "en-dessous des normales"
                    else "dans les normales de saison"
 
-  ecart_txt <- if (ecart == 0) "à la normale de saison"
+  ecart_txt <- if (ecart == 0) "pile dans la normale de saison"
                else paste0(format(abs(ecart), nsmall = 1, decimal.mark = ","),
                            " °C ", if (ecart > 0) "au-dessus" else "en-dessous",
                            " de la normale de saison")
@@ -62,17 +62,20 @@ dessiner_carte_partage <- function(params) {
   }
 
   p +
-    # Énoncé : lieu, date et température observée.
-    annotate("text", x = 6, y = 73, hjust = 0, size = 8.5, color = "#343a40",
-             label = paste0("Le ", date_txt, ", à ", params$ville, ", il a fait")) +
+    # Scénario du quiz : un jour de l'année (sans prétendre à une date précise)
+    # et une température maximale PROPOSÉE (tirée dans la plage historique).
+    annotate("text", x = 6, y = 74, hjust = 0, size = 8.5, color = "#343a40",
+             label = paste0("Un ", date_txt, " à ", params$ville)) +
     annotate("text", x = 6, y = 58, hjust = 0, size = 24, fontface = "bold",
              color = couleur_accent, label = paste0(fmt(temp), " °C")) +
+    annotate("text", x = 6, y = 47, hjust = 0, size = 5.5, color = "#6c757d",
+             fontface = "italic", label = "température maximale proposée par le quiz") +
     # Verdict climatique : la bonne réponse, explicitée.
-    annotate("text", x = 6, y = 41, hjust = 0, size = 9, fontface = "bold",
-             color = couleur_accent, label = paste0("C'était ", verdict_label)) +
-    annotate("text", x = 6, y = 31, hjust = 0, size = 7, color = "#343a40",
+    annotate("text", x = 6, y = 37, hjust = 0, size = 9, fontface = "bold",
+             color = couleur_accent, label = paste0("Réponse : ", verdict_label)) +
+    annotate("text", x = 6, y = 27, hjust = 0, size = 6.5, color = "#343a40",
              label = paste0("soit ", ecart_txt)) +
-    annotate("text", x = 6, y = 23, hjust = 0, size = 6.5, color = "#6c757d",
+    annotate("text", x = 6, y = 19, hjust = 0, size = 6, color = "#6c757d",
              label = paste0("Normale ", params$periode_ref, " : ", fmt(normale), " °C")) +
     # Pied de page : appel à l'action.
     annotate("text", x = 6, y = 9, hjust = 0, size = 6.5, color = "#6c757d",
