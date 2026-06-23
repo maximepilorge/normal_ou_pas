@@ -15,6 +15,12 @@
 # `COPY data data` du Dockerfile fonctionne lors du build Render.
 data/*
 !data/.gitkeep
+# Exception : données de RÉFÉRENCE consommées par le pipeline (pas un cache),
+# qui doivent être versionnées (seuils canicule officiels Météo-France).
+!data/seuils_canicule_departements.csv
+
+# Cartes de contrôle HTML générées par les scripts utils/ (artefacts QA)
+carte_controle_*.html
 
 # Fichiers temporaires R
 .RDataTmp

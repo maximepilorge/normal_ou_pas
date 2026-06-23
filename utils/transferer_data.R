@@ -13,7 +13,8 @@ library(here)
 load_dot_env(file = here::here(".Renviron"))
 
 # Noms des tables à transférer
-tables_a_transferer <- c("temperatures_max", "stats_normales", "quiz_data_precalculee")
+tables_a_transferer <- c("temperatures_max", "stats_normales", "quiz_data_precalculee",
+                         "indicateurs_annuels", "canicules")
 
 # --- Connexions aux bases de données ---
 cat("Connexion aux bases de données...\n")
@@ -87,7 +88,21 @@ tryCatch({
   dbExecute(con_prod, "CREATE INDEX idx_quiz_optimise ON preparation.quiz_data_precalculee (periode_ref, categorie, ville, mois, jour_mois);")
   dbExecute(con_prod, "CREATE INDEX idx_quiz_saison ON preparation.quiz_data_precalculee (periode_ref, categorie, mois);")
   dbExecute(con_prod, "VACUUM ANALYZE preparation.quiz_data_precalculee;")
-  
+
+  # -- Table: indicateurs_annuels --
+  cat("\nTable 'indicateurs_annuels'...\n")
+  dbExecute(con_prod, "ALTER TABLE preparation.indicateurs_annuels ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
+  dbExecute(con_prod, "ALTER TABLE preparation.indicateurs_annuels ADD CONSTRAINT uc_indic_annuels_ville_annee UNIQUE (ville, annee);")
+  dbExecute(con_prod, "CREATE INDEX idx_indic_annuels_ville ON preparation.indicateurs_annuels (ville, annee);")
+  dbExecute(con_prod, "VACUUM ANALYZE preparation.indicateurs_annuels;")
+
+  # -- Table: canicules --
+  cat("\nTable 'canicules'...\n")
+  dbExecute(con_prod, "ALTER TABLE preparation.canicules ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
+  dbExecute(con_prod, "ALTER TABLE preparation.canicules ADD CONSTRAINT uc_canicules_ville_debut UNIQUE (ville, date_debut);")
+  dbExecute(con_prod, "CREATE INDEX idx_canicules_ville_annee ON preparation.canicules (ville, annee);")
+  dbExecute(con_prod, "VACUUM ANALYZE preparation.canicules;")
+
   cat("✅ Structure appliquée avec succès.\n")
   
 }, finally = {

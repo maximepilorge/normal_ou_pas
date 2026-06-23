@@ -68,7 +68,7 @@ traiter_fichier_horaire <- function(nc_path, villes_avec_coords_grille) {
   # Mailles uniques à extraire (une maille peut desservir plusieurs villes).
   mailles <- distinct(villes_avec_coords_grille, lon_grille, lat_grille)
 
-  max_journalier <- bind_rows(lapply(seq_len(nrow(mailles)), function(k) {
+  extremes_journaliers <- bind_rows(lapply(seq_len(nrow(mailles)), function(k) {
     i <- match(mailles$lon_grille[k], lon)
     j <- match(mailles$lat_grille[k], lat)
     if (is.na(i) || is.na(j)) return(NULL)
@@ -78,14 +78,19 @@ traiter_fichier_horaire <- function(nc_path, villes_avec_coords_grille) {
            date = dates, t = serie) %>%
       filter(is.finite(t)) %>%
       group_by(lon_grille, lat_grille, date) %>%
-      summarise(tmax_maille = max(t), .groups = "drop")
+      summarise(tmax_maille = max(t), tmin_maille = min(t), .groups = "drop")
   }))
 
-  # Moyenne spatiale pondérée par ville.
-  max_journalier %>%
+  # Moyenne spatiale pondérée par ville (tmax ET tmin issues de la MÊME série
+  # horaire : la tmin est le min des 24 valeurs, la tmax leur max).
+  extremes_journaliers %>%
     inner_join(villes_avec_coords_grille, by = c("lon_grille", "lat_grille")) %>%
     group_by(ville, date) %>%
-    summarise(temperature_max = weighted.mean(tmax_maille, poids), .groups = "drop")
+    summarise(
+      temperature_max = weighted.mean(tmax_maille, poids),
+      temperature_min = weighted.mean(tmin_maille, poids),
+      .groups = "drop"
+    )
 }
 
 # --------------------
@@ -110,7 +115,15 @@ recuperer_donnees_era5 <- function(villes_a_telecharger = NULL) {
   if (file.exists(full_path_final)) {
     print(paste("Fichier existant trouvé. Chargement de", nom_fichier_final, "et poursuite du travail."))
     df_final_daily_max <- readRDS(full_path_final)
-    print(paste("Dernière date présente :", as.character(max(df_final_daily_max$date, na.rm = TRUE))))
+    # Si le RDS précède l'ajout de la température MINIMALE, on repart de zéro :
+    # poursuivre n'apporterait la tmin que pour les nouvelles dates, laissant un
+    # historique mi-peuplé. Un re-téléchargement complet garantit tmin partout.
+    if (!"temperature_min" %in% names(df_final_daily_max)) {
+      print("⚠️ Données existantes sans 'temperature_min' : re-téléchargement complet pour reconstruire tmin sur tout l'historique.")
+      df_final_daily_max <- data.frame()
+    } else {
+      print(paste("Dernière date présente :", as.character(max(df_final_daily_max$date, na.rm = TRUE))))
+    }
   } else {
     print(paste("Fichier", nom_fichier_final, "non trouvé. Démarrage de zéro."))
     df_final_daily_max <- data.frame()

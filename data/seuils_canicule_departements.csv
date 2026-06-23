@@ -1,0 +1,42 @@
+# Seuils de vigilance canicule par département (dispositif officiel Météo-France / Santé publique France).
+# Critère officiel : une canicule est caractérisée quand les IBM (Indicateurs BioMétéorologiques),
+# moyennes glissantes sur 3 jours consécutifs des températures MINIMALES (IBMn) et MAXIMALES (IBMx),
+# atteignent/dépassent SIMULTANÉMENT les seuils départementaux smin (nuit) et smax (jour).
+#
+# Colonnes : departement (code INSEE 2 car.), nom_departement, smin (°C, IBM min/nuit), smax (°C, IBM max/jour)
+# Laisser smin/smax VIDES pour les départements dont le seuil officiel reste à saisir
+# (depuis l'annexe de l'arrêté Météo-France) : ces villes seront EXCLUES du calcul des canicules
+# tant que leurs seuils ne sont pas renseignés (jamais de donnée approximative).
+#
+# Valeurs renseignées ci-dessous sourcées (PACA + qq départements) ; les autres restent À COMPLÉTER.
+departement,nom_departement,smin,smax
+06,Alpes-Maritimes,24,31
+11,Aude,,
+13,Bouches-du-Rhône,24,35
+17,Charente-Maritime,,
+21,Côte-d'Or,,
+25,Doubs,,
+29,Finistère,,
+31,Haute-Garonne,21,36
+33,Gironde,21,35
+34,Hérault,,
+35,Ille-et-Vilaine,,
+37,Indre-et-Loire,,
+42,Loire,19,35
+44,Loire-Atlantique,,
+49,Maine-et-Loire,,
+51,Marne,,
+57,Moselle,,
+59,Nord,18,33
+63,Puy-de-Dôme,,
+66,Pyrénées-Orientales,,
+67,Bas-Rhin,,
+69,Rhône,,
+75,Paris,,
+76,Seine-Maritime,,
+80,Somme,,
+83,Var,23,35
+84,Vaucluse,21,36
+86,Vienne,,
+87,Haute-Vienne,,
+2A,Corse-du-Sud,,

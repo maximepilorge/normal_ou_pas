@@ -11,6 +11,12 @@ library(RPostgres)
 library(dotenv)
 library(here)
 
+# Fonctions de calcul des indicateurs dérivés (annuels + canicules).
+source(here::here("utils", "calculer_indicateurs.R"))
+# Liste des villes + code INSEE (pour le mapping ville -> département des seuils).
+# `source` n'exécute pas le bloc autonome du fichier (cf. sys.nframe()).
+source(here::here("utils", "definir_mailles_communes.R"))
+
 cat("Début de la préparation complète de la base de données...\n")
 
 # --- Chargement des variables ---
@@ -34,7 +40,7 @@ tryCatch({
   # --- Étape 1 : Chargement et écriture des données brutes ---
   cat("1/5 - Chargement des données brutes...\n")
   donnees_brutes_initiales <- readRDS(chemin_brutes_rds) %>%
-    filter(is.finite(temperature_max))
+    filter(is.finite(temperature_max), is.finite(temperature_min))
   
   cat("2/5 - Préparation des données brutes...\n")
   donnees_brutes <- donnees_brutes_initiales %>%
@@ -166,8 +172,26 @@ tryCatch({
     )
   
   dbWriteTable(con, "quiz_data_precalculee", as.data.frame(quiz_data_precalculee), overwrite = TRUE)
-  
-  
+
+
+  # --- Étape 4 bis : Indicateurs annuels par ville ---
+  cat("5/7 - Pré-calcul des indicateurs annuels (nuits tropicales, jours de chaleur, records)...\n")
+  indicateurs_annuels <- calculer_indicateurs_annuels(donnees_brutes)
+  dbWriteTable(con, "indicateurs_annuels", as.data.frame(indicateurs_annuels), overwrite = TRUE)
+
+
+  # --- Étape 4 ter : Épisodes de canicule (définition officielle Météo-France) ---
+  cat("6/7 - Détection des canicules (IBM 3 j vs seuils départementaux)...\n")
+  chemin_seuils <- here::here("data", "seuils_canicule_departements.csv")
+  seuils_canicule <- read.csv(chemin_seuils, comment.char = "#",
+                              colClasses = c(departement = "character"),
+                              stringsAsFactors = FALSE)
+  canicules <- calculer_canicules(donnees_brutes, villes_insee, seuils_canicule)
+  cat(paste0("    -> ", nrow(canicules), " épisode(s) de canicule détecté(s) sur ",
+             dplyr::n_distinct(canicules$ville), " ville(s).\n"))
+  dbWriteTable(con, "canicules", as.data.frame(canicules), overwrite = TRUE)
+
+
   # --- Étape finale : Application de la structure sur la base locale ---
   cat("Application de la structure (Clés, Contraintes, Index) sur la base de données locale...\n")
   
@@ -192,7 +216,21 @@ tryCatch({
   dbExecute(con, "CREATE INDEX idx_quiz_optimise ON public.quiz_data_precalculee (periode_ref, categorie, ville, mois, jour_mois);")
   dbExecute(con, "CREATE INDEX idx_quiz_saison ON public.quiz_data_precalculee (periode_ref, categorie, mois);")
   dbExecute(con, "VACUUM ANALYZE public.quiz_data_precalculee;")
-  
+
+  # -- Table: indicateurs_annuels --
+  cat("\nTable 'indicateurs_annuels'...\n")
+  dbExecute(con, "ALTER TABLE public.indicateurs_annuels ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
+  dbExecute(con, "ALTER TABLE public.indicateurs_annuels ADD CONSTRAINT uc_indic_annuels_ville_annee UNIQUE (ville, annee);")
+  dbExecute(con, "CREATE INDEX idx_indic_annuels_ville ON public.indicateurs_annuels (ville, annee);")
+  dbExecute(con, "VACUUM ANALYZE public.indicateurs_annuels;")
+
+  # -- Table: canicules --
+  cat("\nTable 'canicules'...\n")
+  dbExecute(con, "ALTER TABLE public.canicules ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
+  dbExecute(con, "ALTER TABLE public.canicules ADD CONSTRAINT uc_canicules_ville_debut UNIQUE (ville, date_debut);")
+  dbExecute(con, "CREATE INDEX idx_canicules_ville_annee ON public.canicules (ville, annee);")
+  dbExecute(con, "VACUUM ANALYZE public.canicules;")
+
   cat("✅ Structure appliquée avec succès sur la base locale.\n")
   
 }, finally = {

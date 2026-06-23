@@ -21,3 +21,11 @@ ALTER TABLE preparation.stats_normales SET SCHEMA public;
 -- --- Table: quiz_data_precalculee ---
 DROP TABLE IF EXISTS public.quiz_data_precalculee;
 ALTER TABLE preparation.quiz_data_precalculee SET SCHEMA public;
+
+-- --- Table: indicateurs_annuels ---
+DROP TABLE IF EXISTS public.indicateurs_annuels;
+ALTER TABLE preparation.indicateurs_annuels SET SCHEMA public;
+
+-- --- Table: canicules ---
+DROP TABLE IF EXISTS public.canicules;
+ALTER TABLE preparation.canicules SET SCHEMA public;
