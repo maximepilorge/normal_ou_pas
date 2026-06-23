@@ -192,7 +192,7 @@ ui <- fluidPage( # On utilise tagList comme conteneur principal
                  p("La méthodologie de l'application repose sur des données publiques et des techniques de traitement géospatial standards."),
                  tags$ul(
                    tags$li(strong("Source des données : "), "Les températures proviennent du jeu de données ERA5-Land, accessible via le Copernicus Climate Change Service (C3S). C'est une base de données de 'réanalyse' climatique qui combine des observations passées avec des modèles météorologiques pour créer un enregistrement climatique complet et cohérent."),
-                   tags$li(strong("Granularité : "), "Les données sont initialement téléchargées à une fréquence horaire puis agrégées pour ne conserver que la température maximale de chaque journée. La période couverte s'étend de 1950 à aujourd'hui."),
+                   tags$li(strong("Granularité : "), "Les données sont initialement téléchargées à une fréquence horaire puis agrégées pour conserver, pour chaque journée, la température maximale (max des 24 heures) et la température minimale (min des 24 heures). La période couverte s'étend de 1950 à aujourd'hui."),
                    tags$li(strong("Attribution des données à une ville : "), "Les données ERA5-Land sont fournies sur une grille géographique avec des mailles d'environ 9x9 km. Plutôt que de retenir une seule maille, l'application sélectionne ", strong("toutes les mailles qui recouvrent l'emprise de la commune"), " et les combine par une moyenne ", strong("pondérée par la part de surface communale couverte par chaque maille"), ". Une grande commune (Paris, Marseille…) est ainsi représentée par plusieurs mailles, ce qui reflète mieux son étendue réelle qu'un point unique."),
                    tags$li(strong("Important - Ce que cette température représente : "), "La valeur affichée est la température maximale journalière, ", strong("moyennée spatialement (pondérée par les surfaces) sur les mailles couvrant la commune"), ". Chaque maille ERA5-Land représentant déjà une moyenne sur environ 81 km² (9x9 km), cette valeur peut différer de la température que vous lisez sur un thermomètre chez vous ou de celle annoncée dans les prévisions météo, qui correspondent souvent à des mesures plus locales (aéroport, station météo spécifique).")
                  ),
@@ -217,7 +217,26 @@ ui <- fluidPage( # On utilise tagList comme conteneur principal
                  p("Cette méthode signifie qu'environ 80% des températures de la période de référence sont considérées comme 'normales'."),
                  
                  hr(),
-                 
+
+                 h3("Aller plus loin 🔗"),
+                 p("Cette application teste vos repères de température. Pour explorer plus largement le changement climatique en France et ses indicateurs, d'autres ressources de référence complètent cette approche :"),
+                 tags$ul(
+                   tags$li(
+                     tags$a(href = "https://dataclimat.fr/", target = "_blank", rel = "noopener", "dataclimat.fr"),
+                     " — visualisations et indicateurs du changement climatique en France."
+                   ),
+                   tags$li(
+                     tags$a(href = "https://meteofrance.com/climathd", target = "_blank", rel = "noopener", "Météo-France — Climat HD"),
+                     " — bilan du climat passé et futur ; source des seuils départementaux de canicule utilisés ici."
+                   ),
+                   tags$li(
+                     tags$a(href = "https://climate.copernicus.eu/", target = "_blank", rel = "noopener", "Copernicus Climate Change Service (C3S)"),
+                     " — fournisseur du jeu de données ERA5-Land à l'origine de toutes les températures de l'application."
+                   )
+                 ),
+
+                 hr(),
+
                  h3("Code Source 💻"),
                  p("Pour les plus curieux, le code source complet de cette application est disponible sur GitHub. N'hésitez pas à le consulter, à le réutiliser ou à proposer des améliorations !"),
                  p(style = "text-align: center; margin-top: 20px;",
