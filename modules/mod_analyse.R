@@ -68,7 +68,39 @@ mod_analyse_ui <- function(id) {
       ),
       
       uiOutput(ns("resultats_defaut_ui")),
-      uiOutput(ns("resultats_seuil_ui")) 
+      uiOutput(ns("resultats_seuil_ui")),
+
+      card(
+        full_screen = TRUE,
+        card_header("Vagues de chaleur (canicules) par décennie"),
+        plotOutput(ns("canicules_plot"), height = "320px"),
+        card_footer(
+          class = "small text-muted",
+          icon("circle-info"),
+          HTML(paste(
+            "Canicules au sens officiel Météo-France : les indicateurs",
+            "biométéorologiques (moyennes glissantes sur 3 jours des températures",
+            "minimales et maximales) dépassent simultanément les seuils du département.",
+            "Nécessite la température minimale et des seuils départementaux renseignés."
+          ))
+        )
+      ),
+
+      card(
+        full_screen = TRUE,
+        card_header("Records quotidiens de chaleur vs de froid, par décennie"),
+        plotOutput(ns("records_plot"), height = "320px"),
+        card_footer(
+          class = "small text-muted",
+          icon("circle-info"),
+          HTML(paste(
+            "Un record quotidien est battu lorsqu'une valeur dépasse toutes les",
+            "années <b>antérieures</b> pour ce jour calendaire. En climat stable, on",
+            "attendrait autant de records chauds que froids ; l'historique débutant",
+            "en 1950, les premières décennies en comptent mécaniquement davantage."
+          ))
+        )
+      )
     )
   )
 }
@@ -392,13 +424,90 @@ mod_analyse_server <- function(id, db_pool) {
       ggplot(donnees_plot, aes(x = as.factor(decennie), y = nb_jours, fill = statut)) +
         geom_col(alpha = 0.8) +
         geom_text(aes(label = nb_jours), vjust = -0.5, size = 4.5) +
-        scale_fill_manual(name = "Statut", 
+        scale_fill_manual(name = "Statut",
                           values = c("Complète" = "steelblue", "Partielle" = "grey70")) +
-        labs(x = "Décennie", y = "Nombre de jours") + 
+        labs(x = "Décennie", y = "Nombre de jours") +
         theme_minimal(base_size = 14) +
         theme(legend.position = "bottom") +
-        scale_y_continuous(expand = expansion(mult = c(0, 0.15))) 
+        scale_y_continuous(expand = expansion(mult = c(0, 0.15)))
     })
-    
+
+    # --- Canicules & records (nécessitent la mise à jour tmin du pipeline) ---
+    # État de repli affiché tant que les données ne sont pas disponibles.
+    etat_indisponible <- function(msg) {
+      ggplot() +
+        annotate("text", x = 0, y = 0, size = 5, color = "grey40",
+                 label = paste(strwrap(msg, width = 50), collapse = "\n")) +
+        theme_void()
+    }
+
+    canicules_ville <- reactive({
+      req(input$ville_analyse, input$annee_range_analyse)
+      if (!canicules_disponibles) return(NULL)
+      a1 <- input$annee_range_analyse[1]; a2 <- input$annee_range_analyse[2]
+      tryCatch(
+        tbl(db_pool, "canicules") %>%
+          filter(ville == !!input$ville_analyse, annee >= !!a1, annee <= !!a2) %>%
+          select(duree_jours, intensite_max, annee) %>%
+          collect(),
+        error = function(e) NULL)
+    }) %>% bindCache(input$ville_analyse, input$annee_range_analyse, canicules_disponibles)
+
+    indicateurs_ville <- reactive({
+      req(input$ville_analyse, input$annee_range_analyse)
+      if (!indicateurs_disponibles) return(NULL)
+      a1 <- input$annee_range_analyse[1]; a2 <- input$annee_range_analyse[2]
+      tryCatch(
+        tbl(db_pool, "indicateurs_annuels") %>%
+          filter(ville == !!input$ville_analyse, annee >= !!a1, annee <= !!a2) %>%
+          select(annee, records_chaud, records_froid) %>%
+          collect(),
+        error = function(e) NULL)
+    }) %>% bindCache(input$ville_analyse, input$annee_range_analyse, indicateurs_disponibles)
+
+    output$canicules_plot <- renderPlot({
+      df <- canicules_ville()
+      if (is.null(df)) return(etat_indisponible(
+        "Indicateur disponible après la mise à jour des données (température minimale ERA5)."))
+      if (nrow(df) == 0) return(etat_indisponible(
+        "Aucune canicule détectée pour cette ville sur la période — ou seuils départementaux non encore renseignés."))
+
+      df %>%
+        mutate(decennie = floor(annee / 10) * 10) %>%
+        group_by(decennie) %>%
+        summarise(jours = sum(duree_jours), episodes = n(), .groups = "drop") %>%
+        ggplot(aes(x = as.factor(decennie), y = jours)) +
+        geom_col(fill = "#E41A1C", alpha = 0.85) +
+        geom_text(aes(label = paste0(jours, " j\n", episodes, " ép.")),
+                  vjust = -0.3, size = 4.5, lineheight = 0.9) +
+        labs(x = "Décennie", y = "Jours de canicule") +
+        theme_minimal(base_size = 14) +
+        scale_y_continuous(expand = expansion(mult = c(0, 0.2)))
+    })
+
+    output$records_plot <- renderPlot({
+      df <- indicateurs_ville()
+      if (is.null(df)) return(etat_indisponible(
+        "Indicateur disponible après la mise à jour des données (température minimale ERA5)."))
+      if (nrow(df) == 0) return(etat_indisponible(
+        "Pas de données de records pour cette ville sur la période."))
+
+      df %>%
+        mutate(decennie = floor(annee / 10) * 10) %>%
+        group_by(decennie) %>%
+        summarise(Chaleur = sum(records_chaud, na.rm = TRUE),
+                  Froid = sum(records_froid, na.rm = TRUE), .groups = "drop") %>%
+        tidyr::pivot_longer(c(Chaleur, Froid), names_to = "type", values_to = "n") %>%
+        # Records de froid affichés vers le bas (graphique divergent).
+        mutate(valeur = ifelse(type == "Froid", -n, n)) %>%
+        ggplot(aes(x = as.factor(decennie), y = valeur, fill = type)) +
+        geom_col(alpha = 0.85) +
+        geom_hline(yintercept = 0, color = "#343a40", linewidth = 0.4) +
+        scale_fill_manual(values = c("Chaleur" = "#E41A1C", "Froid" = "#1f77b4"), name = "") +
+        labs(x = "Décennie", y = "Nombre de records") +
+        theme_minimal(base_size = 14) +
+        theme(legend.position = "bottom")
+    })
+
   })
 }
