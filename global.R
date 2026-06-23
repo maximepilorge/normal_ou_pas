@@ -26,6 +26,7 @@ library(RPostgres)
 library(pool)
 library(dbplyr)
 library(glue)
+library(leaflet)
 
 Sys.setlocale("LC_TIME", "fr_FR.UTF-8")
 
@@ -128,3 +129,107 @@ plage_annees <- tbl(db_pool, "temperatures_max") %>%
 
 an_min_data <- plage_annees$min
 an_max_data <- plage_annees$max
+
+# Tables optionnelles alimentées par la version mise à jour du pipeline
+# (tmin -> canicules + indicateurs annuels). On teste leur présence au démarrage
+# pour que l'app dégrade proprement tant que le pipeline n'a pas été ré-exécuté
+# (les onglets concernés affichent alors un message d'indisponibilité au lieu de
+# planter).
+table_existe <- function(nom) {
+  tryCatch(DBI::dbExistsTable(db_pool, nom), error = function(e) FALSE)
+}
+canicules_disponibles <- table_existe("canicules")
+indicateurs_disponibles <- table_existe("indicateurs_annuels")
+
+# Période de référence la plus récente (ex. "1991-2020") et utilitaire pour
+# associer une année au cycle de 30 ans qui la représente le mieux. Servent à
+# l'onglet « Ma référence » (ancrage mémoriel / baseline glissante).
+.periode_bornes <- function(p) as.numeric(strsplit(p, "-")[[1]])
+periode_recente <- periodes_disponibles[which.max(vapply(periodes_disponibles,
+  function(p) .periode_bornes(p)[2], numeric(1)))]
+
+periode_pour_annee <- function(annee) {
+  milieux <- vapply(periodes_disponibles, function(p) mean(.periode_bornes(p)), numeric(1))
+  periodes_disponibles[which.min(abs(milieux - annee))]
+}
+
+# --- Données pour la carte comparée des villes (onglet « Carte ») ---
+# Coordonnées WGS84 des villes (source de vérité : utils/definir_mailles_communes.R,
+# table villes_insee — à garder synchronisée). Embarquées ici pour éviter de
+# charger sf et l'API geo.gouv au runtime de l'app.
+villes_coords <- tibble::tribble(
+  ~ville, ~latitude, ~longitude,
+  "Paris",            48.8566,  2.3522,
+  "Marseille",        43.2965,  5.3698,
+  "Lyon",             45.7640,  4.8357,
+  "Toulouse",         43.6047,  1.4442,
+  "Nice",             43.7102,  7.2620,
+  "Nantes",           47.2184, -1.5536,
+  "Strasbourg",       48.5833,  7.7458,
+  "Montpellier",      43.6108,  3.8767,
+  "Bordeaux",         44.8378, -0.5792,
+  "Lille",            50.6292,  3.0573,
+  "Rennes",           48.1173, -1.6778,
+  "Reims",            49.2583,  4.0317,
+  "Le Havre",         49.4944,  0.1079,
+  "Saint-Étienne",    45.4397,  4.3872,
+  "Toulon",           43.1242,  5.9280,
+  "Angers",           47.4784, -0.5632,
+  "Dijon",            47.3220,  5.0415,
+  "Brest",            48.3904, -4.4869,
+  "Clermont-Ferrand", 45.7772,  3.0870,
+  "Limoges",          45.8336,  1.2611,
+  "Tours",            47.3941,  0.6849,
+  "Amiens",           49.8941,  2.2958,
+  "Metz",             49.1193,  6.1757,
+  "Besançon",         47.2378,  6.0240,
+  "Perpignan",        42.6887,  2.8948,
+  "La Rochelle",      46.1603, -1.1511,
+  "Avignon",          43.9493,  4.8068,
+  "Carcassonne",      43.2105,  2.3486,
+  "Poitiers",         46.5802,  0.3405,
+  "Ajaccio",          41.9207,  8.7397
+)
+
+# Réchauffement par ville = écart de la tmax annuelle moyenne entre une période
+# de référence ancienne (1961-1990) et récente (1991-2020). Calculé une fois au
+# démarrage ; gardé contre toute erreur pour ne jamais bloquer le lancement.
+villes_rechauffement <- tryCatch({
+  moy_periode <- function(a1, a2, col) {
+    tbl(db_pool, "temperatures_max") %>%
+      filter(annee >= a1, annee <= a2) %>%
+      group_by(ville) %>%
+      summarise(m = mean(temperature_max, na.rm = TRUE), .groups = "drop") %>%
+      collect() %>%
+      rename(!!col := m)
+  }
+  ref <- moy_periode(1961, 1990, "moy_ref")
+  rec <- moy_periode(1991, 2020, "moy_rec")
+
+  rech <- villes_coords %>%
+    left_join(ref, by = "ville") %>%
+    left_join(rec, by = "ville") %>%
+    mutate(rechauffement = moy_rec - moy_ref)
+
+  # Enrichissements optionnels pour les popups (si le pipeline tmin a tourné).
+  if (canicules_disponibles) {
+    nb_can <- tryCatch(
+      tbl(db_pool, "canicules") %>% group_by(ville) %>%
+        summarise(nb_canicules = n(), .groups = "drop") %>% collect(),
+      error = function(e) NULL)
+    if (!is.null(nb_can)) rech <- rech %>% left_join(nb_can, by = "ville")
+  }
+  if (indicateurs_disponibles) {
+    nt <- tryCatch(
+      tbl(db_pool, "indicateurs_annuels") %>% filter(annee >= 2011) %>%
+        group_by(ville) %>%
+        summarise(nuits_trop_recent = mean(nuits_tropicales, na.rm = TRUE), .groups = "drop") %>%
+        collect(),
+      error = function(e) NULL)
+    if (!is.null(nt)) rech <- rech %>% left_join(nt, by = "ville")
+  }
+  rech
+}, error = function(e) {
+  warning("Calcul du réchauffement par ville indisponible : ", conditionMessage(e))
+  villes_coords %>% mutate(moy_ref = NA_real_, moy_rec = NA_real_, rechauffement = NA_real_)
+})

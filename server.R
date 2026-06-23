@@ -11,6 +11,8 @@ library(dbplyr)
 source("modules/mod_quiz.R")
 source("modules/mod_visualisation.R")
 source("modules/mod_analyse.R")
+source("modules/mod_memoire.R")
+source("modules/mod_carte.R")
 
 server <- function(input, output, session) {
   
@@ -92,7 +94,13 @@ server <- function(input, output, session) {
                            annee = reactive(input$annee_select))
   
   # Module Analyse
-  mod_analyse_server("analyse_1", 
+  mod_analyse_server("analyse_1",
                      db_pool = db_pool)
-  
+
+  # Module Ancrage mémoriel (« Ma référence »)
+  mod_memoire_server("memoire_1", db_pool = db_pool)
+
+  # Module Carte comparée des villes
+  mod_carte_server("carte_1", db_pool = db_pool)
+
 }
