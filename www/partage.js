@@ -1,23 +1,27 @@
 // www/partage.js
 // Helpers du modal de partage de la carte de résultat du quiz.
 // Le modal (construit côté serveur) contient l'image (#apercu-partage-img) et
-// son texte d'accompagnement (#partage-zone[data-texte]). Ces fonctions, appelées
-// par les boutons du modal, en déduisent l'action choisie.
+// son texte d'accompagnement (#partage-zone[data-texte]).
 //
-// Réalités des plateformes :
-//  - presse-papiers / partage natif (Web Share API) : vrais partages d'image ;
-//  - LinkedIn / Facebook : pas d'upload d'image via le web -> on copie l'image et
-//    on ouvre le réseau pour que l'utilisateur la colle (un aperçu OG riche
-//    nécessiterait le sidecar utils/share_api.R déployé) ;
-//  - Instagram : aucune publication web -> téléchargement puis import manuel
-//    (ou partage natif sur mobile).
+// Note Firefox/Safari : l'écriture d'une image dans le presse-papiers doit se
+// faire pendant l'« activation utilisateur » du clic. On évite donc tout
+// fetch()/await avant clipboard.write() : le blob est construit SYNCHRONEMENT à
+// partir de la data-URI. En cas d'échec ou de navigateur non compatible, on
+// retombe sur le téléchargement (toujours un retour visible).
 
 (function () {
-  function imgBlob(cb) {
+  function dataUriToBlob(uri) {
+    var parts = uri.split(",");
+    var mime = (parts[0].match(/:(.*?);/) || [])[1] || "image/png";
+    var bin = atob(parts[1].replace(/\s/g, ""));
+    var arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: mime });
+  }
+
+  function imgBlob() {
     var img = document.getElementById("apercu-partage-img");
-    if (!img) return;
-    fetch(img.src).then(function (r) { return r.blob(); }).then(cb)
-      .catch(function () { toast("Action impossible sur cet appareil."); });
+    return img ? dataUriToBlob(img.src) : null;
   }
 
   function texte() {
@@ -44,31 +48,47 @@
     URL.revokeObjectURL(u);
   }
 
-  // Copie l'image dans le presse-papiers. `after(ok)` permet d'enchaîner.
-  function copier(after) {
-    imgBlob(function (blob) {
-      if (navigator.clipboard && window.ClipboardItem) {
+  // Copie un blob image dans le presse-papiers. Renvoie une promesse qui rejette
+  // sur TOUTE erreur, y compris une exception synchrone du constructeur
+  // ClipboardItem (certains navigateurs refusent le type image ainsi), afin que
+  // l'appelant puisse toujours retomber sur le téléchargement.
+  function copierBlob(blob) {
+    return new Promise(function (resolve, reject) {
+      if (!(navigator.clipboard && window.ClipboardItem)) {
+        reject(new Error("ClipboardItem non supporté"));
+        return;
+      }
+      try {
         navigator.clipboard.write([new ClipboardItem({ "image/png": blob })])
-          .then(function () { after ? after(true) : toast("Image copiée ✔"); })
-          .catch(function () { after ? after(false) : toast("Copie impossible — utilisez Télécharger."); });
-      } else {
-        after ? after(false) : toast("Copie non supportée — utilisez Télécharger.");
+          .then(resolve, reject);
+      } catch (e) {
+        reject(e);
       }
     });
   }
 
-  window.partageCopier = function () { copier(null); };
+  window.partageCopier = function () {
+    var blob = imgBlob();
+    if (!blob) { toast("Image indisponible."); return; }
+    copierBlob(blob)
+      .then(function () { toast("Image copiée ✔"); })
+      .catch(function (e) {
+        console.error("Copie image impossible :", e);
+        toast("Copie impossible sur ce navigateur — image téléchargée à la place.");
+        telecharger(blob);
+      });
+  };
 
   window.partagePartager = function () {
-    imgBlob(function (blob) {
-      var file = new File([blob], "normal-ou-pas.png", { type: "image/png" });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        navigator.share({ files: [file], title: "Climat : Normal ou pas ?", text: texte() })
-          .catch(function (e) { if (!(e && e.name === "AbortError")) toast("Partage impossible."); });
-      } else {
-        toast("Partage natif indisponible sur cet appareil — utilisez Copier ou Télécharger.");
-      }
-    });
+    var blob = imgBlob();
+    if (!blob) { toast("Image indisponible."); return; }
+    var file = new File([blob], "normal-ou-pas.png", { type: "image/png" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      navigator.share({ files: [file], title: "Climat : Normal ou pas ?", text: texte() })
+        .catch(function (e) { if (!(e && e.name === "AbortError")) toast("Partage impossible."); });
+    } else {
+      toast("Partage natif indisponible sur cet appareil — utilisez Copier ou Télécharger.");
+    }
   };
 
   window.partageReseau = function (reseau) {
@@ -77,17 +97,17 @@
       facebook: "https://www.facebook.com/",
       instagram: "https://www.instagram.com/"
     };
-    // On ouvre le réseau SYNCHRONEMENT (dans le geste du clic) pour éviter le
-    // blocage des popups, puis on prépare l'image.
+    // Ouverture SYNCHRONE (dans le geste du clic) pour éviter le blocage popup.
     window.open(urls[reseau], "_blank", "noopener");
+    var blob = imgBlob();
+    if (!blob) return;
     if (reseau === "instagram") {
-      imgBlob(telecharger);
+      telecharger(blob);
       toast("Image téléchargée — importez-la dans Instagram.");
     } else {
-      copier(function (ok) {
-        toast(ok ? "Image copiée — collez-la dans votre publication."
-                 : "Ajoutez l'image téléchargée à votre publication.");
-      });
+      copierBlob(blob)
+        .then(function () { toast("Image copiée — collez-la dans votre publication."); })
+        .catch(function () { telecharger(blob); toast("Image téléchargée — ajoutez-la à votre publication."); });
     }
   };
 })();
