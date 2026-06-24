@@ -60,6 +60,8 @@ mod_quiz_server <- function(id, db_pool) {
     score_echecs <- reactiveVal(0)
     # Paramètres du dernier résultat validé (pour la carte de partage).
     dernier_resultat <- reactiveVal(NULL)
+    # Seuils p10/p90 (bornes du « normal ») du jour, pour le boxplot.
+    seuils_quiz <- reactiveVal(NULL)
     
     observeEvent(req(input$periode_normale), {
       shinyjs::click("new_question_btn")
@@ -244,6 +246,21 @@ mod_quiz_server <- function(id, db_pool) {
       jour_quiz <- lubridate::day(data$date)
       mois_quiz <- lubridate::month(data$date)
 
+      # Seuils p10/p90 du jour (bornes officielles du « normal » dans le quiz) :
+      # on les récupère pour les superposer au boxplot.
+      seuils_normaux <- tbl(db_pool, "stats_normales") %>%
+        filter(
+          ville == !!data$city,
+          mois == !!mois_quiz,
+          jour_mois == !!jour_quiz,
+          periode_ref == !!input$periode_normale
+        ) %>%
+        select(seuil_bas_p10, seuil_haut_p90) %>%
+        collect()
+      seuils_quiz(if (nrow(seuils_normaux) > 0)
+        list(p10 = seuils_normaux$seuil_bas_p10[1], p90 = seuils_normaux$seuil_haut_p90[1])
+        else NULL)
+
       # Fenêtre ±7 jours autour de la date, cohérente avec la classification du
       # quiz (seuils p10/p90 lissés sur ±7 j). On filtre sur l'ensemble des
       # couples (mois, jour) de la fenêtre via une clé mois*100 + jour.
@@ -375,7 +392,28 @@ mod_quiz_server <- function(id, db_pool) {
           ) +
           theme_minimal(base_size = 14) +
           theme(plot.title = element_text(face = "bold"))
-        
+
+        # Bornes du « normal » : 10e et 90e percentiles (lissés ±7 j) qui servent
+        # à classer la température. La zone entre les deux = « dans les normales ».
+        seuils <- seuils_quiz()
+        if (!is.null(seuils) && is.finite(seuils$p10) && is.finite(seuils$p90)) {
+          fmt1 <- function(x) format(round(x, 1), nsmall = 1, decimal.mark = ",")
+          seuils_df <- data.frame(
+            type = c(paste0("10e pct – seuil bas : ", fmt1(seuils$p10), " °C"),
+                     paste0("90e pct – seuil haut : ", fmt1(seuils$p90), " °C")),
+            y = c(seuils$p10, seuils$p90)
+          )
+          p <- p +
+            annotate("rect", xmin = 0.55, xmax = 1.45,
+                     ymin = seuils$p10, ymax = seuils$p90,
+                     fill = "#2E8B57", alpha = 0.07) +
+            geom_hline(data = seuils_df, aes(yintercept = y, color = type),
+                       linetype = "dashed", linewidth = 0.8) +
+            scale_color_manual(name = "Bornes du « normal »",
+                               values = setNames(c("#1f77b4", "#ff7f0e"), seuils_df$type)) +
+            theme(legend.position = "bottom")
+        }
+
         ggplotly(p, tooltip = "text") %>%
           # On verrouille les axes pour désactiver le zoom et le déplacement
           layout(

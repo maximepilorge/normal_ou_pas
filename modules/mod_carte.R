@@ -173,13 +173,24 @@ mod_carte_server <- function(id, db_pool) {
                  config(displayModeBar = FALSE))
       }
 
+      fmt2 <- function(x) format(round(x, 2), nsmall = 2, decimal.mark = ",")
+
       ensemble <- anomalies_villes_annee %>%
         group_by(annee) %>%
         summarise(moy = mean(anomalie, na.rm = TRUE),
                   bas = min(anomalie, na.rm = TRUE),
-                  haut = max(anomalie, na.rm = TRUE), .groups = "drop")
-      df_ville <- anomalies_villes_annee %>% filter(ville == v) %>% arrange(annee)
+                  haut = max(anomalie, na.rm = TRUE), .groups = "drop") %>%
+        mutate(
+          text_moy = paste0("Année ", annee,
+                            "<br>Moyenne des villes : ", fmt2(moy), " °C"),
+          text_band = paste0("Année ", annee,
+                             "<br>Étendue des villes : de ", fmt2(bas), " à ", fmt2(haut), " °C")
+        )
+      df_ville <- anomalies_villes_annee %>% filter(ville == v) %>% arrange(annee) %>%
+        mutate(text = paste0("Année ", annee, "<br>", v, " : ", fmt2(anomalie), " °C"))
 
+      # Infobulles via des points invisibles (alpha = 0) porteurs du texte, pour
+      # ne pas fragmenter les lignes (même pattern que mod_visualisation).
       p <- ggplot() +
         # Étendue (min–max) des villes : situe la ville dans le « peloton ».
         geom_ribbon(data = ensemble, aes(x = annee, ymin = bas, ymax = haut),
@@ -187,8 +198,12 @@ mod_carte_server <- function(id, db_pool) {
         geom_line(data = ensemble, aes(x = annee, y = moy,
                                        color = "Moyenne des villes"),
                   linewidth = 0.7, linetype = "dashed") +
+        geom_point(data = ensemble, aes(x = annee, y = moy, text = text_moy),
+                   alpha = 0) +
         geom_line(data = df_ville, aes(x = annee, y = anomalie, color = v),
                   linewidth = 1) +
+        geom_point(data = df_ville, aes(x = annee, y = anomalie, text = text),
+                   alpha = 0) +
         geom_hline(yintercept = 0, color = "#343a40", linewidth = 0.4) +
         # Repère de l'année active sur la carte.
         geom_vline(xintercept = input$annee_carte, color = "#6c757d",
@@ -201,7 +216,7 @@ mod_carte_server <- function(id, db_pool) {
         theme(legend.position = "bottom",
               axis.text.x = element_text(angle = 45, hjust = 1))
 
-      ggplotly(p, tooltip = c("x", "y")) %>%
+      ggplotly(p, tooltip = "text") %>%
         layout(legend = list(orientation = "h", x = 0.5, xanchor = "center", y = -0.2)) %>%
         config(displayModeBar = FALSE, responsive = TRUE)
     })
