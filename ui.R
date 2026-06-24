@@ -231,9 +231,20 @@ ui <- fluidPage( # On utilise tagList comme conteneur principal
                    tags$li(strong("Attribution des données à une ville : "), "Les données ERA5-Land sont fournies sur une grille géographique avec des mailles d'environ 9x9 km. Plutôt que de retenir une seule maille, l'application sélectionne ", strong("toutes les mailles qui recouvrent l'emprise de la commune"), " et les combine par une moyenne ", strong("pondérée par la part de surface communale couverte par chaque maille"), ". Une grande commune (Paris, Marseille…) est ainsi représentée par plusieurs mailles, ce qui reflète mieux son étendue réelle qu'un point unique."),
                    tags$li(strong("Important - Ce que cette température représente : "), "La valeur affichée est la température maximale journalière, ", strong("moyennée spatialement (pondérée par les surfaces) sur les mailles couvrant la commune"), ". Chaque maille ERA5-Land représentant déjà une moyenne sur environ 81 km² (9x9 km), cette valeur peut différer de la température que vous lisez sur un thermomètre chez vous ou de celle annoncée dans les prévisions météo, qui correspondent souvent à des mesures plus locales (aéroport, station météo spécifique).")
                  ),
-                 
+
                  hr(),
-                 
+
+                 h3("Réchauffement, îlots de chaleur et fiabilité de la tendance 🏙️"),
+                 p("Une question fréquente : la hausse des températures d'une ville ne vient-elle pas aussi de l'urbanisation (îlots de chaleur urbains) plutôt que du seul changement climatique ? Le choix d'ERA5-Land répond largement à cette objection."),
+                 tags$ul(
+                   tags$li(strong("Pas d'îlot de chaleur urbain dans la donnée : "), "ERA5-Land est une réanalyse dont le modèle de surface ", strong("ne représente pas les villes"), " (aucun schéma urbain : ni bâti, ni imperméabilisation). Une maille « Paris » est traitée comme une surface essentiellement naturelle. La tendance au réchauffement observée ", strong("ne peut donc pas être un artefact d'urbanisation ou de bétonnage"), " : c'est le signal climatique régional. C'est aussi une réponse directe à l'argument « ce n'est que l'effet des îlots de chaleur »."),
+                   tags$li(strong("Une mesure plutôt prudente : "), "en contrepartie, ERA5-Land ", strong("sous-estime probablement la chaleur réellement ressentie"), " dans un centre-ville dense, où l'îlot de chaleur peut ajouter plusieurs degrés, en particulier la nuit (d'où l'intérêt de suivre les températures minimales et les nuits tropicales)."),
+                   tags$li(strong("Une tendance calculée proprement : "), "l'écart à la normale compare une année et sa normale ", strong("issues du même jeu de données"), " (même grille, même modèle, sur tout l'historique). Il n'y a donc ni changement d'instrument, ni déménagement de station, ni dérive d'urbanisation : ce différentiel interne est homogène, ce qui est précisément ce qu'il faut pour mesurer une tendance."),
+                   tags$li(strong("Limite à garder en tête : "), "avant la fin des années 1970 (ère pré-satellite), la réanalyse est ", strong("moins contrainte par les observations"), " : l'incertitude est plus grande sur les premières décennies (années 1950-1960). Le signal de réchauffement dépasse largement cette incertitude, mais les valeurs les plus anciennes sont à interpréter avec un peu plus de prudence.")
+                 ),
+
+                 hr(),
+
                  h3("Calcul et définition des 'Normales de saison' 📊"),
                  p("L'application se base sur le calcul de normales climatiques, conformément aux standards internationaux."),
                  tags$ul(
