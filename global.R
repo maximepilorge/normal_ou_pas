@@ -116,8 +116,16 @@ periodes_disponibles <- tbl(db_pool, "stats_normales") %>%
   arrange(periode_ref) %>%
   pull()
 
+# Villes RÉELLEMENT alimentées. Certaines villes côtières/insulaires (Le Havre,
+# La Rochelle, Ajaccio…) n'ont pas de données ERA5-Land exploitables (grille terre
+# uniquement) : on exige une couverture minimale (≥ 10 années distinctes) pour ne
+# pas les proposer dans l'app. Liste dynamique : elle s'ajuste seule au contenu de
+# la BDD, et sert de source de vérité à tous les onglets ET à la carte.
 villes_triees <- tbl(db_pool, "temperatures_max") %>%
-  distinct(ville) %>%
+  filter(!is.na(temperature_max)) %>%
+  group_by(ville) %>%
+  summarise(n_annees = n_distinct(annee), .groups = "drop") %>%
+  filter(n_annees >= 10) %>%
   arrange(ville) %>%
   pull(ville)
 
@@ -184,6 +192,10 @@ villes_coords <- tibble::tribble(
   "Poitiers",         46.5802,  0.3405,
   "Ajaccio",          41.9207,  8.7397
 )
+
+# La carte (pastilles + filtre) ne montre que les villes effectivement alimentées
+# en base : on aligne les coordonnées sur villes_triees.
+villes_coords <- villes_coords %>% filter(ville %in% villes_triees)
 
 # Référence pour la carte temporelle : on cartographie, par ville et par année,
 # l'écart à la normale d'une période ANCIENNE (la plus ancienne disponible, p. ex.
