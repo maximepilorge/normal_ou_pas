@@ -2,19 +2,20 @@
 #
 # Onglet « Carte » — réchauffement comparé des villes, EXPLORABLE dans le temps.
 # Un curseur d'année recolore les pastilles selon l'écart de l'année choisie à la
-# normale d'une période ancienne (la plus ancienne disponible) : en faisant
-# glisser le curseur, on voit le réchauffement se diffuser sur le territoire.
-# Clic sur une ville = zoom (recentrage). Filtre multi-villes pour décharger.
+# normale d'une période ancienne : en faisant glisser le curseur, on voit le
+# réchauffement se diffuser sur le territoire.
+# Clic sur une ville = affichage, SOUS la carte, de sa trajectoire d'anomalies
+# année par année, comparée à l'ensemble des villes (situe la ville dans le temps
+# et par rapport au reste du territoire).
 #
-# S'appuie sur villes_coords + normales_jour_ref (pré-calculés dans global.R) et
-# requête temperatures_max pour l'année sélectionnée.
+# S'appuie sur villes_coords + anomalies_villes_annee (pré-calculés dans global.R).
 
 mod_carte_ui <- function(id) {
   ns <- NS(id)
   tagList(
     page_sidebar(
       title = "Le réchauffement, ville par ville et année par année",
-      fillable = TRUE,
+      fillable = FALSE,
 
       sidebar = sidebar(
         width = "320px",
@@ -38,14 +39,19 @@ mod_carte_ui <- function(id) {
           helpText(paste0(
             "Couleur = écart de la température maximale moyenne de l'année à la ",
             "normale ", periode_ref_carte, ". Faites glisser l'année pour voir le ",
-            "réchauffement progresser ; cliquez une ville pour zoomer."))
+            "réchauffement progresser ; cliquez une ville pour sa trajectoire détaillée."))
         )
       ),
 
       card(
         full_screen = TRUE,
         card_header(uiOutput(ns("titre_carte"))),
-        leafletOutput(ns("carte"), height = "650px")
+        leafletOutput(ns("carte"), height = "520px")
+      ),
+
+      card(
+        card_header(uiOutput(ns("titre_graphe_ville"))),
+        plotlyOutput(ns("graphe_ville"), height = "340px")
       )
     )
   )
@@ -55,40 +61,22 @@ mod_carte_server <- function(id, db_pool) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
+    ville_selectionnee <- reactiveVal(NULL)
+
     # Échelle de couleur FIXE (comparable d'une année à l'autre), divergente
     # centrée sur 0 : bleu = sous la normale ancienne, rouge = au-dessus.
     dom <- c(-4, 4)
     pal <- colorNumeric("RdBu", domain = dom, reverse = TRUE, na.color = "#9aa0a6")
     clamp <- function(x) pmax(dom[1], pmin(dom[2], x))
 
-    # Anomalie de chaque ville pour l'année choisie = moyenne, sur les jours
-    # observés, de (tmax - normale du jour) pour la période de référence.
+    # Anomalies de l'année choisie (lecture du pré-calcul, aucune requête).
     anomalies_annee <- reactive({
       req(input$annee_carte)
-      if (is.null(normales_jour_ref)) return(NULL)
-      an <- input$annee_carte
-
-      obs <- tbl(db_pool, "temperatures_max") %>%
-        filter(annee == !!an) %>%
-        select(ville, mois, jour_mois, temperature_max) %>%
-        collect()
-
-      if (nrow(obs) == 0) {
-        return(villes_coords %>%
-                 mutate(anomalie = NA_real_, moy_annuelle = NA_real_, n_jours = 0L))
-      }
-
-      obs %>%
-        inner_join(normales_jour_ref, by = c("ville", "mois", "jour_mois")) %>%
-        group_by(ville) %>%
-        summarise(
-          anomalie = mean(temperature_max - t_moy, na.rm = TRUE),
-          moy_annuelle = mean(temperature_max, na.rm = TRUE),
-          n_jours = n(),
-          .groups = "drop"
-        ) %>%
+      if (is.null(anomalies_villes_annee)) return(NULL)
+      anomalies_villes_annee %>%
+        filter(annee == input$annee_carte) %>%
         right_join(villes_coords, by = "ville")
-    }) %>% bindCache(input$annee_carte)
+    })
 
     construire_popups <- function(df) {
       vapply(seq_len(nrow(df)), function(i) {
@@ -100,7 +88,8 @@ mod_carte_server <- function(id, db_pool) {
           " <i>(année incomplète)</i>" else ""
         paste0("<b>", r$ville, "</b> — ", input$annee_carte, partiel,
                "<br>Écart à la normale ", periode_ref_carte, " : <b>", a, "</b>",
-               "<br>Tmax moyenne : ", m)
+               "<br>Tmax moyenne : ", m,
+               "<br><i>Cliquez pour la trajectoire détaillée</i>")
       }, character(1))
     }
 
@@ -151,12 +140,70 @@ mod_carte_server <- function(id, db_pool) {
         ajouter_marqueurs(selection(df))
     })
 
-    # Zoom sur une ville au clic d'une pastille.
+    # Clic sur une ville : on mémorise la ville et on la met en surbrillance.
     observeEvent(input$carte_marker_click, {
       clk <- input$carte_marker_click
-      req(clk)
+      req(clk$id)
+      ville_selectionnee(clk$id)
       leafletProxy("carte", session) %>%
-        flyTo(lng = clk$lng, lat = clk$lat, zoom = 8)
+        clearGroup("surbrillance") %>%
+        addCircleMarkers(
+          lng = clk$lng, lat = clk$lat, group = "surbrillance",
+          radius = 16, stroke = TRUE, color = "#212529", weight = 3,
+          fill = FALSE, opacity = 1
+        )
+    })
+
+    output$titre_graphe_ville <- renderUI({
+      v <- ville_selectionnee()
+      if (is.null(v)) "Trajectoire d'une ville — cliquez une pastille sur la carte"
+      else paste0("Trajectoire de ", v, " vs l'ensemble des villes (écart à la normale ",
+                  periode_ref_carte, ")")
+    })
+
+    # Graphique : trajectoire annuelle des anomalies de la ville cliquée,
+    # comparée à la moyenne et à l'étendue (min–max) de l'ensemble des villes.
+    output$graphe_ville <- renderPlotly({
+      v <- ville_selectionnee()
+      if (is.null(v) || is.null(anomalies_villes_annee)) {
+        return(plotly_empty(type = "scatter", mode = "lines") %>%
+                 layout(annotations = list(list(
+                   text = "Cliquez une ville sur la carte pour afficher sa trajectoire.",
+                   showarrow = FALSE, font = list(color = "#6c757d", size = 15)))) %>%
+                 config(displayModeBar = FALSE))
+      }
+
+      ensemble <- anomalies_villes_annee %>%
+        group_by(annee) %>%
+        summarise(moy = mean(anomalie, na.rm = TRUE),
+                  bas = min(anomalie, na.rm = TRUE),
+                  haut = max(anomalie, na.rm = TRUE), .groups = "drop")
+      df_ville <- anomalies_villes_annee %>% filter(ville == v) %>% arrange(annee)
+
+      p <- ggplot() +
+        # Étendue (min–max) des villes : situe la ville dans le « peloton ».
+        geom_ribbon(data = ensemble, aes(x = annee, ymin = bas, ymax = haut),
+                    fill = "grey80", alpha = 0.5) +
+        geom_line(data = ensemble, aes(x = annee, y = moy,
+                                       color = "Moyenne des villes"),
+                  linewidth = 0.7, linetype = "dashed") +
+        geom_line(data = df_ville, aes(x = annee, y = anomalie, color = v),
+                  linewidth = 1) +
+        geom_hline(yintercept = 0, color = "#343a40", linewidth = 0.4) +
+        # Repère de l'année active sur la carte.
+        geom_vline(xintercept = input$annee_carte, color = "#6c757d",
+                   linetype = "dotted", linewidth = 0.5) +
+        scale_color_manual(values = setNames(c("#E41A1C", "#6c757d"),
+                                             c(v, "Moyenne des villes"))) +
+        scale_x_continuous(breaks = scales::breaks_width(10)) +
+        labs(x = NULL, y = "Écart à la normale (°C)", color = NULL) +
+        theme_minimal(base_size = 13) +
+        theme(legend.position = "bottom",
+              axis.text.x = element_text(angle = 45, hjust = 1))
+
+      ggplotly(p, tooltip = c("x", "y")) %>%
+        layout(legend = list(orientation = "h", x = 0.5, xanchor = "center", y = -0.2)) %>%
+        config(displayModeBar = FALSE, responsive = TRUE)
     })
 
   })

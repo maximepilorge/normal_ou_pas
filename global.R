@@ -187,20 +187,33 @@ villes_coords <- tibble::tribble(
 
 # Référence pour la carte temporelle : on cartographie, par ville et par année,
 # l'écart à la normale d'une période ANCIENNE (la plus ancienne disponible, p. ex.
-# 1951-1980), afin de visualiser le réchauffement progresser dans le temps. On
-# pré-charge les normales JOURNALIÈRES de cette période : l'anomalie d'une année se
-# calcule en comparant chaque jour observé à la normale du même jour calendaire
-# (robuste aux années partielles). Gardé contre toute erreur pour ne pas bloquer
-# le lancement.
+# 1951-1980), afin de visualiser le réchauffement progresser dans le temps.
 periode_ref_carte <- periodes_disponibles[which.min(
   vapply(periodes_disponibles, function(p) .periode_bornes(p)[1], numeric(1)))]
 
-normales_jour_ref <- tryCatch(
-  tbl(db_pool, "stats_normales") %>%
-    filter(periode_ref == !!periode_ref_carte) %>%
-    select(ville, mois, jour_mois, t_moy) %>%
+# Anomalies pré-calculées par VILLE et par ANNÉE (une seule requête au démarrage,
+# jointure faite en base -> ~30 villes × ~76 ans). L'anomalie compare chaque jour
+# observé à la normale du même jour calendaire (robuste aux années partielles).
+# Sert à la fois à colorer la carte (filtre par année, sans requête par cran de
+# curseur) et à tracer la trajectoire d'une ville vs l'ensemble. Gardé contre
+# toute erreur pour ne pas bloquer le lancement.
+anomalies_villes_annee <- tryCatch(
+  tbl(db_pool, "temperatures_max") %>%
+    inner_join(
+      tbl(db_pool, "stats_normales") %>%
+        filter(periode_ref == !!periode_ref_carte) %>%
+        select(ville, mois, jour_mois, t_moy),
+      by = c("ville", "mois", "jour_mois")
+    ) %>%
+    group_by(ville, annee) %>%
+    summarise(
+      anomalie = mean(temperature_max - t_moy, na.rm = TRUE),
+      moy_annuelle = mean(temperature_max, na.rm = TRUE),
+      n_jours = n(),
+      .groups = "drop"
+    ) %>%
     collect(),
   error = function(e) {
-    warning("Normales journalières (carte) indisponibles : ", conditionMessage(e))
+    warning("Anomalies villes/année (carte) indisponibles : ", conditionMessage(e))
     NULL
   })
