@@ -5,18 +5,25 @@ Deux niveaux, indépendants.
 ## 1. Partage par image (actif)
 
 Le bouton **« Partager mon résultat »** du quiz génère une image PNG 1200×630
-côté serveur ([utils/render_partage.R](utils/render_partage.R)), l'encode en
-base64 et l'envoie au client. Le script [www/partage.js](www/partage.js) choisit
-alors le meilleur canal, en cascade :
+côté serveur ([utils/render_partage.R](utils/render_partage.R)) et l'affiche dans
+un **modal d'aperçu**. L'utilisateur y choisit son canal ([www/partage.js](www/partage.js)) :
 
-1. **Partage natif** (Web Share API avec fichier) — feuille de partage du système
-   sur mobile et Safari macOS : envoi direct vers réseaux sociaux, messagerie, etc.
-2. **Copie dans le presse-papiers** (ClipboardItem) — sur navigateurs de bureau
-   compatibles (Chrome, Edge) : l'image est copiée, prête à coller.
-3. **Téléchargement** — repli si aucune des deux API n'est disponible.
+- **Copier l'image** — presse-papiers (ClipboardItem ; bureau Chrome/Edge).
+- **Télécharger** — toujours disponible (nécessaire pour Instagram, qui exige un
+  import manuel).
+- **Partager (mobile)** — Web Share API : feuille native du système (mobile,
+  Safari macOS) → Instagram, WhatsApp, LinkedIn, etc. C'est le seul vrai partage
+  direct vers Instagram.
+- **LinkedIn / Facebook / Instagram** — ouvrent le réseau ; l'image est copiée
+  (LinkedIn/Facebook) ou téléchargée (Instagram) pour être collée/importée.
 
-Rien à configurer ; fonctionne dans l'app Shiny telle quelle (contexte HTTPS
-requis pour le presse-papiers et le partage natif).
+Limites des plateformes : aucune API web ne permet de *publier* une image
+directement sur LinkedIn/Facebook/Instagram depuis un bouton. Un **aperçu social
+riche** (carte image dans le fil) à partir d'un simple lien nécessite le sidecar
+Open Graph ci-dessous.
+
+Rien à configurer ; fonctionne dans l'app telle quelle (contexte HTTPS requis
+pour le presse-papiers et le partage natif).
 
 ## 2. Aperçu social Open Graph dynamique (optionnel, non activé)
 

@@ -1,75 +1,93 @@
 // www/partage.js
-// Partage de la carte de résultat du quiz, déclenché côté serveur via
-// session$sendCustomMessage("partage_resultat", {image, filename, titre, texte}).
-// Stratégie en cascade : 1) partage natif (Web Share API avec fichier image),
-// 2) copie dans le presse-papiers, 3) repli téléchargement.
+// Helpers du modal de partage de la carte de résultat du quiz.
+// Le modal (construit côté serveur) contient l'image (#apercu-partage-img) et
+// son texte d'accompagnement (#partage-zone[data-texte]). Ces fonctions, appelées
+// par les boutons du modal, en déduisent l'action choisie.
+//
+// Réalités des plateformes :
+//  - presse-papiers / partage natif (Web Share API) : vrais partages d'image ;
+//  - LinkedIn / Facebook : pas d'upload d'image via le web -> on copie l'image et
+//    on ouvre le réseau pour que l'utilisateur la colle (un aperçu OG riche
+//    nécessiterait le sidecar utils/share_api.R déployé) ;
+//  - Instagram : aucune publication web -> téléchargement puis import manuel
+//    (ou partage natif sur mobile).
 
 (function () {
-  function dataUrlVersBlob(dataUrl) {
-    return fetch(dataUrl).then(function (r) { return r.blob(); });
+  function imgBlob(cb) {
+    var img = document.getElementById("apercu-partage-img");
+    if (!img) return;
+    fetch(img.src).then(function (r) { return r.blob(); }).then(cb)
+      .catch(function () { toast("Action impossible sur cet appareil."); });
   }
 
-  function telecharger(dataUrl, filename) {
-    var a = document.createElement("a");
-    a.href = dataUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+  function texte() {
+    var z = document.getElementById("partage-zone");
+    return z ? (z.dataset.texte || "") : "";
   }
 
-  function toast(texte) {
-    var t = document.createElement("div");
-    t.textContent = texte;
-    t.style.cssText =
+  function toast(t) {
+    var d = document.createElement("div");
+    d.textContent = t;
+    d.style.cssText =
       "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);" +
       "background:#343a40;color:#fff;padding:10px 18px;border-radius:6px;" +
-      "z-index:2000;font-size:0.9rem;box-shadow:0 2px 8px rgba(0,0,0,.3)";
-    document.body.appendChild(t);
-    setTimeout(function () { t.remove(); }, 2600);
+      "z-index:3000;font-size:.9rem;box-shadow:0 2px 8px rgba(0,0,0,.3)";
+    document.body.appendChild(d);
+    setTimeout(function () { d.remove(); }, 2800);
   }
 
-  function gererPartage(msg) {
-    dataUrlVersBlob(msg.image).then(function (blob) {
-      var file = new File([blob], msg.filename, { type: "image/png" });
+  function telecharger(blob) {
+    var u = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = u; a.download = "normal-ou-pas.png";
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(u);
+  }
 
-      // 1) Partage natif avec fichier (mobile, Safari macOS…)
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        navigator
-          .share({ files: [file], title: msg.titre, text: msg.texte })
-          .catch(function (e) {
-            if (e && e.name === "AbortError") return; // l'utilisateur a annulé
-            copierOuTelecharger(blob, msg);
-          });
-        return;
+  // Copie l'image dans le presse-papiers. `after(ok)` permet d'enchaîner.
+  function copier(after) {
+    imgBlob(function (blob) {
+      if (navigator.clipboard && window.ClipboardItem) {
+        navigator.clipboard.write([new ClipboardItem({ "image/png": blob })])
+          .then(function () { after ? after(true) : toast("Image copiée ✔"); })
+          .catch(function () { after ? after(false) : toast("Copie impossible — utilisez Télécharger."); });
+      } else {
+        after ? after(false) : toast("Copie non supportée — utilisez Télécharger.");
       }
-      // 2) Sinon, presse-papiers / téléchargement
-      copierOuTelecharger(blob, msg);
-    }).catch(function () {
-      telecharger(msg.image, msg.filename);
     });
   }
 
-  function copierOuTelecharger(blob, msg) {
-    if (navigator.clipboard && window.ClipboardItem) {
-      navigator.clipboard
-        .write([new ClipboardItem({ "image/png": blob })])
-        .then(function () { toast("Image copiée dans le presse-papiers ✔"); })
-        .catch(function () { telecharger(msg.image, msg.filename); });
-    } else {
-      telecharger(msg.image, msg.filename);
-    }
-  }
+  window.partageCopier = function () { copier(null); };
 
-  // Enregistrement du handler dès que Shiny est prêt.
-  function enregistrer() {
-    if (window.Shiny && Shiny.addCustomMessageHandler) {
-      Shiny.addCustomMessageHandler("partage_resultat", gererPartage);
+  window.partagePartager = function () {
+    imgBlob(function (blob) {
+      var file = new File([blob], "normal-ou-pas.png", { type: "image/png" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: "Climat : Normal ou pas ?", text: texte() })
+          .catch(function (e) { if (!(e && e.name === "AbortError")) toast("Partage impossible."); });
+      } else {
+        toast("Partage natif indisponible sur cet appareil — utilisez Copier ou Télécharger.");
+      }
+    });
+  };
+
+  window.partageReseau = function (reseau) {
+    var urls = {
+      linkedin: "https://www.linkedin.com/feed/?shareActive=true",
+      facebook: "https://www.facebook.com/",
+      instagram: "https://www.instagram.com/"
+    };
+    // On ouvre le réseau SYNCHRONEMENT (dans le geste du clic) pour éviter le
+    // blocage des popups, puis on prépare l'image.
+    window.open(urls[reseau], "_blank", "noopener");
+    if (reseau === "instagram") {
+      imgBlob(telecharger);
+      toast("Image téléchargée — importez-la dans Instagram.");
+    } else {
+      copier(function (ok) {
+        toast(ok ? "Image copiée — collez-la dans votre publication."
+                 : "Ajoutez l'image téléchargée à votre publication.");
+      });
     }
-  }
-  if (window.Shiny && Shiny.addCustomMessageHandler) {
-    enregistrer();
-  } else {
-    document.addEventListener("shiny:connected", enregistrer);
-  }
+  };
 })();

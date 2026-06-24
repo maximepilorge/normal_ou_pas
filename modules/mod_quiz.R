@@ -445,9 +445,9 @@ mod_quiz_server <- function(id, db_pool) {
     })
     
     # --- Partage de la carte de résultat (PNG 1200×630) ---
-    # On génère l'image côté serveur, on l'encode en base64 et on l'envoie au
-    # client, qui choisit le meilleur canal : partage natif, presse-papiers ou
-    # téléchargement (cf. www/partage.js).
+    # On génère l'image côté serveur, on l'embarque (base64) dans un modal
+    # d'aperçu, où l'utilisateur choisit le canal : copier, télécharger, partage
+    # natif (mobile) ou ouverture d'un réseau social (cf. www/partage.js).
     observeEvent(input$partager_btn, {
       res <- dernier_resultat()
       req(res)
@@ -455,7 +455,8 @@ mod_quiz_server <- function(id, db_pool) {
       f <- tempfile(fileext = ".png")
       sauver_carte_partage(res, f)
       on.exit(unlink(f), add = TRUE)
-      b64 <- jsonlite::base64_enc(readBin(f, "raw", n = file.info(f)$size))
+      data_uri <- paste0("data:image/png;base64,",
+                         jsonlite::base64_enc(readBin(f, "raw", n = file.info(f)$size)))
 
       ecart <- round(res$temp - res$normale_moy, 1)
       sens <- if (ecart > 0) "au-dessus" else if (ecart < 0) "en-dessous" else "dans"
@@ -465,13 +466,40 @@ mod_quiz_server <- function(id, db_pool) {
         paste0(res$temp, "°C à ", res$ville, " : ", sprintf("%+.1f", ecart),
                "°C ", sens, " de la normale de saison. Et vous, sauriez-vous situer ce qui est normal ?")
       }
-      ville_fichier <- gsub("[^A-Za-z0-9]+", "_", res$ville)
+      nom_fichier <- paste0("normal-ou-pas_", gsub("[^A-Za-z0-9]+", "_", res$ville), ".png")
 
-      session$sendCustomMessage("partage_resultat", list(
-        image = paste0("data:image/png;base64,", b64),
-        filename = paste0("normal-ou-pas_", ville_fichier, ".png"),
-        titre = "Climat : Normal ou pas ?",
-        texte = texte
+      btn <- function(label, icone, onclick, classe) {
+        tags$button(type = "button", class = paste("btn", classe, "m-1"),
+                    onclick = onclick, icon(icone), label)
+      }
+
+      showModal(modalDialog(
+        title = "Partager mon résultat",
+        easyClose = TRUE,
+        size = "l",
+        div(
+          id = "partage-zone", `data-texte` = texte,
+          div(class = "text-center",
+              tags$img(id = "apercu-partage-img", src = data_uri,
+                       style = "max-width:100%; height:auto; border:1px solid #dee2e6; border-radius:8px;")),
+          div(class = "text-center mt-3",
+              btn("Copier l'image", "copy", "partageCopier()", "btn-primary"),
+              tags$a(class = "btn btn-outline-secondary m-1", href = data_uri,
+                     download = nom_fichier, icon("download"), " Télécharger"),
+              btn("Partager (mobile)", "share-nodes", "partagePartager()", "btn-outline-secondary")
+          ),
+          tags$p(class = "text-muted small text-center mt-3 mb-1", "Publier sur un réseau :"),
+          div(class = "text-center",
+              btn("LinkedIn", "linkedin", "partageReseau('linkedin')", "btn-outline-primary"),
+              btn("Facebook", "facebook", "partageReseau('facebook')", "btn-outline-primary"),
+              btn("Instagram", "instagram", "partageReseau('instagram')", "btn-outline-primary")
+          ),
+          tags$p(class = "text-muted small text-center mt-3 mb-0",
+                 "Sur mobile, « Partager » publie directement (Instagram, etc.). Sur ordinateur, ",
+                 "l'image est copiée : collez-la dans votre publication. Pour Instagram, importez ",
+                 "l'image téléchargée.")
+        ),
+        footer = modalButton("Fermer")
       ))
     })
 
