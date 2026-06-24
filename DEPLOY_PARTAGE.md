@@ -14,13 +14,14 @@ un **modal d'aperçu**. L'utilisateur y choisit son canal ([www/partage.js](www/
 - **Partager (mobile)** — Web Share API : feuille native du système (mobile,
   Safari macOS) → Instagram, WhatsApp, LinkedIn, etc. C'est le seul vrai partage
   direct vers Instagram.
-- **LinkedIn / Facebook / Instagram** — ouvrent le réseau ; l'image est copiée
-  (LinkedIn/Facebook) ou téléchargée (Instagram) pour être collée/importée.
+- **LinkedIn / Facebook / Instagram** — ouvrent le réseau et **téléchargent**
+  l'image, à importer via le bouton photo de la publication (les éditeurs de ces
+  réseaux n'acceptent pas le collage d'image : upload de fichier requis).
 
 Limites des plateformes : aucune API web ne permet de *publier* une image
-directement sur LinkedIn/Facebook/Instagram depuis un bouton. Un **aperçu social
-riche** (carte image dans le fil) à partir d'un simple lien nécessite le sidecar
-Open Graph ci-dessous.
+directement sur LinkedIn/Facebook/Instagram depuis un bouton, ni d'y *coller* une
+image dans l'éditeur. Un **aperçu social riche** (carte image dans le fil) à
+partir d'un simple lien nécessite le sidecar Open Graph ci-dessous.
 
 Rien à configurer ; fonctionne dans l'app telle quelle (contexte HTTPS requis
 pour le presse-papiers et le partage natif).

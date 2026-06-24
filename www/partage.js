@@ -97,17 +97,16 @@
       facebook: "https://www.facebook.com/",
       instagram: "https://www.instagram.com/"
     };
+    var noms = { linkedin: "LinkedIn", facebook: "Facebook", instagram: "Instagram" };
     // Ouverture SYNCHRONE (dans le geste du clic) pour éviter le blocage popup.
     window.open(urls[reseau], "_blank", "noopener");
     var blob = imgBlob();
     if (!blob) return;
-    if (reseau === "instagram") {
-      telecharger(blob);
-      toast("Image téléchargée — importez-la dans Instagram.");
-    } else {
-      copierBlob(blob)
-        .then(function () { toast("Image copiée — collez-la dans votre publication."); })
-        .catch(function () { telecharger(blob); toast("Image téléchargée — ajoutez-la à votre publication."); });
-    }
+    // Les éditeurs de publication de ces réseaux n'acceptent PAS le collage d'une
+    // image (upload de fichier requis) : on télécharge donc l'image, à importer
+    // via le bouton photo de la publication.
+    telecharger(blob);
+    toast("Image téléchargée — importez-la via le bouton photo de votre publication " +
+          (noms[reseau] || "") + ".");
   };
 })();

@@ -495,9 +495,10 @@ mod_quiz_server <- function(id, db_pool) {
               btn("Instagram", "instagram", "partageReseau('instagram')", "btn-outline-primary")
           ),
           tags$p(class = "text-muted small text-center mt-3 mb-0",
-                 "Sur mobile, « Partager » publie directement (Instagram, etc.). Sur ordinateur, ",
-                 "l'image est copiée : collez-la dans votre publication. Pour Instagram, importez ",
-                 "l'image téléchargée.")
+                 "Les boutons réseau téléchargent l'image : importez-la via le bouton photo de la ",
+                 "publication (LinkedIn, Instagram et Facebook n'acceptent pas le collage). ",
+                 "« Copier l'image » convient aux applis qui acceptent le collage (X, WhatsApp, e-mail…). ",
+                 "Sur mobile, « Partager » publie directement.")
         ),
         footer = modalButton("Fermer")
       ))
