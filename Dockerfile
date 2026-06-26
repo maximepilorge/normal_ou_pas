@@ -1,6 +1,11 @@
 FROM rocker/shiny:4.4
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
-    libpq-dev 
+    libpq-dev \
+    libtiff5 \
+    libjpeg-turbo8 \
+    libpng16-16 \
+    libfreetype6 \
+    libfontconfig1
 RUN R -e 'install.packages(c(\
               "shiny", \
               "shinyjs", \
