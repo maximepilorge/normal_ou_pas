@@ -253,6 +253,17 @@ ui <- fluidPage( # On utilise tagList comme conteneur principal
                  
                  hr(),
 
+                 h3("Projections futures : « 2050 » et « 2100 » 🔮"),
+                 p("Les repères « 2050 » et « 2100 » (boutons du quiz, barres projetées du graphique des jours de forte chaleur) s'appuient sur les projections climatiques de référence ", strong("Explore2"), " — le projet piloté par l'INRAE avec Météo-France et l'Office français de la biodiversité — alignées sur la ", strong("Trajectoire de Réchauffement de référence pour l'Adaptation au Changement Climatique (TRACC)"), " : ", strong("+2,7 °C en 2050"), " et ", strong("+4 °C en 2100"), " pour la France métropolitaine, par rapport à l'ère préindustrielle."),
+                 tags$ul(
+                   tags$li(strong("17 simulations climatiques : "), "Explore2 rassemble ", strong("17 chaînes de modèles"), " (6 modèles climatiques mondiaux croisés avec 9 modèles régionaux, issus de la base européenne EURO-CORDEX), corrigées de leurs biais sur les observations françaises (méthode ADAMONT, grille 8 km de Météo-France). Multiplier les modèles couvre l'éventail des sensibilités climatiques ; l'application affiche la ", strong("médiane des 17 simulations"), " (l'estimation centrale)."),
+                   tags$li(strong("On projette le réchauffement, pas la température brute : "), "on calcule l'", strong("écart de réchauffement"), " entre la période future et le présent (1991-2020), sur la même fenêtre glissante de ±7 jours, et on l'", strong("ajoute aux normales ERA5"), " de l'application. Tout reste ainsi sur la même échelle que l'observé, et directement comparable avec lui."),
+                   tags$li(strong("La distribution évolue, pas seulement la moyenne : "), "sur le graphique du quiz, le décalage est calculé séparément pour la moyenne, le 10e et le 90e percentile. Les extrêmes chauds montant plus vite, la zone « normale » ne fait pas que se translater : elle s'", strong("élargit vers le haut"), "."),
+                   tags$li(strong("Des tendances, pas des prévisions datées : "), "ces valeurs décrivent le climat ", strong("moyen d'un horizon"), " (la « nouvelle normale » d'une époque), pas la météo d'une année précise. Elles donnent une direction et un ordre de grandeur, cohérents avec la trajectoire officielle d'adaptation de la France.")
+                 ),
+
+                 hr(),
+
                  h3("Aller plus loin 🔗"),
                  p("Cette application teste vos repères de température. Pour explorer plus largement le changement climatique en France et ses indicateurs, d'autres ressources de référence complètent cette approche :"),
                  tags$ul(
