@@ -84,8 +84,8 @@ mod_analyse_ui <- function(id) {
             "Vers le <b>bas</b>, les <b>jours de gel</b> (tmin ≤ 0 °C).",
             "Avec le réchauffement, la chaleur monte et le gel recule.",
             "<br>Les colonnes <b>projetées</b> (TRACC, +2,7 °C et +4 °C) appliquent les",
-            "mêmes définitions aux projections DRIAS : <b>médiane de 5 simulations",
-            "régionales</b> (RCP8.5). Tendances, non prévisions datées."
+            "mêmes définitions aux projections DRIAS : <b>médiane de 17 simulations",
+            "régionales</b>."
           ))
         )
       )
