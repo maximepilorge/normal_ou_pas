@@ -14,7 +14,8 @@ load_dot_env(file = here::here(".Renviron"))
 
 # Noms des tables à transférer
 tables_a_transferer <- c("temperatures_max", "stats_normales", "quiz_data_precalculee",
-                         "indicateurs_annuels", "canicules")
+                         "indicateurs_annuels",
+                         "stats_normales_projetees", "extremes_projetes")
 
 # --- Connexions aux bases de données ---
 cat("Connexion aux bases de données...\n")
@@ -96,12 +97,18 @@ tryCatch({
   dbExecute(con_prod, "CREATE INDEX idx_indic_annuels_ville ON preparation.indicateurs_annuels (ville, annee);")
   dbExecute(con_prod, "VACUUM ANALYZE preparation.indicateurs_annuels;")
 
-  # -- Table: canicules --
-  cat("\nTable 'canicules'...\n")
-  dbExecute(con_prod, "ALTER TABLE preparation.canicules ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
-  dbExecute(con_prod, "ALTER TABLE preparation.canicules ADD CONSTRAINT uc_canicules_ville_debut UNIQUE (ville, date_debut);")
-  dbExecute(con_prod, "CREATE INDEX idx_canicules_ville_annee ON preparation.canicules (ville, annee);")
-  dbExecute(con_prod, "VACUUM ANALYZE preparation.canicules;")
+  # -- Table: stats_normales_projetees (projections TRACC, quiz) --
+  cat("\nTable 'stats_normales_projetees'...\n")
+  dbExecute(con_prod, "ALTER TABLE preparation.stats_normales_projetees ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
+  dbExecute(con_prod, "ALTER TABLE preparation.stats_normales_projetees ADD CONSTRAINT uc_proj_ville_jour_niveau UNIQUE (ville, mois, jour_mois, niveau_rechauffement);")
+  dbExecute(con_prod, "CREATE INDEX idx_proj_ville_niveau ON preparation.stats_normales_projetees (ville, niveau_rechauffement);")
+  dbExecute(con_prod, "VACUUM ANALYZE preparation.stats_normales_projetees;")
+
+  # -- Table: extremes_projetes (projections TRACC : forte chaleur + gel) --
+  cat("\nTable 'extremes_projetes'...\n")
+  dbExecute(con_prod, "ALTER TABLE preparation.extremes_projetes ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
+  dbExecute(con_prod, "ALTER TABLE preparation.extremes_projetes ADD CONSTRAINT uc_ext_proj_ville_niveau UNIQUE (ville, niveau_rechauffement);")
+  dbExecute(con_prod, "VACUUM ANALYZE preparation.extremes_projetes;")
 
   cat("✅ Structure appliquée avec succès.\n")
   

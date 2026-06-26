@@ -1,7 +1,7 @@
 # calculer_indicateurs.R
 # Fonctions de calcul des indicateurs dérivés des températures journalières
-# (tmax + tmin) : indicateurs annuels par ville et épisodes de canicule selon la
-# définition officielle Météo-France (IBM 3 jours vs seuils départementaux).
+# (tmax + tmin) : indicateurs annuels par ville et épisodes de canicule inspirés
+# du dispositif SACS (indicateur IBM 3 jours), seuils recalibrés sur la donnée.
 #
 # Sourcé par preparer_data.R. En `source()`, ce fichier n'expose que des
 # fonctions (aucun effet de bord), conformément au reste du pipeline.
@@ -17,6 +17,9 @@ library(lubridate)
 #   - nuits_tropicales      : nb de nuits où tmin >= 20 °C (santé / sommeil)
 #   - jours_chaleur_30      : nb de jours où tmax >= 30 °C
 #   - jours_forte_chaleur_35: nb de jours où tmax >= 35 °C
+#   - jours_gel             : nb de jours où tmin <= 0 °C (le pendant « froid »,
+#       qui RECULE avec le réchauffement — lecture grand public, sans le biais
+#       1/n des records cumulés)
 #   - tmax_annuel           : journée la plus chaude de l'année
 #   - tmin_annuel           : nuit la plus froide de l'année
 #   - records_chaud / records_froid : nb de records quotidiens battus dans l'année
@@ -50,6 +53,7 @@ calculer_indicateurs_annuels <- function(donnees) {
       nuits_tropicales       = sum(temperature_min >= 20, na.rm = TRUE),
       jours_chaleur_30       = sum(temperature_max >= 30, na.rm = TRUE),
       jours_forte_chaleur_35 = sum(temperature_max >= 35, na.rm = TRUE),
+      jours_gel              = sum(temperature_min <= 0, na.rm = TRUE),
       tmax_annuel            = max(temperature_max, na.rm = TRUE),
       tmin_annuel            = min(temperature_min, na.rm = TRUE),
       nb_jours               = n(),
@@ -58,7 +62,61 @@ calculer_indicateurs_annuels <- function(donnees) {
     left_join(records, by = c("ville", "annee"))
 }
 
-# --- Canicules (définition officielle Météo-France) -------------------------
+# --- Seuil "jour de forte chaleur" : 90e pct de la tmax estivale (JJA) --------
+# Indicateur SIMPLE (remplace la canicule) : un jour de forte chaleur = tmax >=
+# seuil, où seuil = 90e percentile de la tmax des étés (JJA) de la période de
+# référence, PAR ville. Recalculé DANS la source (ERA5 / DRIAS) → cohérent
+# observé/projeté ; seuil local (plus haut au sud) ; pas de bagage « canicule »
+# (ni IBM, ni dual tmin/tmax, ni volet sanitaire).
+#   donnees : ville, date, temperature_max (1+ villes)
+# Retour : data.frame(ville, seuil).
+calculer_seuil_forte_chaleur <- function(donnees, periode_ref = c(1973, 2003), pct = 0.90) {
+  donnees %>%
+    mutate(annee = year(date), mois = month(date)) %>%
+    filter(annee >= periode_ref[1], annee <= periode_ref[2], mois %in% 6:8) %>%
+    group_by(ville) %>%
+    summarise(seuil = as.numeric(quantile(temperature_max, pct, na.rm = TRUE)), .groups = "drop")
+}
+
+# --- Seuils de canicule RECALIBRÉS sur la donnée (cohérence interne) ---------
+# [CONSERVÉ pour référence — n'est plus utilisé par le pipeline depuis le passage
+#  à l'indicateur « jour de forte chaleur » ci-dessus, plus lisible grand public.]
+# INSPIRÉ du dispositif SACS (Santé publique France & Météo-France) : on reprend
+# l'indicateur IBM (moyennes glissantes 3 j des tmin/tmax) ET le percentile de la
+# méthode officielle. Dans SACS, les seuils calibrés sur la surmortalité (doublement
+# de la mortalité, 14 villes pilotes) se sont avérés proches du PERCENTILE 99,5 de
+# la distribution des IBM ; ce percentile a ensuite été appliqué aux stations de
+# référence des autres départements (cf. doc SACS, Santé publique France).
+# On applique donc le même percentile (99,5) à NOTRE source (ERA5-Land observé /
+# DRIAS projeté), sur les étés (JJA) de la période de référence, par ville. Les
+# seuils « reflètent le climat local » (plus hauts à Marseille/Lyon qu'à Rennes),
+# exactement comme l'officiel. La canicule = « top 0,5 % des étés 1973-2003 »,
+# cohérent et comparable observé/projeté. (On ne reproduit PAS le volet sanitaire.)
+#   donnees : ville, date, temperature_max, temperature_min (1+ villes)
+# Retour : data.frame(departement, smin, smax) directement utilisable par
+#          calculer_canicules().
+calculer_seuils_recalibres <- function(donnees, villes_insee,
+                                       periode_ref = c(1973, 2003), pct = 0.995) {
+  ville_dept <- villes_insee %>% transmute(ville, departement = substr(insee, 1, 2))
+  donnees %>%
+    arrange(ville, date) %>%
+    group_by(ville) %>%
+    mutate(
+      consec = !is.na(lag(date, 2)) & as.integer(date - lag(date, 2)) == 2,
+      ibmn = if_else(consec, (temperature_min + lag(temperature_min, 1) + lag(temperature_min, 2)) / 3, NA_real_),
+      ibmx = if_else(consec, (temperature_max + lag(temperature_max, 1) + lag(temperature_max, 2)) / 3, NA_real_),
+      annee = year(date), mois = month(date)
+    ) %>%
+    ungroup() %>%
+    filter(annee >= periode_ref[1], annee <= periode_ref[2], mois %in% 6:8) %>%
+    group_by(ville) %>%
+    summarise(smin = as.numeric(quantile(ibmn, pct, na.rm = TRUE)),
+              smax = as.numeric(quantile(ibmx, pct, na.rm = TRUE)), .groups = "drop") %>%
+    inner_join(ville_dept, by = "ville") %>%
+    select(departement, smin, smax)
+}
+
+# --- Canicules (indicateur IBM façon SACS, seuils recalibrés sur la donnée) --
 # IBM = moyennes glissantes sur 3 jours consécutifs des tmin (IBMn) et tmax
 # (IBMx). Un jour est « caniculaire » quand IBMn >= smin ET IBMx >= smax, où
 # (smin, smax) sont les seuils du DÉPARTEMENT de la ville. Un épisode est une

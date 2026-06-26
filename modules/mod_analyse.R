@@ -52,6 +52,7 @@ mod_analyse_ui <- function(id) {
       card(
         full_screen = TRUE,
         card_header("Évolution des températures maximales annuelles (écart à la normale)"),
+        uiOutput(ns("analyse_rechauffement_ui")),
         plotlyOutput(ns("evolution_plot"), height = "500px"),
         card_footer(
           class = "small text-muted",
@@ -67,37 +68,24 @@ mod_analyse_ui <- function(id) {
         )
       ),
       
-      uiOutput(ns("resultats_defaut_ui")),
       uiOutput(ns("resultats_seuil_ui")),
 
       card(
         full_screen = TRUE,
-        card_header("Vagues de chaleur (canicules) par décennie"),
-        plotOutput(ns("canicules_plot"), height = "320px"),
+        card_header("Jours de forte chaleur vs jours de gel, par an"),
+        plotOutput(ns("forte_chaleur_plot"), height = "380px"),
         card_footer(
           class = "small text-muted",
           icon("circle-info"),
           HTML(paste(
-            "Canicules au sens officiel Météo-France : les indicateurs",
-            "biométéorologiques (moyennes glissantes sur 3 jours des températures",
-            "minimales et maximales) dépassent simultanément les seuils du département.",
-            "Nécessite la température minimale et des seuils départementaux renseignés."
-          ))
-        )
-      ),
-
-      card(
-        full_screen = TRUE,
-        card_header("Records quotidiens de chaleur vs de froid, par décennie"),
-        plotOutput(ns("records_plot"), height = "320px"),
-        card_footer(
-          class = "small text-muted",
-          icon("circle-info"),
-          HTML(paste(
-            "Un record quotidien est battu lorsqu'une valeur dépasse toutes les",
-            "années <b>antérieures</b> pour ce jour calendaire. En climat stable, on",
-            "attendrait autant de records chauds que froids ; l'historique débutant",
-            "en 1950, les premières décennies en comptent mécaniquement davantage."
+            "Nombre moyen de jours par an. Vers le <b>haut</b>, les <b>jours de forte",
+            "chaleur</b> : tmax au-dessus du <b>seuil local</b> (90ᵉ percentile des",
+            "tmax estivales 1973-2003 — une journée parmi les 10 % d'étés les plus chauds).",
+            "Vers le <b>bas</b>, les <b>jours de gel</b> (tmin ≤ 0 °C).",
+            "Avec le réchauffement, la chaleur monte et le gel recule.",
+            "<br>Les colonnes <b>projetées</b> (TRACC, +2,7 °C et +4 °C) appliquent les",
+            "mêmes définitions aux projections DRIAS : <b>médiane de 5 simulations",
+            "régionales</b> (RCP8.5). Tendances, non prévisions datées."
           ))
         )
       )
@@ -224,15 +212,11 @@ mod_analyse_server <- function(id, db_pool) {
         )
       }
       
-      # 2. Calcul du top 5 des événements
-      top_5_events <- df_analyse %>% arrange(desc(tmax_celsius)) %>% head(5)
-      
-      # 3. On stocke ces résultats dans notre nouveau reactiveVal
+      # On stocke ces résultats dans notre reactiveVal
       resultats_defaut(list(
-        ville = input$ville_analyse, 
+        ville = input$ville_analyse,
         annee_range = input$annee_range_analyse,
-        stats_30ans = stats_30ans, 
-        top_5 = top_5_events
+        stats_30ans = stats_30ans
       ))
       
       # 4. On réinitialise l'analyse de seuil quand les données de base changent
@@ -347,30 +331,19 @@ mod_analyse_server <- function(id, db_pool) {
       resultats_seuil(NULL)
     })
     
-    # --- AJOUT ---
-    # UI pour les résultats par défaut (analyse réchauffement + top 5)
-    output$resultats_defaut_ui <- renderUI({
+    # Texte « Analyse du réchauffement » — affiché JUSTE AU-DESSUS du graphe
+    # d'évolution (comparaison des moyennes de tmax entre les deux trentaines).
+    output$analyse_rechauffement_ui <- renderUI({
       req(resultats_defaut())
-      res <- resultats_defaut()
-      
-      texte_stats_ui <- NULL
-      if (!is.null(res$stats_30ans)) {
-        stats <- res$stats_30ans
-        diff <- round(stats$moyenne2 - stats$moyenne1, 2)
-        texte_stats_ui <- p(HTML(paste0(
-          "<b>Analyse du réchauffement :</b> ",
-          "La température maximale moyenne sur la période <b>", stats$periode1_str, "</b> était de <b>", round(stats$moyenne1, 2), "°C</b>. ",
-          "Pour la période <b>", stats$periode2_str, "</b>, elle a atteint <b>", round(stats$moyenne2, 2), "°C</b>, ",
-          "soit une augmentation de <b>", diff, "°C</b>."
-        )))
-      }
-      
-      card(
-        card_header(paste0("Analyse pour ", res$ville, " (", res$annee_range[1], "-", res$annee_range[2], ")")),
-        texte_stats_ui,
-        hr(),
-        card(card_header("Top 5 des événements les plus chauds"), if(nrow(res$top_5) > 0) tableOutput(ns("top_events_table")) else p("Aucune donnée disponible."))
-      )
+      stats <- resultats_defaut()$stats_30ans
+      if (is.null(stats)) return(NULL)
+      diff <- round(stats$moyenne2 - stats$moyenne1, 2)
+      p(class = "text-muted small mb-2", HTML(paste0(
+        "<b>Analyse du réchauffement :</b> ",
+        "La température maximale moyenne sur la période <b>", stats$periode1_str, "</b> était de <b>", round(stats$moyenne1, 2), "°C</b>. ",
+        "Pour la période <b>", stats$periode2_str, "</b>, elle a atteint <b>", round(stats$moyenne2, 2), "°C</b>, ",
+        "soit une augmentation de <b>", diff, "°C</b>."
+      )))
     })
     
     # --- MODIFICATION ---
@@ -390,15 +363,6 @@ mod_analyse_server <- function(id, db_pool) {
         card(card_header("Nombre de jours au-dessus du seuil par décennie"), plotOutput(ns("decennie_plot"), height = "300px"))
       )
     })
-    
-    # --- MODIFICATION ---
-    # La table utilise maintenant le reactiveVal "resultats_defaut"
-    output$top_events_table <- renderTable({
-      req(resultats_defaut())
-      resultats_defaut()$top_5 %>%
-        select(Date = date, `Température (°C)` = tmax_celsius) %>%
-        mutate(Date = format(Date, "%d/%m/%Y"), `Température (°C)` = sprintf("%.1f", `Température (°C)`))
-    }, striped = TRUE, hover = TRUE, bordered = TRUE, spacing = "s", width = "100%")
     
     output$decennie_plot <- renderPlot({
       req(resultats_seuil())
@@ -441,17 +405,30 @@ mod_analyse_server <- function(id, db_pool) {
         theme_void()
     }
 
-    canicules_ville <- reactive({
-      req(input$ville_analyse, input$annee_range_analyse)
-      if (!canicules_disponibles) return(NULL)
-      a1 <- input$annee_range_analyse[1]; a2 <- input$annee_range_analyse[2]
+    # Jours de FORTE CHALEUR projetés (TRACC) par niveau, pour la ville.
+    # Indépendants de la plage d'années observée (ce sont des horizons futurs).
+    extremes_proj_ville <- reactive({
+      req(input$ville_analyse)
       tryCatch(
-        tbl(db_pool, "canicules") %>%
-          filter(ville == !!input$ville_analyse, annee >= !!a1, annee <= !!a2) %>%
-          select(duree_jours, intensite_max, annee) %>%
+        tbl(db_pool, "extremes_projetes") %>%
+          filter(ville == !!input$ville_analyse) %>%
           collect(),
         error = function(e) NULL)
-    }) %>% bindCache(input$ville_analyse, input$annee_range_analyse, canicules_disponibles)
+    }) %>% bindCache(input$ville_analyse)
+
+    # Seuil de forte chaleur de la ville (90e pct de la tmax estivale 1973-2003),
+    # recalculé à la volée — même définition que le pipeline — pour l'afficher.
+    seuil_fc_ville <- reactive({
+      req(input$ville_analyse)
+      tryCatch({
+        d <- tbl(db_pool, "temperatures_max") %>%
+          filter(ville == !!input$ville_analyse, annee >= 1973L, annee <= 2003L,
+                 mois %in% c(6L, 7L, 8L)) %>%
+          select(temperature_max) %>% collect()
+        if (nrow(d) == 0) return(NA_real_)
+        as.numeric(quantile(d$temperature_max, 0.90, na.rm = TRUE))
+      }, error = function(e) NA_real_)
+    }) %>% bindCache(input$ville_analyse)
 
     indicateurs_ville <- reactive({
       req(input$ville_analyse, input$annee_range_analyse)
@@ -460,53 +437,76 @@ mod_analyse_server <- function(id, db_pool) {
       tryCatch(
         tbl(db_pool, "indicateurs_annuels") %>%
           filter(ville == !!input$ville_analyse, annee >= !!a1, annee <= !!a2) %>%
-          select(annee, records_chaud, records_froid) %>%
+          select(annee, jours_gel, jours_forte_chaleur, nb_jours) %>%
           collect(),
         error = function(e) NULL)
     }) %>% bindCache(input$ville_analyse, input$annee_range_analyse, indicateurs_disponibles)
 
-    output$canicules_plot <- renderPlot({
-      df <- canicules_ville()
-      if (is.null(df)) return(etat_indisponible(
-        "Indicateur disponible après la mise à jour des données (température minimale ERA5)."))
-      if (nrow(df) == 0) return(etat_indisponible(
-        "Aucune canicule détectée pour cette ville sur la période — ou seuils départementaux non encore renseignés."))
+    # Graphe DIVERGENT fusionné : forte chaleur (P90) vers le haut, gel (≤0°C)
+    # vers le bas ; décennies observées + horizons projetés (médiane TRACC).
+    output$forte_chaleur_plot <- renderPlot({
+      df   <- indicateurs_ville()
+      proj <- extremes_proj_ville()
+      obs_ok  <- !is.null(df) && nrow(df) > 0 && "jours_forte_chaleur" %in% names(df)
+      proj_ok <- !is.null(proj) && nrow(proj) > 0
+      if (!obs_ok && !proj_ok) return(etat_indisponible(
+        "Indicateur disponible après la mise à jour des données."))
 
-      df %>%
-        mutate(decennie = floor(annee / 10) * 10) %>%
-        group_by(decennie) %>%
-        summarise(jours = sum(duree_jours), episodes = n(), .groups = "drop") %>%
-        ggplot(aes(x = as.factor(decennie), y = jours)) +
-        geom_col(fill = "#E41A1C", alpha = 0.85) +
-        geom_text(aes(label = paste0(jours, " j\n", episodes, " ép.")),
-                  vjust = -0.3, size = 4.5, lineheight = 0.9) +
-        labs(x = "Décennie", y = "Jours de canicule") +
-        theme_minimal(base_size = 14) +
-        scale_y_continuous(expand = expansion(mult = c(0, 0.2)))
-    })
+      # Observé par décennie (jours/an moyens). Années incomplètes (ex. 2026
+      # partielle) écartées pour ne pas sous-estimer le compte estival.
+      obs <- if (obs_ok) {
+        df %>%
+          filter(nb_jours >= 360) %>%
+          mutate(decennie = floor(annee / 10) * 10) %>%
+          group_by(decennie) %>%
+          summarise(chaleur = mean(jours_forte_chaleur, na.rm = TRUE),
+                    gel = mean(jours_gel, na.rm = TRUE), .groups = "drop") %>%
+          transmute(cat = as.character(decennie), ordre = decennie, chaleur, gel)
+      } else {
+        tibble(cat = character(), ordre = numeric(), chaleur = numeric(), gel = numeric())
+      }
 
-    output$records_plot <- renderPlot({
-      df <- indicateurs_ville()
-      if (is.null(df)) return(etat_indisponible(
-        "Indicateur disponible après la mise à jour des données (température minimale ERA5)."))
-      if (nrow(df) == 0) return(etat_indisponible(
-        "Pas de données de records pour cette ville sur la période."))
+      # Projeté (médiane TRACC) : forte chaleur + gel, à droite.
+      barres <- obs
+      if (proj_ok) {
+        labels_niv <- c("2050_+2.7" = "~2050\n+2,7 °C", "2100_+4.0" = "~2100\n+4 °C")
+        ordres_niv <- c("2050_+2.7" = 9990, "2100_+4.0" = 9991)
+        pr <- proj %>%
+          filter(niveau_rechauffement %in% names(labels_niv)) %>%
+          transmute(cat = unname(labels_niv[niveau_rechauffement]),
+                    ordre = unname(ordres_niv[niveau_rechauffement]),
+                    chaleur = jours_chaleur, gel = jours_gel)
+        barres <- bind_rows(obs, pr)
+      }
+      barres <- barres %>% arrange(ordre) %>% mutate(cat = factor(cat, levels = cat))
 
-      df %>%
-        mutate(decennie = floor(annee / 10) * 10) %>%
-        group_by(decennie) %>%
-        summarise(Chaleur = sum(records_chaud, na.rm = TRUE),
-                  Froid = sum(records_froid, na.rm = TRUE), .groups = "drop") %>%
-        tidyr::pivot_longer(c(Chaleur, Froid), names_to = "type", values_to = "n") %>%
-        # Records de froid affichés vers le bas (graphique divergent).
-        mutate(valeur = ifelse(type == "Froid", -n, n)) %>%
-        ggplot(aes(x = as.factor(decennie), y = valeur, fill = type)) +
+      # Format long divergent : chaleur vers le haut, gel vers le bas (négatif).
+      long <- barres %>%
+        tidyr::pivot_longer(c(chaleur, gel), names_to = "indic", values_to = "n") %>%
+        mutate(indicateur = ifelse(indic == "chaleur", "Forte chaleur", "Gel (≤ 0 °C)"),
+               valeur = ifelse(indic == "gel", -n, n))
+
+      seuil <- seuil_fc_ville()
+      sous_titre <- if (is.finite(seuil))
+        sprintf("Seuil de forte chaleur à %s : %s °C (90ᵉ pct des étés 1973-2003)",
+                input$ville_analyse,
+                format(round(seuil, 1), nsmall = 1, decimal.mark = ",")) else NULL
+
+      p <- ggplot(long, aes(x = cat, y = valeur, fill = indicateur)) +
         geom_col(alpha = 0.85) +
+        geom_text(aes(label = round(abs(valeur)),
+                      vjust = ifelse(valeur >= 0, -0.3, 1.2)), size = 3.5) +
         geom_hline(yintercept = 0, color = "#343a40", linewidth = 0.4) +
-        scale_fill_manual(values = c("Chaleur" = "#E41A1C", "Froid" = "#1f77b4"), name = "") +
-        labs(x = "Décennie", y = "Nombre de records") +
+        scale_fill_manual(values = c("Forte chaleur" = "#E41A1C", "Gel (≤ 0 °C)" = "#1f77b4"),
+                          name = NULL) +
+        labs(x = NULL, y = "Jours par an", subtitle = sous_titre) +
         theme_minimal(base_size = 14) +
-        theme(legend.position = "bottom")
+        theme(legend.position = "bottom", plot.subtitle = element_text(color = "grey30")) +
+        scale_y_continuous(expand = expansion(mult = c(0.12, 0.12)))
+      # Séparateur pointillé entre décennies observées et horizons projetés.
+      if (proj_ok && nrow(obs) > 0)
+        p <- p + geom_vline(xintercept = nrow(obs) + 0.5, linetype = "dashed", color = "grey55")
+      p
     })
 
   })

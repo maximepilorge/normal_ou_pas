@@ -129,66 +129,87 @@ recuperer_donnees_era5 <- function(villes_a_telecharger = NULL) {
     df_final_daily_max <- data.frame()
   }
 
-  # --- Pré-calcul des coordonnées de grille ---
-  # On télécharge un petit échantillon pour récupérer les coordonnées exactes
-  # de la grille ERA5-Land, nécessaires à l'association ville -> mailles.
-  print("Détermination des points de grille pour chaque ville...")
-  nc_grid_file <- "era5_grid_temp"
-  full_nc_grid_path <- file.path(path_to_save, nc_grid_file)
-
-  request_list_grid <- list(
-    dataset_short_name = "reanalysis-era5-land",
-    product_type = "reanalysis",
-    variable = "2m_temperature",
-    year = "2023",
-    month = "01",
-    day = "01",
-    time = "00:00",
-    format = "netcdf",
-    area = c(max(villes$latitude) + 1, min(villes$longitude) - 1,
-             min(villes$latitude) - 1, max(villes$longitude) + 1),
-    target = paste0(nc_grid_file, ".nc")
-  )
-
-  wf_request(user = "maxp17.mp@gmail.com",
-             request_list_grid,
-             path = path_to_save,
-             transfer = TRUE,
-             verbose = FALSE)
-
-  # Décompression éventuelle du fichier de grille.
-  downloaded_file <- file.path(path_to_save, paste0(nc_grid_file, ".zip"))
-  if (file.exists(downloaded_file)) {
-    unzip(zipfile = downloaded_file, exdir = path_to_save)
-    extracted_nc_file <- file.path(path_to_save, "data_0.nc")
-    if (file.exists(extracted_nc_file)) {
-      file.rename(from = extracted_nc_file, to = file.path(path_to_save, paste0(nc_grid_file, ".nc")))
-      print("Fichier de grille décompressé et renommé avec succès.")
+  # --- Association ville -> mailles ERA5 (avec cache sur disque) ---
+  # L'association ne dépend que de la liste des villes et de la grille ERA5-Land
+  # (figée à 0,1°) : elle ne change pas d'un run à l'autre. La recalculer implique
+  # un petit téléchargement de grille (CDS) PUIS le contour de chaque commune
+  # (geo.api.gouv.fr) — coûteux et inutile si rien n'a bougé. On réutilise donc le
+  # RDS précédent dès qu'il couvre déjà toutes les villes demandées.
+  chemin_complet_assoc <- file.path(path_to_save, "villes_et_mailles_associees.rds")
+  villes_avec_coords_grille <- NULL
+  if (file.exists(chemin_complet_assoc)) {
+    assoc_existante <- readRDS(chemin_complet_assoc)
+    villes_manquantes <- setdiff(villes$ville, unique(assoc_existante$ville))
+    if (length(villes_manquantes) == 0) {
+      print("Association villes/mailles réutilisée depuis le cache existant (pas de recalcul).")
+      villes_avec_coords_grille <- assoc_existante %>% filter(ville %in% villes$ville)
     } else {
-      stop("Erreur : Le fichier n'a pas été trouvé après la décompression.")
+      print(paste0("Cache d'association incomplet (villes absentes : ",
+                   paste(villes_manquantes, collapse = ", "), ") — recalcul complet."))
     }
   }
 
-  # Lecture du fichier de grille pour extraire les coordonnées (arrondies au
-  # centième : la grille ERA5-Land est à 0,1°, l'arrondi fiabilise la jointure
-  # entre fichiers/datasets en absorbant le bruit de représentation flottante).
-  nc_grid_path <- paste0(full_nc_grid_path, ".nc")
-  nc_grid <- nc_open(nc_grid_path)
-  lon_grid <- round(ncvar_get(nc_grid, "longitude"), 2)
-  lat_grid <- round(ncvar_get(nc_grid, "latitude"), 2)
-  nc_close(nc_grid)
-  file.remove(nc_grid_path)
+  if (is.null(villes_avec_coords_grille)) {
+    # --- Pré-calcul des coordonnées de grille ---
+    # On télécharge un petit échantillon pour récupérer les coordonnées exactes
+    # de la grille ERA5-Land, nécessaires à l'association ville -> mailles.
+    print("Détermination des points de grille pour chaque ville...")
+    nc_grid_file <- "era5_grid_temp"
+    full_nc_grid_path <- file.path(path_to_save, nc_grid_file)
 
-  # --- Association ville -> mailles ERA5 par emprise communale ---
-  # On construit les mailles réelles de la grille puis on retient pour chaque
-  # ville TOUTES les mailles qui intersectent sa commune, avec un poids = part
-  # de surface couverte (plusieurs lignes par ville : lon_grille, lat_grille, poids).
-  sf_cells <- construire_cellules_era5(lon_grid, lat_grid)
-  villes_avec_coords_grille <- associer_mailles_communes(villes, sf_cells)
+    request_list_grid <- list(
+      dataset_short_name = "reanalysis-era5-land",
+      product_type = "reanalysis",
+      variable = "2m_temperature",
+      year = "2023",
+      month = "01",
+      day = "01",
+      time = "00:00",
+      format = "netcdf",
+      area = c(max(villes$latitude) + 1, min(villes$longitude) - 1,
+               min(villes$latitude) - 1, max(villes$longitude) + 1),
+      target = paste0(nc_grid_file, ".nc")
+    )
 
-  chemin_complet_assoc <- file.path(path_to_save, "villes_et_mailles_associees.rds")
-  saveRDS(villes_avec_coords_grille, file = chemin_complet_assoc)
-  print(paste("Fichier d'association villes/mailles sauvegardé dans :", chemin_complet_assoc))
+    wf_request(user = "maxp17.mp@gmail.com",
+               request_list_grid,
+               path = path_to_save,
+               transfer = TRUE,
+               verbose = FALSE)
+
+    # Décompression éventuelle du fichier de grille.
+    downloaded_file <- file.path(path_to_save, paste0(nc_grid_file, ".zip"))
+    if (file.exists(downloaded_file)) {
+      unzip(zipfile = downloaded_file, exdir = path_to_save)
+      extracted_nc_file <- file.path(path_to_save, "data_0.nc")
+      if (file.exists(extracted_nc_file)) {
+        file.rename(from = extracted_nc_file, to = file.path(path_to_save, paste0(nc_grid_file, ".nc")))
+        print("Fichier de grille décompressé et renommé avec succès.")
+      } else {
+        stop("Erreur : Le fichier n'a pas été trouvé après la décompression.")
+      }
+    }
+
+    # Lecture du fichier de grille pour extraire les coordonnées (arrondies au
+    # centième : la grille ERA5-Land est à 0,1°, l'arrondi fiabilise la jointure
+    # entre fichiers/datasets en absorbant le bruit de représentation flottante).
+    nc_grid_path <- paste0(full_nc_grid_path, ".nc")
+    nc_grid <- nc_open(nc_grid_path)
+    lon_grid <- round(ncvar_get(nc_grid, "longitude"), 2)
+    lat_grid <- round(ncvar_get(nc_grid, "latitude"), 2)
+    nc_close(nc_grid)
+    file.remove(nc_grid_path)
+
+    # --- Association ville -> mailles ERA5 par emprise communale ---
+    # On construit les mailles réelles de la grille puis on retient pour chaque
+    # ville TOUTES les mailles qui intersectent sa commune, avec un poids = part
+    # de surface couverte (plusieurs lignes par ville : lon_grille, lat_grille, poids).
+    sf_cells <- construire_cellules_era5(lon_grid, lat_grid)
+    villes_avec_coords_grille <- associer_mailles_communes(villes, sf_cells)
+
+    saveRDS(villes_avec_coords_grille, file = chemin_complet_assoc)
+    print(paste("Fichier d'association villes/mailles sauvegardé dans :", chemin_complet_assoc))
+  }
 
   # (traiter_fichier_horaire est défini au niveau supérieur, en début de script.)
 

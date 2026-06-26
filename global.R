@@ -149,8 +149,12 @@ an_max_data <- plage_annees$max
 table_existe <- function(nom) {
   tryCatch(DBI::dbExistsTable(db_pool, nom), error = function(e) FALSE)
 }
-canicules_disponibles <- table_existe("canicules")
 indicateurs_disponibles <- table_existe("indicateurs_annuels")
+# Projections TRACC (delta DRIAS par niveau de réchauffement) : alimentées par la
+# chaîne utils/telecharger_drias.R -> calculer_projections.R -> deployer_projections.R.
+projections_disponibles <- table_existe("stats_normales_projetees")
+# Période de référence sur laquelle les deltas de projection sont ancrés (présent).
+PERIODE_REF_PROJECTION <- "1991-2020"
 
 # Utilitaire : bornes (début, fin) d'un libellé de période "AAAA-AAAA".
 .periode_bornes <- function(p) as.numeric(strsplit(p, "-")[[1]])

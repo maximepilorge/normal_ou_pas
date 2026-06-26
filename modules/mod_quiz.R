@@ -62,6 +62,8 @@ mod_quiz_server <- function(id, db_pool) {
     dernier_resultat <- reactiveVal(NULL)
     # Seuils p10/p90 (bornes du « normal ») du jour, pour le boxplot.
     seuils_quiz <- reactiveVal(NULL)
+    # Normales projetées (TRACC) du jour : présent + niveaux 2050/2100, pour le boxplot.
+    projections_quiz <- reactiveVal(NULL)
     
     observeEvent(req(input$periode_normale), {
       shinyjs::click("new_question_btn")
@@ -192,7 +194,7 @@ mod_quiz_server <- function(id, db_pool) {
       req(quiz_data())
       data <- quiz_data()
       formatted_date <- paste(format(data$date, "%d"), mois_fr[as.numeric(format(data$date, "%m"))])
-      paste0('Le ', formatted_date, ', à ', data$city, ', la température maximale observée est de ', data$temp, '°C. Normal ou pas ?')
+      paste0('Le ', formatted_date, ', ', autour_de(data$city), ', la température maximale observée est de ', data$temp, '°C. Normal ou pas ?')
     })
     
     # --- ENVOI RÉPONSE ---
@@ -261,6 +263,38 @@ mod_quiz_server <- function(id, db_pool) {
         list(p10 = seuils_normaux$seuil_bas_p10[1], p90 = seuils_normaux$seuil_haut_p90[1])
         else NULL)
 
+      # --- Normales projetées (TRACC) : normale 1991-2020 + delta DRIAS par niveau.
+      # Ancrage sur le PRÉSENT (1991-2020), indépendant de la période de
+      # classification choisie. La fourchette (bas/haut) = enveloppe inter-modèles.
+      projections_quiz(NULL)
+      if (projections_disponibles) {
+        base_9120 <- tbl(db_pool, "stats_normales") %>%
+          filter(ville == !!data$city, mois == !!mois_quiz, jour_mois == !!jour_quiz,
+                 periode_ref == !!PERIODE_REF_PROJECTION) %>%
+          select(t_moy, seuil_bas_p10, seuil_haut_p90) %>% collect()
+        deltas_proj <- tbl(db_pool, "stats_normales_projetees") %>%
+          filter(ville == !!data$city, mois == !!mois_quiz, jour_mois == !!jour_quiz) %>%
+          collect()
+        if (nrow(base_9120) > 0 && nrow(deltas_proj) > 0) {
+          labels_niv <- c("2050_+2.7" = "2050 (+2,7 °C)", "2100_+4.0" = "2100 (+4 °C)")
+          niveaux <- lapply(names(labels_niv), function(niv) {
+            d <- deltas_proj[deltas_proj$niveau_rechauffement == niv, ]
+            if (nrow(d) == 0) return(NULL)
+            list(niveau = niv, label = unname(labels_niv[niv]),
+                 moy      = base_9120$t_moy[1]          + d$delta_moy[1],
+                 p10      = base_9120$seuil_bas_p10[1]  + d$delta_p10[1],
+                 p90      = base_9120$seuil_haut_p90[1] + d$delta_p90[1],
+                 moy_bas  = base_9120$t_moy[1]          + d$delta_moy_bas[1],
+                 moy_haut = base_9120$t_moy[1]          + d$delta_moy_haut[1])
+          })
+          niveaux <- Filter(Negate(is.null), niveaux)
+          if (length(niveaux) > 0) projections_quiz(list(
+            present = list(p10 = base_9120$seuil_bas_p10[1],
+                           p90 = base_9120$seuil_haut_p90[1], moy = base_9120$t_moy[1]),
+            niveaux = niveaux))
+        }
+      }
+
       # Fenêtre ±7 jours autour de la date, cohérente avec la classification du
       # quiz (seuils p10/p90 lissés sur ±7 j). On filtre sur l'ensemble des
       # couples (mois, jour) de la fenêtre via une clé mois*100 + jour.
@@ -297,7 +331,7 @@ mod_quiz_server <- function(id, db_pool) {
       ))
       
       if (data$correct_answer == "Dans les normales de saison") {
-        explication_text <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", round(moyenne_reelle, 1), "°C) et est considérée comme normale à cette période de l'année (autour du ", paste(format(data$date, "%d"), mois_fr[as.numeric(format(data$date, "%m"))]), ") à ", data$city, ".")
+        explication_text <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", round(moyenne_reelle, 1), "°C) et est considérée comme normale à cette période de l'année (vers le ", paste(format(data$date, "%d"), mois_fr[as.numeric(format(data$date, "%m"))]), ") ", autour_de(data$city), ".")
       } else {
         
         explication_principale <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", round(moyenne_reelle, 1), "°C) pour la période ", input$periode_normale, ".")
@@ -331,7 +365,25 @@ mod_quiz_server <- function(id, db_pool) {
       }
       
       feedback_body <- paste0("<b>", intro_message, "</b><br><br>", explication_text)
-      
+
+      # --- Phrase projections (TRACC) : situe la température aux horizons futurs.
+      proj <- projections_quiz()
+      if (!is.null(proj)) {
+        classer <- function(temp, p10, p90) {
+          if (temp < p10) "<b>en dessous des normales</b>"
+          else if (temp > p90) "<b>au-dessus des normales</b>"
+          else "<b>dans les normales de saison</b>"
+        }
+        phrases <- vapply(proj$niveaux, function(n)
+          paste0("à l'horizon <b>", n$label, "</b>, elle serait ",
+                 classer(data$temp, n$p10, n$p90)), character(1))
+        feedback_body <- paste0(
+          feedback_body,
+          "<br><br><span style='color:#555'>🌡️ Avec le réchauffement (trajectoire de référence ",
+          "TRACC, par rapport aux normales actuelles 1991-2020) : ",
+          paste(phrases, collapse = " ; "), ".</span>")
+      }
+
       # --- BOXPLOT ---
       output$feedback_boxplot <- renderPlotly({
         
@@ -340,84 +392,79 @@ mod_quiz_server <- function(id, db_pool) {
         data_quiz <- quiz_data()
         donnees_historiques_jour_plot <- boxplot_data()
 
-        main_title <- paste("Distribution historique autour du", paste(format(data_quiz$date, "%d"), mois_fr[as.numeric(format(data_quiz$date, "%m"))]), "(±7 j) à", data_quiz$city)
+        main_title <- paste0("Distribution historique ", autour_de(data_quiz$city), " (vers le ", paste(format(data_quiz$date, "%d"), mois_fr[as.numeric(format(data_quiz$date, "%m"))]), ", ±7 j)")
         subtitle_text <- paste("Période", input$periode_normale)
         full_title <- paste0(main_title, "<br><sup>", subtitle_text, "</sup><br>")
         
-        points_specifiques <- data.frame(
-          normale_moy = data_quiz$normale_moy,
-          temp_quiz = data_quiz$temp
-        )
-        
-        # Création du graphique
+        fmt1 <- function(x) format(round(x, 1), nsmall = 1, decimal.mark = ",")
+        seuils <- seuils_quiz()
+        proj   <- projections_quiz()
+
+        # Repère « normale » ACTIF selon le bouton horizon (présent / 2050 / 2100).
+        # Présent = période de classification choisie ; 2050/2100 = normales
+        # projetées absolues (1991-2020 + delta). UN SEUL repère à la fois -> lisible.
+        horizon <- if (is.null(input$horizon_proj)) "present" else input$horizon_proj
+        actif <- NULL
+        if (horizon == "present") {
+          if (!is.null(seuils) && is.finite(seuils$p10) && is.finite(seuils$p90))
+            actif <- list(p10 = seuils$p10, p90 = seuils$p90, moy = data_quiz$normale_moy,
+                          titre = paste0("Normale actuelle (", input$periode_normale, ")"),
+                          couleur = "#2E8B57")
+        } else if (!is.null(proj)) {
+          n <- Filter(function(x) startsWith(x$niveau, horizon), proj$niveaux)
+          if (length(n) > 0) {
+            n <- n[[1]]
+            actif <- list(p10 = n$p10, p90 = n$p90, moy = n$moy,
+                          titre = paste0("Normale projetée ", n$label),
+                          couleur = if (horizon == "2050") "#E8A33D" else "#E4572E")
+          }
+        }
+
+        sous_titre <- if (!is.null(actif))
+          paste0(actif$titre, " : zone normale ", fmt1(actif$p10), "–", fmt1(actif$p90),
+                 " °C · moyenne ", fmt1(actif$moy), " °C")
+        else paste("Période", input$periode_normale)
+        full_title <- paste0(main_title, "<br><sup>", sous_titre, "</sup><br>")
+
+        # Cadre Y fixe couvrant présent + 2050 + 2100 : en basculant, la zone
+        # « normale » glisse vers le haut sans que le boxplot soit redimensionné.
+        all_y <- c(donnees_historiques_jour_plot$tmax_celsius, data_quiz$temp)
+        if (!is.null(seuils)) all_y <- c(all_y, seuils$p10, seuils$p90)
+        if (!is.null(proj)) for (n in proj$niveaux) all_y <- c(all_y, n$p10, n$p90)
+        yr <- range(all_y, na.rm = TRUE); yr <- yr + c(-1, 1) * 0.06 * diff(yr)
+
         p <- ggplot(donnees_historiques_jour_plot, aes(x = "", y = tmax_celsius)) +
-          # Boxplot basé sur les données historiques
           geom_boxplot(width = 0.3, fill = "skyblue", alpha = 0.7) +
-          # Afficher tous les points historiques avec un peu de jitter
-          geom_jitter(
-            aes(text = paste(
-              "Date :", format(date, "%d %b %Y"),
-              "<br>Température :", round(tmax_celsius, 1), "°C"
-            )),
-            width = 0.1, alpha = 0.4, color = "darkblue"
-          ) +
-          # On ajoute la moyenne avec une forme et une couleur distinctes
-          geom_point(
-            data = points_specifiques,
-            aes(x = "", y = normale_moy, text = paste(
-              "Moyenne historique :", normale_moy, "°C"
-            )),
-            shape = 4,
-            size = 4, 
-            color = "black"
-          ) +
-          # Ajouter le point de la température du quiz en rouge
-          geom_point(
-            data = points_specifiques,
-            aes(x = "", y = temp_quiz, text = paste(
-              "Température du quiz :", temp_quiz, "°C"
-            )),
-            color = "red", size = 4, shape = 4, stroke = 1.5, alpha = 0.85
-          ) +
+          geom_jitter(aes(text = paste("Date :", format(date, "%d %b %Y"),
+                                       "<br>Température :", round(tmax_celsius, 1), "°C")),
+                      width = 0.1, alpha = 0.4, color = "darkblue") +
+          geom_point(data = data.frame(temp_quiz = data_quiz$temp),
+                     aes(x = "", y = temp_quiz,
+                         text = paste("Température du quiz :", data_quiz$temp, "°C")),
+                     color = "red", size = 4, shape = 4, stroke = 1.5, alpha = 0.85) +
           scale_y_continuous(labels = ~paste(.x, "°C")) +
-          labs(
-            title = main_title,
-            x = "",
-            y = "Température Maximale"
-          ) +
+          labs(title = main_title, x = "", y = "Température Maximale") +
           theme_minimal(base_size = 14) +
           theme(plot.title = element_text(face = "bold"))
 
-        # Bornes du « normal » : 10e et 90e percentiles (lissés ±7 j) qui servent
-        # à classer la température. La zone entre les deux = « dans les normales ».
-        seuils <- seuils_quiz()
-        if (!is.null(seuils) && is.finite(seuils$p10) && is.finite(seuils$p90)) {
-          fmt1 <- function(x) format(round(x, 1), nsmall = 1, decimal.mark = ",")
-          seuils_df <- data.frame(
-            type = c(paste0("10e pct – seuil bas : ", fmt1(seuils$p10), " °C"),
-                     paste0("90e pct – seuil haut : ", fmt1(seuils$p90), " °C")),
-            y = c(seuils$p10, seuils$p90)
-          )
+        # Zone normale de l'horizon actif (rectangle + bornes p10/p90 + moyenne).
+        if (!is.null(actif)) {
           p <- p +
-            annotate("rect", xmin = 0.55, xmax = 1.45,
-                     ymin = seuils$p10, ymax = seuils$p90,
-                     fill = "#2E8B57", alpha = 0.07) +
-            geom_hline(data = seuils_df, aes(yintercept = y, color = type),
-                       linetype = "dashed", linewidth = 0.8) +
-            scale_color_manual(name = "Bornes du « normal »",
-                               values = setNames(c("#1f77b4", "#ff7f0e"), seuils_df$type)) +
-            theme(legend.position = "bottom")
+            annotate("rect", xmin = 0.55, xmax = 1.45, ymin = actif$p10, ymax = actif$p90,
+                     fill = actif$couleur, alpha = 0.15) +
+            geom_hline(yintercept = c(actif$p10, actif$p90),
+                       linetype = "dashed", color = actif$couleur, linewidth = 0.8) +
+            geom_point(data = data.frame(y = actif$moy),
+                       aes(x = "", y = y, text = paste("Moyenne :", fmt1(actif$moy), "°C")),
+                       shape = 4, size = 4, color = "black")
         }
 
         ggplotly(p, tooltip = "text") %>%
-          # On verrouille les axes pour désactiver le zoom et le déplacement
-          layout(
-            title = list(text = full_title, x = 0.5),
-            xaxis = list(fixedrange = TRUE),
-            yaxis = list(fixedrange = TRUE)
-          ) %>%
+          layout(title = list(text = full_title, x = 0.5),
+                 xaxis = list(fixedrange = TRUE),
+                 yaxis = list(fixedrange = TRUE, range = yr)) %>%
           config(displayModeBar = FALSE, responsive = TRUE)
-        
+
       })
       
       # --- Affichage du texte et du graphique dans l'UI ---
@@ -426,6 +473,15 @@ mod_quiz_server <- function(id, db_pool) {
           HTML(feedback_body),
           hr(),
           h4("Visualisation de la distribution"),
+          if (!is.null(projections_quiz()))
+            div(class = "text-center mb-2",
+                radioGroupButtons(
+                  session$ns("horizon_proj"),
+                  label = "Comparer à la normale de :",
+                  choices = c("Aujourd'hui" = "present",
+                              "2050 (+2,7 °C)" = "2050",
+                              "2100 (+4 °C)" = "2100"),
+                  selected = "present", size = "sm", status = "primary")),
           plotlyOutput(session$ns("feedback_boxplot")),
           hr(),
           div(
@@ -461,9 +517,9 @@ mod_quiz_server <- function(id, db_pool) {
       ecart <- round(res$temp - res$normale_moy, 1)
       sens <- if (ecart > 0) "au-dessus" else if (ecart < 0) "en-dessous" else "dans"
       texte <- if (ecart == 0) {
-        paste0(res$temp, "°C à ", res$ville, " : exactement dans la normale de saison. Et vous, sauriez-vous situer ce qui est normal ?")
+        paste0(res$temp, "°C ", autour_de(res$ville), " : exactement dans la normale de saison. Et vous, sauriez-vous situer ce qui est normal ?")
       } else {
-        paste0(res$temp, "°C à ", res$ville, " : ", sprintf("%+.1f", ecart),
+        paste0(res$temp, "°C ", autour_de(res$ville), " : ", sprintf("%+.1f", ecart),
                "°C ", sens, " de la normale de saison. Et vous, sauriez-vous situer ce qui est normal ?")
       }
       nom_fichier <- paste0("normal-ou-pas_", gsub("[^A-Za-z0-9]+", "_", res$ville), ".png")

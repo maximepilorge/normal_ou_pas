@@ -175,21 +175,23 @@ tryCatch({
 
 
   # --- Étape 4 bis : Indicateurs annuels par ville ---
-  cat("5/7 - Pré-calcul des indicateurs annuels (nuits tropicales, jours de chaleur, records)...\n")
+  cat("5/7 - Pré-calcul des indicateurs annuels (nuits tropicales, jours de chaleur, gel, records)...\n")
   indicateurs_annuels <- calculer_indicateurs_annuels(donnees_brutes)
+
+  # Jours de FORTE CHALEUR : tmax >= 90e pct de la tmax estivale (JJA) 1973-2003,
+  # seuil local par ville (recalculé sur ERA5, cohérent avec les projections DRIAS).
+  # Remplace l'ancien indicateur « canicule » (trop complexe / chargé pour le public).
+  cat("6/7 - Jours de forte chaleur (tmax >= 90e pct estival 1973-2003)...\n")
+  seuil_fc <- calculer_seuil_forte_chaleur(donnees_brutes)
+  jours_fc <- donnees_brutes %>%
+    dplyr::inner_join(seuil_fc, by = "ville") %>%
+    dplyr::group_by(ville, annee) %>%
+    dplyr::summarise(jours_forte_chaleur = sum(temperature_max >= seuil, na.rm = TRUE),
+                     .groups = "drop")
+  indicateurs_annuels <- indicateurs_annuels %>%
+    dplyr::left_join(jours_fc, by = c("ville", "annee"))
+
   dbWriteTable(con, "indicateurs_annuels", as.data.frame(indicateurs_annuels), overwrite = TRUE)
-
-
-  # --- Étape 4 ter : Épisodes de canicule (définition officielle Météo-France) ---
-  cat("6/7 - Détection des canicules (IBM 3 j vs seuils départementaux)...\n")
-  chemin_seuils <- here::here("data", "seuils_canicule_departements.csv")
-  seuils_canicule <- read.csv(chemin_seuils, comment.char = "#",
-                              colClasses = c(departement = "character"),
-                              stringsAsFactors = FALSE)
-  canicules <- calculer_canicules(donnees_brutes, villes_insee, seuils_canicule)
-  cat(paste0("    -> ", nrow(canicules), " épisode(s) de canicule détecté(s) sur ",
-             dplyr::n_distinct(canicules$ville), " ville(s).\n"))
-  dbWriteTable(con, "canicules", as.data.frame(canicules), overwrite = TRUE)
 
 
   # --- Étape finale : Application de la structure sur la base locale ---
@@ -223,13 +225,6 @@ tryCatch({
   dbExecute(con, "ALTER TABLE public.indicateurs_annuels ADD CONSTRAINT uc_indic_annuels_ville_annee UNIQUE (ville, annee);")
   dbExecute(con, "CREATE INDEX idx_indic_annuels_ville ON public.indicateurs_annuels (ville, annee);")
   dbExecute(con, "VACUUM ANALYZE public.indicateurs_annuels;")
-
-  # -- Table: canicules --
-  cat("\nTable 'canicules'...\n")
-  dbExecute(con, "ALTER TABLE public.canicules ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
-  dbExecute(con, "ALTER TABLE public.canicules ADD CONSTRAINT uc_canicules_ville_debut UNIQUE (ville, date_debut);")
-  dbExecute(con, "CREATE INDEX idx_canicules_ville_annee ON public.canicules (ville, annee);")
-  dbExecute(con, "VACUUM ANALYZE public.canicules;")
 
   cat("✅ Structure appliquée avec succès sur la base locale.\n")
   

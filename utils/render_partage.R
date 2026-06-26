@@ -11,6 +11,16 @@
 
 library(ggplot2)
 
+# « Autour de <ville> » avec élision française. On dit « autour de » (et non « à »)
+# car les températures viennent de la maille ERA5-Land (zone, périphérie incluse),
+# moins marquée par l'îlot de chaleur urbain que le centre-ville. Défini ici car ce
+# fichier est sourcé à la fois par l'app (global.R) et par le sidecar share_api.R.
+autour_de <- function(ville) {
+  if (ville == "Le Havre") return("autour du Havre")
+  if (grepl("^[AEIOUYÀÂÄÉÈÊËÎÏÔÖÙÛÜaeiouy]", ville)) return(paste0("autour d'", ville))
+  paste0("autour de ", ville)
+}
+
 # Construit le ggplot de la carte de partage (résultat de quiz).
 # params : list(ville, date (Date|chr), temp, normale_moy, periode_ref,
 #               categorie ("Au-dessus des normales"/"En-dessous…"/"Dans…"),
@@ -65,7 +75,7 @@ dessiner_carte_partage <- function(params) {
     # Scénario du quiz : un jour de l'année (sans prétendre à une date précise)
     # et une température maximale PROPOSÉE (tirée dans la plage historique).
     annotate("text", x = 6, y = 74, hjust = 0, size = 8.5, color = "#343a40",
-             label = paste0("Un ", date_txt, " à ", params$ville)) +
+             label = paste0("Un ", date_txt, " ", autour_de(params$ville))) +
     annotate("text", x = 6, y = 58, hjust = 0, size = 24, fontface = "bold",
              color = couleur_accent, label = paste0(fmt(temp), " °C")) +
     annotate("text", x = 6, y = 47, hjust = 0, size = 5.5, color = "#6c757d",

@@ -52,7 +52,7 @@ function(req) {
   p <- .parse_params(req$args)
   ecart <- round(p$temp - p$normale_moy, 1)
   sens <- if (ecart > 0) "au-dessus" else if (ecart < 0) "en-dessous" else "dans"
-  titre <- paste0(p$temp, "°C à ", p$ville, " — ", sprintf("%+.1f", ecart),
+  titre <- paste0(p$temp, "°C ", autour_de(p$ville), " — ", sprintf("%+.1f", ecart),
                   "°C ", sens, " de la normale")
   desc <- paste0("Normale ", p$periode_ref, " : ", p$normale_moy,
                  "°C. Et vous, sauriez-vous situer ce qui est normal ?")
