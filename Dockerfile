@@ -1,7 +1,7 @@
 FROM rocker/shiny:4.4
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     libpq-dev \
-    libtiff5 \
+    libtiff6 \
     libjpeg-turbo8 \
     libpng16-16 \
     libfreetype6 \
@@ -23,7 +23,7 @@ RUN R -e 'install.packages(c(\
               "leaflet", \
               "ragg", \
               "plumber"), \
-            repos="https://packagemanager.rstudio.com/cran/__linux__/focal/2025-08-11"\
+            repos="https://packagemanager.rstudio.com/cran/__linux__/noble/2025-08-11"\
           )'
 WORKDIR /home/shinyusr
 COPY global.R global.R
