@@ -204,7 +204,7 @@ ui <- fluidPage( # On utilise tagList comme conteneur principal
       icon = icon("question-circle")
       ),
     nav_panel(
-      "Comparer",
+      "Comparaison",
       mod_comparer_ui("comparer_1"),
       icon = icon("chart-bar")
       ),
@@ -214,7 +214,7 @@ ui <- fluidPage( # On utilise tagList comme conteneur principal
       icon = icon("calendar-day")
       ),
     nav_panel(
-      "Evolution",
+      "Évolution",
       mod_analyse_ui("analyse_1"),
       icon = icon("chart-line")
       ),

@@ -17,9 +17,9 @@ Quatre onglets, en montée pédagogique :
 | Onglet | Module | Idée |
 |---|---|---|
 | **Le Quiz** | `modules/mod_quiz.R` | On propose une température un jour donné dans une ville ; l'utilisateur devine si elle est sous / dans / au-dessus des normales. Boxplot de la distribution historique + bascule des repères présent / 2050 / 2100. Carte de résultat partageable (PNG). |
-| **Comparer** | `modules/mod_comparer.R` | « Dans l'année » : courbe d'une année vs la normale. « Entre les villes » : carte Leaflet des écarts à une normale ancienne + trajectoire d'une ville, avec curseur d'année. |
+| **Comparaison** | `modules/mod_comparer.R` | « Dans l'année » : courbe d'une année vs la normale. « Entre les villes » : carte Leaflet des écarts à une normale ancienne + trajectoire d'une ville, avec curseur d'année. |
 | **Une journée** | `modules/mod_jour.R` | Analyse d'un jour précis (ville + date) : valeur, écart à la normale, rang (« jour le plus chaud autour du… depuis 1950 ») et fréquence, distribution ±7 j, carte partageable. |
-| **Evolution** | `modules/mod_analyse.R` | Écart annuel à la normale (barres), analyse du réchauffement sur 30 ans, jours de forte chaleur vs jours de gel (observé + projeté TRACC). |
+| **Évolution** | `modules/mod_analyse.R` | Écart annuel à la normale (barres), analyse du réchauffement sur 30 ans, jours de forte chaleur vs jours de gel (observé + projeté TRACC). |
 | **Méthodo** | `ui.R` (inline) | Sources, définition des normales (percentiles, fenêtre ±7 j), méthode des projections, limites. |
 
 ---
