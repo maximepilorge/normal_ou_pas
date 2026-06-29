@@ -3,13 +3,37 @@
 # --- UI MISE À JOUR ---
 mod_analyse_ui <- function(id) {
   ns <- NS(id)
+
+  # Note d'information repliée par défaut (<details> natif, sans JS) : allège la
+  # page, le détail s'ouvre au clic sur le résumé.
+  info_repliable <- function(...) {
+    tags$details(
+      class = "small text-muted",
+      tags$summary(style = "cursor: pointer;",
+                   icon("circle-info"), " À propos de ces chiffres"),
+      div(class = "mt-2", ...)
+    )
+  }
+
   tagList(
+    # Hauteur du graphe d'évolution réduite en portrait pour limiter le scroll
+    # (la police/les ticks sont, eux, adaptés côté serveur via clientData).
+    tags$head(tags$style(HTML("
+      .evolution-plot-wrap { height: 500px; }
+      @media (max-width: 575.98px) { .evolution-plot-wrap { height: 420px; } }
+    "))),
     page_sidebar(
       title = "Analyser l'évolution des températures",
       fillable = FALSE,
       
+      # Comportement de sidebar adapté à l'orientation (breakpoint bslib 576px) :
+      #   - mobile = "always"  -> en portrait, les filtres s'empilent SOUS les
+      #     graphes, toujours visibles (l'utilisateur voit qu'il peut paramétrer).
+      #   - desktop = "closed" -> en paysage/desktop, sidebar repliée : les graphes
+      #     occupent toute la largeur.
       sidebar = sidebar(
         width = "350px",
+        open = list(mobile = "always", desktop = "closed"),
         card(
           card_header("Paramètres de la série temporelle"),
           pickerInput(ns("ville_analyse"),
@@ -29,55 +53,61 @@ mod_analyse_ui <- function(id) {
                       selected = periodes_disponibles[1],
                       options = list('live-search' = FALSE)),
           helpText("Chaque barre indique l'écart de la moyenne annuelle des températures maximales par rapport à la normale de la période de référence choisie.")
-        ),
-        card(
-          card_header("Analyser un seuil de température"),
-          p("Définissez un seuil pour identifier les jours de chaleur et analyser leur fréquence."),
-          numericInput(ns("temp_seuil_analyse"), "Température maximale à analyser (°C) :",
-                       value = 30, min = -20, max = 50),
-          pickerInput(ns("saison_analyse"), 
-                      "Filtrer par saison (optionnel) :",
-                      choices = c("Toutes les saisons" = "all", 
-                                  "Hiver" = "hiver", 
-                                  "Printemps" = "printemps", 
-                                  "Été" = "ete", 
-                                  "Automne" = "automne"),
-                      selected = "all",
-                      options = list('live-search' = FALSE)),
-          actionButton(ns("lancer_analyse_btn"), "Analyser le seuil", icon = icon("magnifying-glass-chart"), class = "btn-primary w-100 mt-3"),
-          actionButton(ns("reset_analyse_btn"), "Réinitialiser l'analyse", icon = icon("refresh"), class = "btn-light w-100 mt-2")
         )
+        # Les réglages du seuil de chaleur ne sont plus ici : ils ont rejoint la
+        # carte du graphe de résultat (contenu principal) pour être co-localisés.
       ),
       
       card(
         full_screen = TRUE,
-        card_header("Évolution des températures maximales annuelles (écart à la normale)"),
+        card_header(uiOutput(ns("titre_evolution"))),
         uiOutput(ns("analyse_rechauffement_ui")),
-        plotlyOutput(ns("evolution_plot"), height = "500px"),
+        div(class = "evolution-plot-wrap",
+            plotlyOutput(ns("evolution_plot"), height = "100%")),
         card_footer(
-          class = "small text-muted",
-          icon("circle-info"),
-          HTML(paste(
+          info_repliable(HTML(paste(
             "Ces indicateurs reposent sur les températures <b>maximales</b> journalières",
             "(réanalyse ERA5-Land), choisies pour leur lisibilité.",
             "Les références climatiques officielles (Météo-France, GIEC) s'appuient sur la",
             "température <b>moyenne</b> et sur des séries de stations homogénéisées.",
             "Ces valeurs ne sont donc pas directement comparables aux chiffres officiels :",
             "elles illustrent des tendances, et non des références absolues."
-          ))
+          )))
         )
       ),
       
-      uiOutput(ns("resultats_seuil_ui")),
+      # Analyse d'un seuil de chaleur : réglages co-localisés avec le graphe (hors
+      # sidebar) → sur mobile, on règle et on voit le résultat au même endroit.
+      # Le seuil est pré-rempli au seuil de forte chaleur de la ville (90e pct) et
+      # le graphe se met à jour en direct.
+      card(
+        full_screen = TRUE,
+        card_header(uiOutput(ns("titre_seuil"))),
+        layout_columns(
+          col_widths = c(7, 5),
+          numericInput(ns("temp_seuil_analyse"), "Seuil de température (°C) :",
+                       value = 30, min = -20, max = 50),
+          pickerInput(ns("saison_analyse"), "Saison (optionnel) :",
+                      choices = c("Toutes les saisons" = "all",
+                                  "Hiver" = "hiver", "Printemps" = "printemps",
+                                  "Été" = "ete", "Automne" = "automne"),
+                      selected = "all", options = list('live-search' = FALSE))
+        ),
+        div(class = "mb-2",
+            actionLink(ns("reset_seuil_local"),
+                       label = tagList(icon("rotate-left"),
+                                       " Revenir au seuil de forte chaleur de la ville"),
+                       class = "small")),
+        uiOutput(ns("synthese_seuil_ui")),
+        plotOutput(ns("decennie_plot"), height = "300px")
+      ),
 
       card(
         full_screen = TRUE,
-        card_header("Jours de forte chaleur vs jours de gel, par an"),
+        card_header(uiOutput(ns("titre_forte_chaleur"))),
         plotOutput(ns("forte_chaleur_plot"), height = "380px"),
         card_footer(
-          class = "small text-muted",
-          icon("circle-info"),
-          HTML(paste(
+          info_repliable(HTML(paste(
             "Nombre moyen de jours par an. Vers le <b>haut</b>, les <b>jours de forte",
             "chaleur</b> : tmax au-dessus du <b>seuil local</b> (90ᵉ percentile des",
             "tmax estivales 1973-2003 — une journée parmi les 10 % d'étés les plus chauds).",
@@ -86,7 +116,7 @@ mod_analyse_ui <- function(id) {
             "<br>Les colonnes <b>projetées</b> (TRACC, +2,7 °C et +4 °C) appliquent les",
             "mêmes définitions aux projections DRIAS : <b>médiane de 17 simulations",
             "régionales</b>."
-          ))
+          )))
         )
       )
     )
@@ -101,9 +131,26 @@ mod_analyse_server <- function(id, db_pool) {
   moduleServer(id, function(input, output, session) {
     
     ns <- session$ns
-    
+
+    # Largeur réelle (px) du graphe d'évolution, transmise par le client.
+    # Booléen (et non largeur brute) pour ne ré-invalider le rendu qu'au
+    # franchissement du seuil ~500px (≈ smartphone en portrait), pas à chaque pixel.
+    est_mobile_evolution <- reactive({
+      w <- session$clientData[[paste0("output_", ns("evolution_plot"), "_width")]]
+      !is.null(w) && w > 0 && w < 500
+    })
+    # Idem pour le graphe forte chaleur / gel (rendu statique ggplot).
+    est_mobile_chaleur <- reactive({
+      w <- session$clientData[[paste0("output_", ns("forte_chaleur_plot"), "_width")]]
+      !is.null(w) && w > 0 && w < 500
+    })
+    # Idem pour le graphe « jours au-dessus du seuil par décennie ».
+    est_mobile_decennie <- reactive({
+      w <- session$clientData[[paste0("output_", ns("decennie_plot"), "_width")]]
+      !is.null(w) && w > 0 && w < 500
+    })
+
     resultats_defaut <- reactiveVal(NULL)
-    resultats_seuil <- reactiveVal(NULL) 
     
     donnees_long_terme <- reactive({
       req(input$ville_analyse, input$annee_range_analyse)
@@ -218,10 +265,7 @@ mod_analyse_server <- function(id, db_pool) {
         annee_range = input$annee_range_analyse,
         stats_30ans = stats_30ans
       ))
-      
-      # 4. On réinitialise l'analyse de seuil quand les données de base changent
-      resultats_seuil(NULL)
-      
+
     }, ignoreNULL = TRUE)
     
     output$evolution_plot <- renderPlotly({
@@ -240,6 +284,19 @@ mod_analyse_server <- function(id, db_pool) {
           )
         )
 
+      # Rendu adapté à la largeur réelle : sur smartphone (portrait), police plus
+      # petite, ticks plus espacés et légende compacte pour rester lisible.
+      mob <- est_mobile_evolution()
+      taille_police  <- if (mob) 11 else 14
+      taille_legende <- if (mob) 10 else 12
+      pas_ticks      <- if (mob) 20 else 10
+
+      # Ticks de l'axe X calculés ici puis imposés à plotly : ggplotly ignore les
+      # `breaks` de ggplot et génère sinon une nuée d'étiquettes illisibles.
+      rng_annees <- range(df_anom$annee)
+      tickvals <- seq(ceiling(rng_annees[1] / pas_ticks) * pas_ticks,
+                      floor(rng_annees[2] / pas_ticks) * pas_ticks, by = pas_ticks)
+
       p <- ggplot(df_anom, aes(x = annee, y = anomalie)) +
         # Barres colorées bleu (sous la normale) / rouge (au-dessus),
         # transparence réduite pour les années incomplètes.
@@ -256,19 +313,21 @@ mod_analyse_server <- function(id, db_pool) {
           )
         ) +
         scale_alpha_manual(values = c("TRUE" = 1, "FALSE" = 0.4), guide = "none") +
-        scale_x_continuous(breaks = scales::breaks_width(10)) +
         labs(y = "Écart à la normale (°C)", x = "Année", fill = "") +
-        theme_minimal(base_size = 14) +
-        theme(
-          legend.position = "bottom",
-          axis.text.x = element_text(angle = 45, hjust = 1)
-        )
+        theme_minimal(base_size = taille_police) +
+        theme(legend.position = "bottom")
 
       gp <- ggplotly(p, tooltip = "text") %>%
-        # On verrouille les axes pour désactiver le zoom et le déplacement
+        # Axes verrouillés (pas de zoom/déplacement) ; ticks X imposés ; légende
+        # en bande horizontale compacte au-dessus du graphe.
         layout(
-          xaxis = list(fixedrange = TRUE),
-          yaxis = list(fixedrange = TRUE)
+          xaxis = list(fixedrange = TRUE, tickmode = "array",
+                       tickvals = tickvals, ticktext = as.character(tickvals),
+                       tickangle = -45),
+          yaxis = list(fixedrange = TRUE),
+          legend = list(orientation = "h", x = 0.5, xanchor = "center",
+                        y = 1.02, yanchor = "bottom",
+                        font = list(size = taille_legende))
         ) %>%
         config(displayModeBar = FALSE, responsive = TRUE)
 
@@ -281,6 +340,9 @@ mod_analyse_server <- function(id, db_pool) {
         if (is.null(nom)) next
         nom <- gsub("[()]", "", nom)
         nom <- trimws(gsub(",?(TRUE|FALSE)", "", nom))
+        # Libellés courts ("Au-dessus" / "En-dessous") : plus compacts sur mobile,
+        # le code rouge/bleu autour de la ligne zéro restant explicite.
+        nom <- sub(" de la normale", "", nom)
         gp$x$data[[i]]$name <- nom
         gp$x$data[[i]]$legendgroup <- nom
         if (nom == "" || nom %in% deja_vu) {
@@ -295,42 +357,53 @@ mod_analyse_server <- function(id, db_pool) {
       bindCache(
         input$ville_analyse,
         input$annee_range_analyse,
-        input$periode_ref_analyse
+        input$periode_ref_analyse,
+        est_mobile_evolution()
       )
     
-    observeEvent(list(input$ville_analyse, input$annee_range_analyse, input$saison_analyse), {
-      shinyjs::click("reset_analyse_btn")
-    }, ignoreInit = TRUE)
-    
-    observeEvent(input$lancer_analyse_btn, {
-      req(donnees_long_terme(), input$temp_seuil_analyse)
-      
+    # Seuil debouncé : évite de recalculer à chaque frappe dans le champ numérique.
+    seuil_debounce <- debounce(reactive(input$temp_seuil_analyse), 600)
+
+    # Analyse de seuil EN DIRECT : nombre de jours où tmax ≥ seuil (filtre saison
+    # optionnel). Plus de bouton « Analyser » : le graphe s'affiche par défaut et
+    # se met à jour dès que le seuil, la saison, la ville ou la période changent.
+    resultats_seuil <- reactive({
       df_analyse <- donnees_long_terme()
-      
-      # Filtrage saisonnier (identique à avant)
+      seuil <- seuil_debounce()
+      req(nrow(df_analyse) > 0, is.finite(seuil))
+
+      lookup_saison <- c("all" = "Toutes les saisons", "hiver" = "en hiver",
+                         "printemps" = "au printemps", "ete" = "en été",
+                         "automne" = "en automne")
+      saison_choisie_nom <- unname(lookup_saison[input$saison_analyse])
+
       df_pour_stats <- df_analyse
-      lookup_saison <- c("all" = "Toutes les saisons", "hiver" = "en hiver", "printemps" = "au printemps", "ete" = "en été", "automne" = "en automne")
-      saison_choisie_nom <- lookup_saison[input$saison_analyse]
-      
       if (input$saison_analyse != "all") {
-        mois_saison <- switch(input$saison_analyse, "hiver" = c(12, 1, 2), "printemps" = c(3, 4, 5), "ete" = c(6, 7, 8), "automne" = c(9, 10, 11))
+        mois_saison <- switch(input$saison_analyse, "hiver" = c(12, 1, 2),
+                              "printemps" = c(3, 4, 5), "ete" = c(6, 7, 8),
+                              "automne" = c(9, 10, 11))
         df_pour_stats <- df_analyse %>% filter(mois %in% mois_saison)
       }
-      
-      # Calcul du nombre de jours au-dessus du seuil
-      donnees_filtrees <- df_pour_stats %>% filter(tmax_celsius >= input$temp_seuil_analyse)
-      
-      # On stocke les résultats dans le reactiveVal dédié au seuil
-      resultats_seuil(list(
-        data = donnees_filtrees, seuil = input$temp_seuil_analyse,
-        annee_range = input$annee_range_analyse, saison_nom = saison_choisie_nom
-      ))
+      donnees_filtrees <- df_pour_stats %>% filter(tmax_celsius >= seuil)
+
+      list(data = donnees_filtrees, seuil = seuil,
+           annee_range = input$annee_range_analyse, saison_nom = saison_choisie_nom)
     })
-    
-    observeEvent(input$reset_analyse_btn, {
-      resultats_seuil(NULL)
+
+    # Pré-remplit le seuil avec la forte chaleur locale (90e pct) à chaque
+    # changement de ville (et au chargement) : départ sur un seuil pertinent.
+    # (seuil_fc_ville est défini plus bas ; la résolution se fait à l'exécution.)
+    observeEvent(seuil_fc_ville(), {
+      s <- seuil_fc_ville()
+      if (is.finite(s)) updateNumericInput(session, "temp_seuil_analyse", value = round(s))
+    }, ignoreNULL = TRUE)
+
+    # Lien « revenir au seuil de forte chaleur de la ville ».
+    observeEvent(input$reset_seuil_local, {
+      s <- seuil_fc_ville()
+      if (is.finite(s)) updateNumericInput(session, "temp_seuil_analyse", value = round(s))
     })
-    
+
     # Texte « Analyse du réchauffement » — affiché JUSTE AU-DESSUS du graphe
     # d'évolution (comparaison des moyennes de tmax entre les deux trentaines).
     output$analyse_rechauffement_ui <- renderUI({
@@ -346,24 +419,24 @@ mod_analyse_server <- function(id, db_pool) {
       )))
     })
     
-    # --- MODIFICATION ---
-    # L'ancienne UI est renommée et ne génère plus que la partie "seuil"
-    output$resultats_seuil_ui <- renderUI({
-      req(resultats_seuil())
-      res <- resultats_seuil()
-      
-      saison_texte <- if (res$saison_nom != "Toutes les saisons") paste0(" ", res$saison_nom) else ""
-      texte_synthese_seuil <- p(HTML(paste0(
-        "Il y a eu <b>", nrow(res$data), " jours</b>", saison_texte, 
-        " où <b>", res$seuil, "°C</b> a été atteint ou dépassé."
-      )))
-      
-      card(
-        texte_synthese_seuil,
-        card(card_header("Nombre de jours au-dessus du seuil par décennie"), plotOutput(ns("decennie_plot"), height = "300px"))
-      )
+    # Titre dynamique de la carte d'analyse de seuil (rappelle la ville).
+    output$titre_seuil <- renderUI({
+      req(input$ville_analyse)
+      HTML(paste0("Jours de chaleur au-dessus d'un seuil à <strong>",
+                  input$ville_analyse, "</strong>, par décennie"))
     })
-    
+
+    # Phrase de synthèse (nombre de jours ≥ seuil sur la période / saison).
+    output$synthese_seuil_ui <- renderUI({
+      res <- resultats_seuil()
+      req(res)
+      saison_texte <- if (res$saison_nom != "Toutes les saisons") paste0(" ", res$saison_nom) else ""
+      p(class = "mb-2", HTML(paste0(
+        "Il y a eu <b>", nrow(res$data), " jours</b>", saison_texte,
+        " où <b>", res$seuil, " °C</b> a été atteint ou dépassé sur la période sélectionnée."
+      )))
+    })
+
     output$decennie_plot <- renderPlot({
       req(resultats_seuil())
       resultats_figes <- resultats_seuil()
@@ -385,14 +458,17 @@ mod_analyse_server <- function(id, db_pool) {
           TRUE ~ "Complète"
         ))
       
+      mob <- est_mobile_decennie()
       ggplot(donnees_plot, aes(x = as.factor(decennie), y = nb_jours, fill = statut)) +
         geom_col(alpha = 0.8) +
-        geom_text(aes(label = nb_jours), vjust = -0.5, size = 4.5) +
+        geom_text(aes(label = nb_jours), vjust = -0.5, size = if (mob) 3.5 else 4.5) +
         scale_fill_manual(name = "Statut",
                           values = c("Complète" = "steelblue", "Partielle" = "grey70")) +
         labs(x = "Décennie", y = "Nombre de jours") +
-        theme_minimal(base_size = 14) +
-        theme(legend.position = "bottom") +
+        theme_minimal(base_size = if (mob) 10 else 14) +
+        theme(legend.position = "bottom",
+              axis.text.x = element_text(angle = if (mob) 45 else 0,
+                                         hjust = if (mob) 1 else 0.5)) +
         scale_y_continuous(expand = expansion(mult = c(0, 0.15)))
     })
 
@@ -442,6 +518,32 @@ mod_analyse_server <- function(id, db_pool) {
         error = function(e) NULL)
     }) %>% bindCache(input$ville_analyse, input$annee_range_analyse, indicateurs_disponibles)
 
+    # Titres dynamiques des cartes : la ville étant choisie dans la sidebar (en
+    # bas de page sur mobile), on la rappelle dans l'en-tête de chaque graphe.
+    output$titre_evolution <- renderUI({
+      req(input$ville_analyse)
+      tagList(
+        HTML(paste0("Évolution des températures maximales à <strong>",
+                    input$ville_analyse, "</strong>")),
+        tags$div(class = "small text-muted fw-normal",
+                 paste0("Écart annuel à la normale ", input$periode_ref_analyse))
+      )
+    })
+
+    output$titre_forte_chaleur <- renderUI({
+      req(input$ville_analyse)
+      seuil <- seuil_fc_ville()
+      sous <- if (is.finite(seuil))
+        paste0("Seuil de forte chaleur : ",
+               format(round(seuil, 1), nsmall = 1, decimal.mark = ","),
+               " °C (90ᵉ pct des étés 1973-2003)") else NULL
+      tagList(
+        HTML(paste0("Jours de forte chaleur vs jours de gel à <strong>",
+                    input$ville_analyse, "</strong>, par an")),
+        if (!is.null(sous)) tags$div(class = "small text-muted fw-normal", sous)
+      )
+    })
+
     # Graphe DIVERGENT fusionné : forte chaleur (P90) vers le haut, gel (≤0°C)
     # vers le bas ; décennies observées + horizons projetés (médiane TRACC).
     output$forte_chaleur_plot <- renderPlot({
@@ -486,22 +588,28 @@ mod_analyse_server <- function(id, db_pool) {
         mutate(indicateur = ifelse(indic == "chaleur", "Forte chaleur", "Gel (≤ 0 °C)"),
                valeur = ifelse(indic == "gel", -n, n))
 
-      seuil <- seuil_fc_ville()
-      sous_titre <- if (is.finite(seuil))
-        sprintf("Seuil de forte chaleur à %s : %s °C (90ᵉ pct des étés 1973-2003)",
-                input$ville_analyse,
-                format(round(seuil, 1), nsmall = 1, decimal.mark = ",")) else NULL
+      # Le seuil de forte chaleur est désormais affiché dans l'en-tête de carte
+      # (titre_forte_chaleur) où il peut s'enrouler — plus de sous-titre tronqué.
+
+      # Rendu adapté à la largeur : sur mobile, police réduite, libellés X inclinés
+      # (sinon les décennies se chevauchent) et étiquettes de valeurs plus petites.
+      mob <- est_mobile_chaleur()
+      taille_police  <- if (mob) 10 else 14
+      taille_valeurs <- if (mob) 3   else 3.5
+      angle_x        <- if (mob) 45  else 0
+      hjust_x        <- if (mob) 1   else 0.5
 
       p <- ggplot(long, aes(x = cat, y = valeur, fill = indicateur)) +
         geom_col(alpha = 0.85) +
         geom_text(aes(label = round(abs(valeur)),
-                      vjust = ifelse(valeur >= 0, -0.3, 1.2)), size = 3.5) +
+                      vjust = ifelse(valeur >= 0, -0.3, 1.2)), size = taille_valeurs) +
         geom_hline(yintercept = 0, color = "#343a40", linewidth = 0.4) +
         scale_fill_manual(values = c("Forte chaleur" = "#E41A1C", "Gel (≤ 0 °C)" = "#1f77b4"),
                           name = NULL) +
-        labs(x = NULL, y = "Jours par an", subtitle = sous_titre) +
-        theme_minimal(base_size = 14) +
-        theme(legend.position = "bottom", plot.subtitle = element_text(color = "grey30")) +
+        labs(x = NULL, y = "Jours par an") +
+        theme_minimal(base_size = taille_police) +
+        theme(legend.position = "bottom",
+              axis.text.x = element_text(angle = angle_x, hjust = hjust_x)) +
         scale_y_continuous(expand = expansion(mult = c(0.12, 0.12)))
       # Séparateur pointillé entre décennies observées et horizons projetés.
       if (proj_ok && nrow(obs) > 0)
