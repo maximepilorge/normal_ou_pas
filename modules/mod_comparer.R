@@ -53,9 +53,10 @@ mod_comparer_ui <- function(id) {
                         value = an_max_data, step = 1, sep = "", width = "100%")
           ),
           helpText(HTML(paste0(
-            "La <b>période de référence</b> s'applique à la vue « Dans l'année ». ",
-            "La carte « Entre les villes » compare à une normale ancienne figée (",
-            periode_ref_carte, ") pour visualiser le réchauffement progresser.")))
+            "La <b>période de référence</b> s'applique à la courbe « Dans l'année » ",
+            "et à la carte « Entre les villes » (réchauffement entre cette période et ",
+            "la plus récente). La trajectoire, elle, compare à une normale ancienne ",
+            "figée (", periode_ref_carte, ").")))
         )
       ),
 
@@ -70,6 +71,16 @@ mod_comparer_ui <- function(id) {
         nav_panel(
           "Entre les villes", value = "carte",
           uiOutput(ns("titre_carte")),
+          # Sélecteur d'indicateur cartographié (réchauffement par défaut ; jours de
+          # forte chaleur / gel si la table d'indicateurs est disponible).
+          div(class = "mb-2",
+              radioGroupButtons(
+                ns("carte_indic"), label = NULL,
+                choices = c(c("Réchauffement (°C)" = "rechauffement"),
+                            if (indicateurs_disponibles)
+                              c("Jours de forte chaleur" = "forte_chaleur",
+                                "Jours de gel" = "gel")),
+                selected = "rechauffement", size = "sm", status = "primary")),
           leafletOutput(ns("carte"), height = "500px"),
           hr(),
           uiOutput(ns("titre_trajectoire")),
@@ -237,45 +248,95 @@ mod_comparer_server <- function(id, db_pool) {
 
     # ================ VUE « ENTRE LES VILLES » : carte + trajectoire =============
 
-    # Échelle de couleur FIXE divergente centrée sur 0 (comparable d'une année à
-    # l'autre) : bleu = sous la normale ancienne, rouge = au-dessus.
-    dom <- c(-4, 4)
-    pal <- colorNumeric("RdBu", domain = dom, reverse = TRUE, na.color = "#9aa0a6")
-    clamp <- function(x) pmax(dom[1], pmin(dom[2], x))
+    # Période « récente » = la plus récente disponible (référent du réchauffement).
+    periode_recente <- periodes_disponibles[which.max(
+      vapply(periodes_disponibles, function(p) .periode_bornes(p)[1], numeric(1)))]
 
-    anomalies_annee <- reactive({
-      req(input$annee)
-      if (is.null(anomalies_villes_annee)) return(NULL)
-      anomalies_villes_annee %>%
-        filter(annee == input$annee) %>%
-        right_join(villes_coords, by = "ville")
-    })
+    # Moyenne annuelle de la normale (tmax) d'une période, par ville.
+    moy_normale_periode <- function(per) {
+      tbl(db_pool, "stats_normales") %>%
+        filter(periode_ref == !!per) %>%
+        group_by(ville) %>%
+        summarise(moy = mean(t_moy, na.rm = TRUE), .groups = "drop") %>%
+        collect()
+    }
+    # Moyennes annuelles des indicateurs (forte chaleur, gel) sur une plage d'années
+    # COMPLÈTES, par ville.
+    moy_indicateurs_periode <- function(bornes) {
+      tbl(db_pool, "indicateurs_annuels") %>%
+        filter(annee >= !!bornes[1], annee <= !!bornes[2], nb_jours >= 360L) %>%
+        group_by(ville) %>%
+        summarise(chaleur = mean(jours_forte_chaleur, na.rm = TRUE),
+                  gel = mean(jours_gel, na.rm = TRUE), .groups = "drop") %>%
+        collect()
+    }
 
-    construire_popups <- function(df) {
+    # Valeur cartographiée par ville = ÉCART entre la période la plus récente et la
+    # période de référence SÉLECTIONNÉE (input$periode), pour l'indicateur choisi.
+    # STATIQUE (ne dépend pas de l'année). Jointe aux coordonnées des villes.
+    carte_data <- reactive({
+      req(input$periode)
+      indic <- if (is.null(input$carte_indic)) "rechauffement" else input$carte_indic
+      P <- input$periode
+      d <- if (indic == "rechauffement") {
+        mr <- moy_normale_periode(periode_recente)
+        mp <- moy_normale_periode(P)
+        mr %>% rename(r = moy) %>%
+          inner_join(mp %>% rename(p = moy), by = "ville") %>%
+          transmute(ville, valeur = r - p)
+      } else {
+        if (!indicateurs_disponibles) return(NULL)
+        ir <- moy_indicateurs_periode(.periode_bornes(periode_recente))
+        ip <- moy_indicateurs_periode(.periode_bornes(P))
+        col <- if (indic == "forte_chaleur") "chaleur" else "gel"
+        ir %>% inner_join(ip, by = "ville", suffix = c("_r", "_p")) %>%
+          transmute(ville, valeur = .data[[paste0(col, "_r")]] - .data[[paste0(col, "_p")]])
+      }
+      if (is.null(d)) return(NULL)
+      d %>% right_join(villes_coords, by = "ville")
+    }) %>% bindCache(input$periode, input$carte_indic)
+
+    # Config d'affichage selon l'indicateur : palette divergente (rouge = hausse),
+    # domaine symétrique calé sur les données, libellés et unité.
+    config_carte <- function(indic, vals) {
+      vals <- vals[is.finite(vals)]
+      plancher <- if (indic == "rechauffement") 1 else 5
+      D <- max(plancher, if (length(vals)) ceiling(max(abs(vals))) else plancher)
+      dom <- c(-D, D)
+      list(
+        dom = dom,
+        pal = colorNumeric("RdBu", domain = dom, reverse = TRUE, na.color = "#9aa0a6"),
+        unite = if (indic == "rechauffement") "°C" else "j/an",
+        titre_leg = switch(indic, rechauffement = "Réchauffement (°C)",
+                           forte_chaleur = "Forte chaleur (Δ j/an)", gel = "Gel (Δ j/an)"),
+        libelle = switch(indic, rechauffement = "Réchauffement",
+                         forte_chaleur = "Jours de forte chaleur (écart)",
+                         gel = "Jours de gel (écart)")
+      )
+    }
+    fmt_val <- function(x, unite) if (!is.finite(x)) "n/d" else paste0(sprintf("%+.1f", x), " ", unite)
+
+    construire_popups <- function(df, cfg) {
       vapply(seq_len(nrow(df)), function(i) {
         r <- df[i, ]
-        a <- if (is.finite(r$anomalie)) sprintf("%+.1f °C", r$anomalie) else "n/d"
-        m <- if (is.finite(r$moy_annuelle))
-          paste0(format(round(r$moy_annuelle, 1), nsmall = 1, decimal.mark = ","), " °C") else "n/d"
-        partiel <- if (!is.na(r$n_jours) && r$n_jours > 0 && r$n_jours < 350)
-          " <i>(année incomplète)</i>" else ""
-        paste0("<b>", r$ville, "</b> — ", input$annee, partiel,
-               "<br>Écart à la normale ", periode_ref_carte, " : <b>", a, "</b>",
-               "<br>Tmax moyenne : ", m,
+        paste0("<b>", r$ville, "</b>",
+               "<br>", cfg$libelle, " : <b>", fmt_val(r$valeur, cfg$unite), "</b>",
+               "<br><span style='color:#6c757d'>", input$periode, " → ", periode_recente, "</span>",
                "<br><i>Cliquez pour basculer la ville focus</i>")
       }, character(1))
     }
 
     # Toutes les villes sont affichées (pas de filtre) : la ville focus est
     # simplement surlignée. layerId = ville -> remonte dans carte_marker_click$id.
-    ajouter_marqueurs <- function(carte, df) {
+    ajouter_marqueurs <- function(carte, df, cfg) {
       if (nrow(df) == 0) return(carte)
+      clamp <- function(x) pmax(cfg$dom[1], pmin(cfg$dom[2], x))
       addCircleMarkers(
         carte, data = df, lng = ~longitude, lat = ~latitude,
         group = "villes", layerId = ~ville,
         radius = 11, stroke = TRUE, color = "#444444", weight = 1,
-        fillColor = ~pal(clamp(anomalie)), fillOpacity = 0.9,
-        label = ~ville, popup = construire_popups(df)
+        fillColor = ~cfg$pal(clamp(valeur)), fillOpacity = 0.9,
+        label = ~ville, popup = construire_popups(df, cfg)
       )
     }
 
@@ -288,10 +349,14 @@ mod_comparer_server <- function(id, db_pool) {
     }
 
     output$titre_carte <- renderUI({
-      req(input$annee)
+      req(input$periode)
+      indic <- if (is.null(input$carte_indic)) "rechauffement" else input$carte_indic
+      lib <- switch(indic, rechauffement = "Réchauffement",
+                    forte_chaleur = "Évolution des jours de forte chaleur",
+                    gel = "Évolution des jours de gel")
       tagList(
-        HTML(paste0("Écart à la normale ", periode_ref_carte,
-                    " — année <strong>", input$annee, "</strong>")),
+        HTML(paste0("<strong>", lib, "</strong> par ville : de la normale <strong>",
+                    input$periode, "</strong> à <strong>", periode_recente, "</strong>")),
         tags$div(class = "small text-muted fw-normal",
                  "Cliquez une pastille pour basculer la ville focus.")
       )
@@ -300,7 +365,9 @@ mod_comparer_server <- function(id, db_pool) {
     # Carte de base + pastilles + surbrillance initiales dessinées ICI (isolate)
     # pour éviter la race condition leafletProxy/onglet masqué au démarrage.
     output$carte <- renderLeaflet({
-      df0 <- isolate(anomalies_annee())
+      df0 <- isolate(carte_data())
+      indic0 <- isolate(if (is.null(input$carte_indic)) "rechauffement" else input$carte_indic)
+      cfg0 <- config_carte(indic0, if (is.null(df0)) numeric(0) else df0$valeur)
       # Carte volontairement « figée » : seul le zoom par les boutons +/- est
       # autorisé. On désactive la molette, le double-clic, le pincé tactile, le
       # zoom-cadre, le clavier ET le déplacement (dragging) — pour éviter les zooms
@@ -312,10 +379,9 @@ mod_comparer_server <- function(id, db_pool) {
         boxZoom = FALSE, dragging = FALSE, keyboard = FALSE)) %>%
         addProviderTiles(providers$CartoDB.Positron) %>%
         fitBounds(-5.5, 41.0, 9.8, 51.5) %>%
-        addLegend("bottomright", pal = pal, values = dom, bins = 4,
-                  title = paste0("Écart ", periode_ref_carte, " (°C)"),
-                  opacity = 0.9)
-      if (!is.null(df0)) carte <- ajouter_marqueurs(carte, df0)
+        addLegend("bottomright", pal = cfg0$pal, values = cfg0$dom, bins = 4,
+                  title = cfg0$titre_leg, opacity = 0.9, layerId = "legende")
+      if (!is.null(df0)) carte <- ajouter_marqueurs(carte, df0, cfg0)
       carte <- surligner(carte, isolate(input$ville_focus))
       carte
     })
@@ -327,11 +393,16 @@ mod_comparer_server <- function(id, db_pool) {
     # pu changer pendant que la carte était masquée.
     observe({
       req(identical(input$sousvue, "carte"))
-      df <- anomalies_annee()
+      df <- carte_data()
       req(!is.null(df))
+      indic <- if (is.null(input$carte_indic)) "rechauffement" else input$carte_indic
+      cfg <- config_carte(indic, df$valeur)
       leafletProxy("carte", session) %>%
-        clearGroup("villes")       %>% ajouter_marqueurs(df) %>%
-        clearGroup("surbrillance") %>% surligner(input$ville_focus)
+        clearGroup("villes")       %>% ajouter_marqueurs(df, cfg) %>%
+        clearGroup("surbrillance") %>% surligner(input$ville_focus) %>%
+        removeControl("legende") %>%
+        addLegend("bottomright", pal = cfg$pal, values = cfg$dom, bins = 4,
+                  title = cfg$titre_leg, opacity = 0.9, layerId = "legende")
       # Recentrage différé : si la ville a changé pendant que la carte était masquée,
       # on recentre maintenant qu'elle est (ré)affichée, puis on lève le drapeau.
       if (isolate(centrage_en_attente())) {
