@@ -74,12 +74,17 @@ villes_triees <- tbl(db_pool, "temperatures_max") %>%
 plage_annees <- tbl(db_pool, "temperatures_max") %>%
   summarise(
     min = min(annee, na.rm = TRUE),
-    max = max(annee, na.rm = TRUE)
+    max = max(annee, na.rm = TRUE),
+    derniere_date = max(date, na.rm = TRUE)
   ) %>%
   collect()
 
 an_min_data <- plage_annees$min
 an_max_data <- plage_annees$max
+# Dernière date RÉELLEMENT disponible : ERA5-Land accuse un décalage (les données
+# ne vont jamais jusqu'à aujourd'hui). Sert de date par défaut à l'onglet « Une
+# journée » (affinée par ville côté serveur).
+derniere_date_dispo <- as.Date(plage_annees$derniere_date)
 
 # Tables optionnelles alimentées par la version mise à jour du pipeline
 # (tmin -> canicules + indicateurs annuels). On teste leur présence au démarrage

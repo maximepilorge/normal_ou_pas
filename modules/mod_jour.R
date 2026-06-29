@@ -12,8 +12,9 @@
 mod_jour_ui <- function(id) {
   ns <- NS(id)
   date_min <- as.Date(paste0(an_min_data, "-01-01"))
-  date_max <- as.Date(paste0(an_max_data, "-12-31"))
-  val_def  <- min(Sys.Date(), date_max)   # date du jour, bornée à la couverture
+  # Défaut = dernière donnée disponible (ERA5-Land est décalé, « aujourd'hui » est
+  # vide). Affiné à la dernière date de la VILLE sélectionnée côté serveur.
+  val_def  <- derniere_date_dispo
 
   tagList(
     page_sidebar(
@@ -31,7 +32,7 @@ mod_jour_ui <- function(id) {
                       choices = villes_triees, selected = villes_triees[1],
                       options = list('live-search' = TRUE)),
           dateInput(ns("date_jour"), "Date :", value = val_def,
-                    min = date_min, max = date_max,
+                    min = date_min, max = derniere_date_dispo,
                     format = "dd/mm/yyyy", language = "fr", weekstart = 1),
           pickerInput(ns("periode_jour"), "Normale de référence :",
                       choices = periodes_disponibles,
@@ -73,6 +74,24 @@ mod_jour_server <- function(id, db_pool) {
     ns <- session$ns
 
     est_mobile <- reactive({ largeur_sous_seuil(session, ns("dist_plot")) })
+
+    # À chaque changement de ville (et au démarrage) : on cale le calendrier sur la
+    # dernière date RÉELLEMENT disponible pour cette ville. La date n'est ramenée à
+    # ce maximum que si la sélection courante le dépasse (donnée absente) — sinon on
+    # respecte la date choisie (utile pour comparer une même date entre villes).
+    observeEvent(input$ville_jour, {
+      dmax <- tryCatch(
+        tbl(db_pool, "temperatures_max") %>%
+          filter(ville == !!input$ville_jour) %>%
+          summarise(d = max(date, na.rm = TRUE)) %>% collect() %>% pull(d),
+        error = function(e) NA)
+      dmax <- suppressWarnings(as.Date(dmax))
+      if (length(dmax) == 1 && !is.na(dmax)) {
+        cur <- input$date_jour
+        nouvelle <- if (is.null(cur) || as.Date(cur) > dmax) dmax else NULL
+        updateDateInput(session, "date_jour", value = nouvelle, max = dmax)
+      }
+    })
 
     # Date sans l'année (« 23 juin ») pour les phrases de rang.
     date_sans_annee <- function(d) paste(lubridate::day(d),
