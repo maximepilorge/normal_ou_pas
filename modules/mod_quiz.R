@@ -7,35 +7,43 @@ mod_quiz_ui <- function(id) {
       title = "Testez votre intuition climatique",
       fillable = FALSE,
       
+      # La sidebar ne contient que des FILTRES optionnels. Comportement adapté à
+      # l'orientation (bslib bascule au breakpoint 576px) :
+      #   - mobile = "always"  -> en portrait (<576px), la sidebar passe en layout
+      #     « flow » empilé SOUS le quiz, toujours visible : l'utilisateur voit
+      #     qu'il peut paramétrer, sans dépendre de la flèche.
+      #   - desktop = "closed" -> en paysage/desktop (>576px), la sidebar démarre
+      #     repliée (flèche pour l'ouvrir) : le graphique reste pleine largeur.
       sidebar = sidebar(
         width = "350px",
+        open = list(mobile = "always", desktop = "closed"),
         # Carte pour les paramètres généraux
         card(
           card_header("Paramètres"),
-          pickerInput(ns("periode_normale"), 
-                      "Période de référence climatique", 
-                      choices = periodes_disponibles, 
+          pickerInput(ns("periode_normale"),
+                      "Période de référence climatique",
+                      choices = periodes_disponibles,
                       options = list('live-search' = FALSE)),
           pickerInput(ns("ville_select_quiz"),
                       "Filtrer par ville (optionnel) :",
                       choices = c("Toutes les villes", villes_triees),
                       selected = "Toutes les villes",
                       options = list('live-search' = FALSE)),
-          pickerInput(ns("saison_select"), 
+          pickerInput(ns("saison_select"),
                            "Filtrer par saison (optionnel) :",
                            choices = c("Toutes les saisons", "Hiver", "Printemps", "Été", "Automne"),
                            selected = "Toutes les saisons",
                            options = list('live-search' = FALSE))
         ),
-        # Le bouton de nouvelle question reste dans la barre latérale pour ne pas encombrer le quiz
-        actionButton(ns("new_question_btn"), "Tirer une température au hasard !", icon = icon("dice"), class = "btn-primary w-100 mb-3"),
         checkboxInput(ns("trash_talk_mode"), "Me forcer à vous répondre poliment", value = FALSE)
       ),
-      
+
       # Contenu principal de la page
       card(
         card_header(h3(textOutput(ns("question_text")))),
-        #hr(),
+        # La CTA principale vit dans le corps du quiz (et non dans la sidebar) :
+        # tirer une nouvelle question reste accessible sidebar fermée.
+        actionButton(ns("new_question_btn"), "Tirer une température au hasard !", icon = icon("dice"), class = "btn-primary w-100 mb-3"),
         # Déplacer les réponses et le bouton de validation dans le corps principal
         h4("Votre Réponse"),
         radioButtons(ns("user_answer"), "Cette température est :",
@@ -64,7 +72,34 @@ mod_quiz_server <- function(id, db_pool) {
     seuils_quiz <- reactiveVal(NULL)
     # Normales projetées (TRACC) du jour : présent + niveaux 2050/2100, pour le boxplot.
     projections_quiz <- reactiveVal(NULL)
-    
+
+    # Repère « normale » ACTIF selon le bouton horizon (présent / 2050 / 2100).
+    # Présent = période de classification choisie ; 2050/2100 = normales projetées
+    # absolues (1991-2020 + delta). Centralisé ici car réutilisé par le titre HTML
+    # (sous-titre dynamique) ET par le boxplot. NULL si aucun repère disponible.
+    repere_actif <- reactive({
+      data_quiz <- quiz_data()
+      req(data_quiz)
+      seuils <- seuils_quiz()
+      proj   <- projections_quiz()
+      horizon <- if (is.null(input$horizon_proj)) "present" else input$horizon_proj
+      if (horizon == "present") {
+        if (!is.null(seuils) && is.finite(seuils$p10) && is.finite(seuils$p90))
+          return(list(p10 = seuils$p10, p90 = seuils$p90, moy = data_quiz$normale_moy,
+                      titre = paste0("Normale actuelle (", input$periode_normale, ")"),
+                      couleur = "#2E8B57"))
+      } else if (!is.null(proj)) {
+        n <- Filter(function(x) startsWith(x$niveau, horizon), proj$niveaux)
+        if (length(n) > 0) {
+          n <- n[[1]]
+          return(list(p10 = n$p10, p90 = n$p90, moy = n$moy,
+                      titre = paste0("Normale projetée ", n$label),
+                      couleur = if (horizon == "2050") "#E8A33D" else "#E4572E"))
+        }
+      }
+      NULL
+    })
+
     observeEvent(req(input$periode_normale), {
       shinyjs::click("new_question_btn")
     }, once = TRUE)
@@ -384,47 +419,40 @@ mod_quiz_server <- function(id, db_pool) {
           paste(phrases, collapse = " ; "), ".</span>")
       }
 
-      # --- BOXPLOT ---
-      output$feedback_boxplot <- renderPlotly({
-        
-        req(boxplot_data())
-        
+      # --- TITRE DU BOXPLOT (HTML) ---
+      # Rendu hors du graphique plotly (qui ne sait pas passer à la ligne et se
+      # tronque sur écran étroit). En HTML, le titre s'enroule naturellement et
+      # reste responsive. Le sous-titre suit l'horizon actif (présent/2050/2100).
+      output$boxplot_titre <- renderUI({
         data_quiz <- quiz_data()
-        donnees_historiques_jour_plot <- boxplot_data()
-
-        main_title <- paste0("Distribution historique ", autour_de(data_quiz$city), " (vers le ", paste(format(data_quiz$date, "%d"), mois_fr[as.numeric(format(data_quiz$date, "%m"))]), ", ±7 j)")
-        subtitle_text <- paste("Période", input$periode_normale)
-        full_title <- paste0(main_title, "<br><sup>", subtitle_text, "</sup><br>")
-        
+        req(data_quiz, boxplot_data())
         fmt1 <- function(x) format(round(x, 1), nsmall = 1, decimal.mark = ",")
-        seuils <- seuils_quiz()
-        proj   <- projections_quiz()
-
-        # Repère « normale » ACTIF selon le bouton horizon (présent / 2050 / 2100).
-        # Présent = période de classification choisie ; 2050/2100 = normales
-        # projetées absolues (1991-2020 + delta). UN SEUL repère à la fois -> lisible.
-        horizon <- if (is.null(input$horizon_proj)) "present" else input$horizon_proj
-        actif <- NULL
-        if (horizon == "present") {
-          if (!is.null(seuils) && is.finite(seuils$p10) && is.finite(seuils$p90))
-            actif <- list(p10 = seuils$p10, p90 = seuils$p90, moy = data_quiz$normale_moy,
-                          titre = paste0("Normale actuelle (", input$periode_normale, ")"),
-                          couleur = "#2E8B57")
-        } else if (!is.null(proj)) {
-          n <- Filter(function(x) startsWith(x$niveau, horizon), proj$niveaux)
-          if (length(n) > 0) {
-            n <- n[[1]]
-            actif <- list(p10 = n$p10, p90 = n$p90, moy = n$moy,
-                          titre = paste0("Normale projetée ", n$label),
-                          couleur = if (horizon == "2050") "#E8A33D" else "#E4572E")
-          }
-        }
-
+        main_title <- paste0("Distribution historique ", autour_de(data_quiz$city),
+                             " (vers le ", paste(format(data_quiz$date, "%d"),
+                             mois_fr[as.numeric(format(data_quiz$date, "%m"))]), ", ±7 j)")
+        actif <- repere_actif()
         sous_titre <- if (!is.null(actif))
           paste0(actif$titre, " : zone normale ", fmt1(actif$p10), "–", fmt1(actif$p90),
                  " °C · moyenne ", fmt1(actif$moy), " °C")
         else paste("Période", input$periode_normale)
-        full_title <- paste0(main_title, "<br><sup>", sous_titre, "</sup><br>")
+        tagList(
+          tags$p(class = "fw-bold mb-1", main_title),
+          tags$p(class = "text-muted small mb-2", sous_titre)
+        )
+      })
+
+      # --- BOXPLOT ---
+      output$feedback_boxplot <- renderPlotly({
+
+        req(boxplot_data())
+
+        data_quiz <- quiz_data()
+        donnees_historiques_jour_plot <- boxplot_data()
+
+        fmt1 <- function(x) format(round(x, 1), nsmall = 1, decimal.mark = ",")
+        seuils <- seuils_quiz()
+        proj   <- projections_quiz()
+        actif  <- repere_actif()
 
         # Cadre Y fixe couvrant présent + 2050 + 2100 : en basculant, la zone
         # « normale » glisse vers le haut sans que le boxplot soit redimensionné.
@@ -433,24 +461,25 @@ mod_quiz_server <- function(id, db_pool) {
         if (!is.null(proj)) for (n in proj$niveaux) all_y <- c(all_y, n$p10, n$p90)
         yr <- range(all_y, na.rm = TRUE); yr <- yr + c(-1, 1) * 0.06 * diff(yr)
 
+        # Boîte et nuage élargis pour mieux occuper la colonne étroite du mobile,
+        # police réduite (base_size) pour rester lisible sans déborder.
         p <- ggplot(donnees_historiques_jour_plot, aes(x = "", y = tmax_celsius)) +
-          geom_boxplot(width = 0.3, fill = "skyblue", alpha = 0.7) +
+          geom_boxplot(width = 0.5, fill = "skyblue", alpha = 0.7) +
           geom_jitter(aes(text = paste("Date :", format(date, "%d %b %Y"),
                                        "<br>Température :", round(tmax_celsius, 1), "°C")),
-                      width = 0.1, alpha = 0.4, color = "darkblue") +
+                      width = 0.18, alpha = 0.4, color = "darkblue") +
           geom_point(data = data.frame(temp_quiz = data_quiz$temp),
                      aes(x = "", y = temp_quiz,
                          text = paste("Température du quiz :", data_quiz$temp, "°C")),
                      color = "red", size = 4, shape = 4, stroke = 1.5, alpha = 0.85) +
           scale_y_continuous(labels = ~paste(.x, "°C")) +
-          labs(title = main_title, x = "", y = "Température Maximale") +
-          theme_minimal(base_size = 14) +
-          theme(plot.title = element_text(face = "bold"))
+          labs(x = "", y = "Température Maximale") +
+          theme_minimal(base_size = 12)
 
         # Zone normale de l'horizon actif (rectangle + bornes p10/p90 + moyenne).
         if (!is.null(actif)) {
           p <- p +
-            annotate("rect", xmin = 0.55, xmax = 1.45, ymin = actif$p10, ymax = actif$p90,
+            annotate("rect", xmin = 0.5, xmax = 1.5, ymin = actif$p10, ymax = actif$p90,
                      fill = actif$couleur, alpha = 0.15) +
             geom_hline(yintercept = c(actif$p10, actif$p90),
                        linetype = "dashed", color = actif$couleur, linewidth = 0.8) +
@@ -460,9 +489,9 @@ mod_quiz_server <- function(id, db_pool) {
         }
 
         ggplotly(p, tooltip = "text") %>%
-          layout(title = list(text = full_title, x = 0.5),
-                 xaxis = list(fixedrange = TRUE),
-                 yaxis = list(fixedrange = TRUE, range = yr)) %>%
+          layout(xaxis = list(fixedrange = TRUE),
+                 yaxis = list(fixedrange = TRUE, range = yr),
+                 margin = list(t = 10)) %>%
           config(displayModeBar = FALSE, responsive = TRUE)
 
       })
@@ -482,7 +511,8 @@ mod_quiz_server <- function(id, db_pool) {
                               "2050 (+2,7 °C)" = "2050",
                               "2100 (+4 °C)" = "2100"),
                   selected = "present", size = "sm", status = "primary")),
-          plotlyOutput(session$ns("feedback_boxplot")),
+          uiOutput(session$ns("boxplot_titre")),
+          plotlyOutput(session$ns("feedback_boxplot"), height = "340px"),
           hr(),
           div(
             class = "text-center",
