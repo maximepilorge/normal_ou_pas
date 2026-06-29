@@ -274,7 +274,15 @@ mod_comparer_server <- function(id, db_pool) {
     # pour éviter la race condition leafletProxy/onglet masqué au démarrage.
     output$carte <- renderLeaflet({
       df0 <- isolate(anomalies_annee())
-      carte <- leaflet(options = leafletOptions(minZoom = 4)) %>%
+      # Carte volontairement « figée » : seul le zoom par les boutons +/- est
+      # autorisé. On désactive la molette, le double-clic, le pincé tactile, le
+      # zoom-cadre, le clavier ET le déplacement (dragging) — pour éviter les zooms
+      # accidentels et, surtout sur smartphone, pour que le geste de défilement
+      # fasse défiler la PAGE (et non la carte) jusqu'au graphique du bas.
+      carte <- leaflet(options = leafletOptions(
+        minZoom = 4,
+        scrollWheelZoom = FALSE, doubleClickZoom = FALSE, touchZoom = FALSE,
+        boxZoom = FALSE, dragging = FALSE, keyboard = FALSE)) %>%
         addProviderTiles(providers$CartoDB.Positron) %>%
         fitBounds(-5.5, 41.0, 9.8, 51.5) %>%
         addLegend("bottomright", pal = pal, values = dom, bins = 4,
