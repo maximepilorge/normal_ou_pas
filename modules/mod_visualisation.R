@@ -3,36 +3,47 @@
 mod_visualisation_ui <- function(id) {
   ns <- NS(id)
   tagList(
+    # Hauteur du graphe réduite en portrait pour limiter le scroll (la police et
+    # les ticks sont, eux, adaptés côté serveur via clientData).
+    tags$head(tags$style(HTML("
+      .comparaison-plot-wrap { height: 600px; }
+      @media (max-width: 575.98px) { .comparaison-plot-wrap { height: 430px; } }
+    "))),
     page_sidebar(
       title = "Visualiser le changement climatique",
       fillable = FALSE,
-      
+
+      # Sidebar adaptée à l'orientation (breakpoint bslib 576px) :
+      #   - mobile = "always"  -> en portrait, filtres empilés sous le graphe, visibles.
+      #   - desktop = "closed" -> en paysage/desktop, repliée : graphe pleine largeur.
+      # NB : les inputs restent NON-namespacés (lus tels quels par server.R).
       sidebar = sidebar(
         width = "350px",
-        # On encapsule les contrôles dans une "card" pour un meilleur rendu visuel
+        open = list(mobile = "always", desktop = "closed"),
         card(
           card_header("Paramètres"),
-          pickerInput("ville_select", 
-                      "Choisissez une ville :", 
+          pickerInput("ville_select",
+                      "Choisissez une ville :",
                       choices = villes_triees,
                       select = villes_triees[1],
                       options = list('live-search' = FALSE)),
-          pickerInput("periode_select", 
-                      "Choisissez la période de référence :", 
+          pickerInput("periode_select",
+                      "Choisissez la période de référence :",
                       choices = periodes_disponibles,
                       options = list('live-search' = FALSE)),
-          sliderInput("annee_select", "Choisissez l'année à comparer :", 
-                      min = an_min_data, 
-                      max = an_max_data, 
-                      value = an_max_data, 
+          sliderInput("annee_select", "Choisissez l'année à comparer :",
+                      min = an_min_data,
+                      max = an_max_data,
+                      value = an_max_data,
                       sep = "")
         )
       ),
-      
+
       card(
         full_screen = TRUE,
-        card_header("Évolution des températures maximales"),
-        plotlyOutput(ns("climate_plot"), height = "600px")
+        card_header(uiOutput(ns("titre_comparaison"))),
+        div(class = "comparaison-plot-wrap",
+            plotlyOutput(ns("climate_plot"), height = "100%"))
       )
     )
   )
@@ -40,163 +51,119 @@ mod_visualisation_ui <- function(id) {
 
 mod_visualisation_server <- function(id, db_pool, ville, periode, annee) {
   moduleServer(id, function(input, output, session) {
-    
+
     ns <- session$ns
-    screen_width <- reactiveVal()
-    
-    observe({
-      # On injecte l'ID complet et "namespacé" dans le code JS
-      js_code <- sprintf(
-        "
-    function get_screen_width() {
-      Shiny.setInputValue('%s', window.innerWidth, {priority: 'event'});
-    }
-    
-    // Écoute les redimensionnements
-    $(window).on('resize', function(){
-      get_screen_width();
-    });
-    
-    // Déclenche au chargement de la page pour une valeur initiale
-    get_screen_width();
-    ",
-        ns("screen_width")
-      )
-      
-      shinyjs::runjs(js_code)
-      
+
+    # Largeur réelle (px) du graphe, transmise par le client. Booléen (et non
+    # largeur brute) pour ne ré-invalider le rendu qu'au franchissement du seuil
+    # ~500px (≈ smartphone en portrait), pas à chaque pixel.
+    est_mobile <- reactive({
+      w <- session$clientData[[paste0("output_", ns("climate_plot"), "_width")]]
+      !is.null(w) && w > 0 && w < 500
     })
-    
-    observeEvent(input$screen_width, {
-      req(input$screen_width) # On attend d'avoir la largeur
-      
-      # 768px est un seuil commun pour les tablettes/smartphones
-      is_mobile <- input$screen_width < 768 
-      
-      # On utilise plotlyProxy pour modifier le graphique existant sans le redessiner
-      plotlyProxy("climate_plot", session) %>%
-        # On met à jour la visibilité des traces 6 et 7 (indices 5 et 6)
-        plotlyProxyInvoke("restyle", list(visible = !is_mobile), as.list(5:6))
-      
-    }, ignoreNULL = TRUE, ignoreInit = TRUE)
-    
+
+    # Titre dynamique de la carte : rappelle la ville et l'année (s'enroule en
+    # HTML, contrairement à un titre plotly qui se tronque sur écran étroit).
+    output$titre_comparaison <- renderUI({
+      req(ville(), annee(), periode())
+      tagList(
+        HTML(paste0("Températures maximales à <strong>", ville(),
+                    "</strong> en <strong>", annee(), "</strong>")),
+        tags$div(class = "small text-muted fw-normal",
+                 paste("Comparaison à la normale climatique", periode()))
+      )
+    })
+
+    # Données de l'année sélectionnée (tmax journalières).
     plot_data_annee <- reactive({
       req(ville(), annee())
-      
-      annee_selectionnee <- annee()
-      start_date <- as.Date(paste0(annee_selectionnee, "-01-01"))
-      end_date <- as.Date(paste0(annee_selectionnee + 1, "-01-01"))
-
-      # On prépare l'année en chaîne de caractères pour la requête SQL
-      donnees_preparees <- tbl(db_pool, "temperatures_max") %>%
-        filter(
-          ville == !!ville(),
-          date >= !!start_date,
-          date < !!end_date
-        ) %>%
+      start_date <- as.Date(paste0(annee(), "-01-01"))
+      end_date   <- as.Date(paste0(annee() + 1, "-01-01"))
+      tbl(db_pool, "temperatures_max") %>%
+        filter(ville == !!ville(), date >= !!start_date, date < !!end_date) %>%
         select(date, temperature_max) %>%
         collect() %>%
         rename(tmax_celsius = temperature_max)
-      
-      # On retourne le dataframe
-      donnees_preparees
-    })
-    
-    # 1. On dessine le graphique complet une seule fois au démarrage
-    output$climate_plot <- renderPlotly({
+    }) %>% bindCache(ville(), annee())
 
+    # Normales climatiques (rubans + moyenne) pour la ville et la période, datées
+    # sur l'année affichée (le 29/02 est retiré hors année bissextile).
+    plot_data_normale <- reactive({
       req(ville(), periode(), annee())
-      
-      # Données pour les normales (ne change pas avec l'année)
       annee_origine <- paste0(annee(), "-01-01")
-      plot_data_normale <- tbl(db_pool, "stats_normales") %>%
-        filter(
-          ville == !!ville(), 
-          periode_ref == !!periode()
-          ) %>%
+      tbl(db_pool, "stats_normales") %>%
+        filter(ville == !!ville(), periode_ref == !!periode()) %>%
         collect() %>%
         filter(!(mois == 2 & jour_mois == 29 & !leap_year(as.Date(annee_origine)))) %>%
         mutate(date = as.Date(paste(year(as.Date(annee_origine)), mois, jour_mois, sep = "-")))
-      
-      # Construction du graphique complet
+    }) %>% bindCache(ville(), periode(), annee())
+
+    # Graphe re-rendu à chaque changement (ville / période / année / largeur).
+    # bindCache garde le tout rapide ; plus de plotlyProxy ni de JS custom.
+    output$climate_plot <- renderPlotly({
+      req(ville(), periode(), annee())
+      d_norm  <- plot_data_normale()
+      d_annee <- plot_data_annee()
+      req(nrow(d_norm) > 0, nrow(d_annee) > 0)
+
+      mob <- est_mobile()
+      taille_police  <- if (mob) 11 else 14
+      taille_legende <- if (mob) 10 else 12
+
       p <- ggplot() +
-        # Les rubans ne changent pas
-        geom_ribbon(data = plot_data_normale, aes(x = date, ymin = t_min, ymax = t_max), fill = "lightblue", alpha = 0.5) +
-        geom_ribbon(data = plot_data_normale, aes(x = date, ymin = t_q1, ymax = t_q3), fill = "skyblue", alpha = 0.6) +
-        
-        # --- Couches pour la moyenne normale ---
-        # 1. On dessine la ligne (simple, sans 'text')
-        geom_line(data = plot_data_normale, aes(x = date, y = t_moy, color = "Moyenne normale"),
+        # Rubans des normales (min–max puis quartiles).
+        geom_ribbon(data = d_norm, aes(x = date, ymin = t_min, ymax = t_max),
+                    fill = "lightblue", alpha = 0.5) +
+        geom_ribbon(data = d_norm, aes(x = date, ymin = t_q1, ymax = t_q3),
+                    fill = "skyblue", alpha = 0.6) +
+        # Moyenne normale : ligne + points invisibles porteurs de l'infobulle.
+        geom_line(data = d_norm, aes(x = date, y = t_moy, color = "Moyenne normale"),
                   linetype = "dashed", linewidth = 0.6) +
-        # 2. On ajoute les points invisibles (alpha=0) juste pour l'infobulle
-        geom_point(data = plot_data_normale, aes(x = date, y = t_moy, 
-                                                 text = paste("Date:", format(date, "%d %b"), "<br>Moyenne normale:", round(t_moy, 1), "°C")),
-                   alpha = 0) +
-        # La courbe de lissage geom_smooth
-        geom_smooth(data = plot_data_annee(), 
+        geom_point(data = d_norm, aes(x = date, y = t_moy,
+                   text = paste("Date:", format(date, "%d %b"),
+                                "<br>Moyenne normale:", round(t_moy, 1), "°C")),
+                   alpha = 0)
+
+      # La « Tendance de l'année » (lissage loess) n'est tracée que sur grand
+      # écran : sur mobile elle surcharge un graphe déjà étroit.
+      if (!mob)
+        p <- p + geom_smooth(data = d_annee,
                     aes(x = date, y = tmax_celsius, color = "Tendance de l'année"),
-                    linetype = "dashed", linewidth = 0.6, method = "loess", span = 0.3, se = FALSE) +
-        
-        # --- Couches pour l'année sélectionnée ---
-        # 1. On dessine la ligne (simple, sans 'text')
-        geom_line(data = plot_data_annee(), aes(x = date, y = tmax_celsius, color = "Année sélectionnée"), 
+                    linetype = "dashed", linewidth = 0.6,
+                    method = "loess", span = 0.3, se = FALSE)
+
+      p <- p +
+        # Année sélectionnée : ligne + points invisibles porteurs de l'infobulle.
+        geom_line(data = d_annee, aes(x = date, y = tmax_celsius, color = "Année sélectionnée"),
                   linewidth = 0.8) +
-        # 2. On ajoute les points invisibles (alpha=0) juste pour l'infobulle
-        geom_point(data = plot_data_annee(), aes(x = date, y = tmax_celsius, 
-                                                 text = paste("Date:", format(date, "%d %b"), "<br>Température:", round(tmax_celsius, 1), "°C")),
+        geom_point(data = d_annee, aes(x = date, y = tmax_celsius,
+                   text = paste("Date:", format(date, "%d %b"),
+                                "<br>Température:", round(tmax_celsius, 1), "°C")),
                    alpha = 0) +
-        
-        scale_color_manual(values = c("Moyenne normale" = "darkblue", 
+        scale_color_manual(values = c("Moyenne normale"    = "darkblue",
                                       "Année sélectionnée" = "#E41A1C",
                                       "Tendance de l'année" = "#8B0000")) +
-        scale_x_date(date_labels = "%b", date_breaks = "1 month") +
-        labs(
-          title = paste("Températures maximales journalières \nà", ville(), "en", annee()),
-          subtitle = paste("Comparaison avec la normale climatique", periode()),
-          y = "Température maximale (°C)", x = "Jour de l'année", color = "Légende"
-        ) +
-        theme_minimal(base_size = 14) +
-        theme(
-          legend.position = "bottom",
-          axis.text.x = element_text(angle = 45, hjust = 1),
-          plot.title = element_text(hjust = 0.5)
-          )
-      
+        labs(y = "Température maximale (°C)", x = NULL, color = NULL) +
+        theme_minimal(base_size = taille_police) +
+        theme(legend.position = "bottom")
+
+      # Ticks de mois maîtrisés côté plotly : 1 sur 2 en portrait (sinon les 12
+      # mois se chevauchent), les 12 en grand écran. tickformat %b = mois abrégé.
+      dtick_mois <- if (mob) "M2" else "M1"
+
       ggplotly(p, tooltip = "text") %>%
+        layout(
+          xaxis = list(fixedrange = TRUE, title = NULL, dtick = dtick_mois,
+                       tickformat = "%b", tickangle = if (mob) -45 else 0),
+          yaxis = list(fixedrange = TRUE),
+          legend = list(orientation = "h", x = 0.5, xanchor = "center",
+                        y = -0.15, yanchor = "top",
+                        font = list(size = taille_legende)),
+          margin = list(b = if (mob) 70 else 80, t = 10)
+        ) %>%
         config(displayModeBar = FALSE, responsive = TRUE)
-    })
-    
-    # 2. On observe les changements de l'année pour mettre à jour le graphique (après le premier affichage)
-    observeEvent(annee(), {
-      
-      # On récupère les données via le reactive
-      data_annee_maj <- plot_data_annee()
-      
-      # On met à jour les données des traces (lignes) via le proxy
-      plotlyProxy("climate_plot", session) %>%
-        # Met à jour les traces pour le smooth et la ligne de l'année.
-        # Les index sont corrects (2 et 3) car plotly commence à compter à 0
-        # et les couches de l'année sont les 3ème et 4ème dans le ggplot.
-        plotlyProxyInvoke("restyle", list(
-          x = list(data_annee_maj$date, data_annee_maj$date),
-          y = list(data_annee_maj$tmax_celsius, data_annee_maj$tmax_celsius)
-        ), as.list(2:3)) %>%
-        # On met à jour le titre
-        plotlyProxyInvoke("relayout", list(
-          title = paste("Températures maximales journalières à", ville(), "en", annee())
-        ))
+    }) %>%
+      bindCache(ville(), periode(), annee(), est_mobile())
 
-      # Bug mobile : après la mise à jour des données de l'année, on RÉ-APPLIQUE
-      # la visibilité mobile. Sans cela, les traces masquées sur petit écran
-      # (tendance/points) réapparaissent au changement d'année. Sur grand écran
-      # (!is_mobile = TRUE) cela restaure simplement l'affichage normal.
-      if (!is.null(input$screen_width)) {
-        is_mobile <- input$screen_width < 768
-        plotlyProxy("climate_plot", session) %>%
-          plotlyProxyInvoke("restyle", list(visible = !is_mobile), as.list(5:6))
-      }
-
-    }, ignoreInit = TRUE)
-    
   })
 }
