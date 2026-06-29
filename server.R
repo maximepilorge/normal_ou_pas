@@ -9,9 +9,9 @@ library(dbplyr)
 
 # On charge la logique serveur de chaque module
 source("modules/mod_quiz.R")
-source("modules/mod_visualisation.R")
 source("modules/mod_analyse.R")
-source("modules/mod_carte.R")
+# Onglet « Comparer » : fusion des anciens Comparaison + Carte (mod_comparer).
+source("modules/mod_comparer.R")
 
 server <- function(input, output, session) {
   
@@ -85,18 +85,11 @@ server <- function(input, output, session) {
   })
   
   # --- APPELS AUX SERVEURS DES MODULES (HORS QUIZ) ---
-  # Module Visualisation
-  mod_visualisation_server("visu_1", 
-                           db_pool = db_pool,
-                           ville = reactive(input$ville_select), 
-                           periode = reactive(input$periode_select),
-                           annee = reactive(input$annee_select))
-  
+  # Module Comparer (fusion Comparaison + Carte) : sidebar et contrôles internes.
+  mod_comparer_server("comparer_1", db_pool = db_pool)
+
   # Module Analyse
   mod_analyse_server("analyse_1",
                      db_pool = db_pool)
-
-  # Module Carte comparée des villes
-  mod_carte_server("carte_1", db_pool = db_pool)
 
 }

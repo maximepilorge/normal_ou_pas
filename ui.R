@@ -7,9 +7,9 @@ library(bslib)
 
 # On charge le code UI de chaque module
 source("modules/mod_quiz.R")
-source("modules/mod_visualisation.R")
 source("modules/mod_analyse.R")
-source("modules/mod_carte.R")
+# Onglet « Comparer » : fusion des anciens Comparaison + Carte (mod_comparer).
+source("modules/mod_comparer.R")
 
 ui <- fluidPage( # On utilise tagList comme conteneur principal
   
@@ -202,19 +202,14 @@ ui <- fluidPage( # On utilise tagList comme conteneur principal
       icon = icon("question-circle")
       ),
     nav_panel(
-      "Comparaison",
-      mod_visualisation_ui("visu_1"),
+      "Comparer",
+      mod_comparer_ui("comparer_1"),
       icon = icon("chart-bar")
       ),
     nav_panel(
       "Evolution",
       mod_analyse_ui("analyse_1"),
       icon = icon("chart-line")
-      ),
-    nav_panel(
-      "Carte",
-      mod_carte_ui("carte_1"),
-      icon = icon("map-location-dot")
       ),
     nav_panel(
       "Méthodo",
