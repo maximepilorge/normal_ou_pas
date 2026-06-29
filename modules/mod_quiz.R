@@ -439,7 +439,7 @@ mod_quiz_server <- function(id, db_pool) {
         feedback_body <- paste0(
           feedback_body,
           "<br><br><span style='color:#555'>🌡️ Avec le réchauffement (trajectoire de référence ",
-          "TRACC, par rapport aux normales actuelles 1991-2020) : ",
+          "TRACC ; les niveaux +2,7 °C et +4 °C s'entendent par rapport à l'ère préindustrielle) : ",
           paste(phrases, collapse = " ; "), ".</span>")
       }
 
