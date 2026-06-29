@@ -15,20 +15,23 @@ mod_quiz_ui <- function(id) {
         # Carte pour les paramètres généraux
         card(
           card_header("Paramètres"),
+          # container = "body" : le menu déroulant flotte au-dessus de la sidebar
+          # (évite le rognage et la double barre de défilement). live-search sur la
+          # ville (liste longue), size pour plafonner la hauteur du menu.
           pickerInput(ns("periode_normale"),
                       "Période de référence climatique",
                       choices = periodes_disponibles,
-                      options = list('live-search' = FALSE)),
+                      options = list(container = "body", 'live-search' = FALSE)),
           pickerInput(ns("ville_select_quiz"),
                       "Filtrer par ville (optionnel) :",
                       choices = c("Toutes les villes", villes_triees),
                       selected = "Toutes les villes",
-                      options = list('live-search' = FALSE)),
+                      options = list(container = "body", 'live-search' = TRUE, size = 8)),
           pickerInput(ns("saison_select"),
                            "Filtrer par saison (optionnel) :",
                            choices = c("Toutes les saisons", "Hiver", "Printemps", "Été", "Automne"),
                            selected = "Toutes les saisons",
-                           options = list('live-search' = FALSE))
+                           options = list(container = "body", 'live-search' = FALSE))
         ),
         checkboxInput(ns("trash_talk_mode"), "Me forcer à vous répondre poliment", value = FALSE)
       ),

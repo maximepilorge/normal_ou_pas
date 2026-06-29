@@ -26,23 +26,26 @@ mod_comparer_ui <- function(id) {
         }
       "))
     ),
-    page_sidebar(
-      title = "Comparer : dans le temps et entre les villes",
-      fillable = FALSE,
+    div(
+      class = "p-2",
+      h5(class = "mb-2", "Comparer : dans le temps et entre les villes"),
 
-      # Contrôles communs (ville focus + période). Ouverte par défaut sur ordinateur ;
-      # empilée/visible ("always") sur smartphone.
-      sidebar = sidebar(
-        width = "320px",
-        open = list(mobile = "always", desktop = "open"),
-        card(
-          card_header("Réglages"),
-          pickerInput(ns("ville_focus"), "Ville :",
-                      choices = villes_triees, selected = villes_triees[1],
-                      options = list('live-search' = TRUE)),
-          pickerInput(ns("periode"), "Période de référence (normale) :",
-                      choices = periodes_disponibles,
-                      options = list('live-search' = FALSE)),
+      # Barre de réglages EN LIGNE (remplace la sidebar) : ville + période visibles
+      # d'emblée, au-dessus des vues. Les menus s'affichent hors flux (container =
+      # "body") pour ne pas créer de double défilement.
+      card(
+        class = "mb-2",
+        card_body(
+          class = "py-2",
+          layout_columns(
+            col_widths = breakpoints(sm = 6),
+            pickerInput(ns("ville_focus"), "Ville :",
+                        choices = villes_triees, selected = villes_triees[1],
+                        options = list(container = "body", `live-search` = TRUE, size = 8)),
+            pickerInput(ns("periode"), "Période de référence (normale) :",
+                        choices = periodes_disponibles,
+                        options = list(container = "body", `live-search` = FALSE))
+          ),
           helpText(HTML(paste0(
             "La <b>période de référence</b> s'applique à la vue « Dans l'année ». ",
             "La carte « Entre les villes » compare à une normale ancienne figée (",
@@ -50,8 +53,7 @@ mod_comparer_ui <- function(id) {
         )
       ),
 
-      # Année : scrubber COMMUN aux deux vues, mis en évidence hors sidebar pour
-      # rester accessible (on le fait glisser pour animer la carte).
+      # Année : scrubber COMMUN aux deux vues (on le fait glisser pour animer la carte).
       div(class = "px-1 pb-2",
           sliderInput(ns("annee"), "Année :",
                       min = an_min_data, max = an_max_data,

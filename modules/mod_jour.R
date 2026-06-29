@@ -17,27 +17,29 @@ mod_jour_ui <- function(id) {
   val_def  <- derniere_date_dispo
 
   tagList(
-    page_sidebar(
-      title = "Analyser une journée précise",
-      fillable = FALSE,
+    div(
+      class = "p-2",
+      h5(class = "mb-2", "Analyser une journée précise"),
 
-      # Sidebar ouverte par défaut sur ordinateur (réglages visibles) ; empilée/
-      # visible ("always") sur smartphone (cohérent avec les autres onglets).
-      sidebar = sidebar(
-        width = "330px",
-        open = list(mobile = "always", desktop = "open"),
-        card(
-          card_header("Réglages"),
-          pickerInput(ns("ville_jour"), "Ville :",
-                      choices = villes_triees, selected = villes_triees[1],
-                      options = list('live-search' = TRUE)),
-          dateInput(ns("date_jour"), "Date :", value = val_def,
-                    min = date_min, max = derniere_date_dispo,
-                    format = "dd/mm/yyyy", language = "fr", weekstart = 1),
-          pickerInput(ns("periode_jour"), "Normale de référence :",
-                      choices = periodes_disponibles,
-                      selected = periodes_disponibles[length(periodes_disponibles)],
-                      options = list('live-search' = FALSE)),
+      # Barre de réglages EN LIGNE (remplace la sidebar) : ville, date et normale de
+      # référence, visibles d'emblée. Menus hors flux (container = "body").
+      card(
+        class = "mb-2",
+        card_body(
+          class = "py-2",
+          layout_columns(
+            col_widths = breakpoints(sm = c(4, 4, 4)),
+            pickerInput(ns("ville_jour"), "Ville :",
+                        choices = villes_triees, selected = villes_triees[1],
+                        options = list(container = "body", `live-search` = TRUE, size = 8)),
+            dateInput(ns("date_jour"), "Date :", value = val_def,
+                      min = date_min, max = derniere_date_dispo,
+                      format = "dd/mm/yyyy", language = "fr", weekstart = 1),
+            pickerInput(ns("periode_jour"), "Normale de référence :",
+                        choices = periodes_disponibles,
+                        selected = periodes_disponibles[length(periodes_disponibles)],
+                        options = list(container = "body", `live-search` = FALSE))
+          ),
           helpText(paste0("Rang et fréquence sont calculés sur une fenêtre de ±7 ",
                           "jours autour de la date, toutes années depuis ",
                           an_min_data, "."))

@@ -22,39 +22,33 @@ mod_analyse_ui <- function(id) {
       .evolution-plot-wrap { height: 500px; }
       @media (max-width: 575.98px) { .evolution-plot-wrap { height: 420px; } }
     "))),
-    page_sidebar(
-      title = "Analyser l'évolution des températures",
-      fillable = FALSE,
-      
-      # Sidebar OUVERTE par défaut sur ordinateur (paramètres visibles) ;
-      # empilée/visible ("always") sur smartphone.
-      sidebar = sidebar(
-        width = "350px",
-        open = list(mobile = "always", desktop = "open"),
-        card(
-          card_header("Paramètres de la série temporelle"),
-          pickerInput(ns("ville_analyse"),
-                      "Choisissez une ville :", 
-                      choices = villes_triees,
-                      selected = villes_triees[1],
-                      options = list('live-search' = FALSE)),
-          sliderInput(ns("annee_range_analyse"),
-                      "Période d'analyse :",
-                      min = an_min_data,
-                      max = an_max_data,
-                      value = c(an_min_data, an_max_data),
-                      sep = ""),
-          pickerInput(ns("periode_ref_analyse"),
-                      "Période de référence (normale) :",
-                      choices = periodes_disponibles,
-                      selected = periodes_disponibles[1],
-                      options = list('live-search' = FALSE)),
+    div(
+      class = "p-2",
+      h5(class = "mb-2", "Analyser l'évolution des températures"),
+
+      # Barre de réglages EN LIGNE (remplace la sidebar) : ville, période d'analyse
+      # et normale de référence, visibles d'emblée au-dessus des graphes. Menus hors
+      # flux (container = "body") pour éviter tout double défilement.
+      card(
+        class = "mb-2",
+        card_body(
+          class = "py-2",
+          layout_columns(
+            col_widths = breakpoints(sm = c(4, 4, 4)),
+            pickerInput(ns("ville_analyse"), "Ville :",
+                        choices = villes_triees, selected = villes_triees[1],
+                        options = list(container = "body", `live-search` = TRUE, size = 8)),
+            sliderInput(ns("annee_range_analyse"), "Période d'analyse :",
+                        min = an_min_data, max = an_max_data,
+                        value = c(an_min_data, an_max_data), sep = ""),
+            pickerInput(ns("periode_ref_analyse"), "Période de référence (normale) :",
+                        choices = periodes_disponibles, selected = periodes_disponibles[1],
+                        options = list(container = "body", `live-search` = FALSE))
+          ),
           helpText("Chaque barre indique l'écart de la moyenne annuelle des températures maximales par rapport à la normale de la période de référence choisie.")
         )
-        # Les réglages du seuil de chaleur ne sont plus ici : ils ont rejoint la
-        # carte du graphe de résultat (contenu principal) pour être co-localisés.
       ),
-      
+
       card(
         full_screen = TRUE,
         card_header(uiOutput(ns("titre_evolution"))),
