@@ -37,14 +37,20 @@ mod_comparer_ui <- function(id) {
         class = "mb-2",
         card_body(
           class = "py-2",
+          # Ville · période · année dans une même rangée de 3 colonnes (cohérent
+          # avec les autres onglets). L'année est le scrubber COMMUN aux deux vues
+          # (on le fait glisser pour animer la carte).
           layout_columns(
-            col_widths = breakpoints(sm = 6),
+            col_widths = breakpoints(sm = c(4, 4, 4)),
             pickerInput(ns("ville_focus"), "Ville :",
                         choices = villes_triees, selected = villes_triees[1],
                         options = list(container = "body", `live-search` = TRUE, size = 8)),
             pickerInput(ns("periode"), "Période de référence (normale) :",
                         choices = periodes_disponibles,
-                        options = list(container = "body", `live-search` = FALSE))
+                        options = list(container = "body", `live-search` = FALSE)),
+            sliderInput(ns("annee"), "Année :",
+                        min = an_min_data, max = an_max_data,
+                        value = an_max_data, step = 1, sep = "", width = "100%")
           ),
           helpText(HTML(paste0(
             "La <b>période de référence</b> s'applique à la vue « Dans l'année ». ",
@@ -52,12 +58,6 @@ mod_comparer_ui <- function(id) {
             periode_ref_carte, ") pour visualiser le réchauffement progresser.")))
         )
       ),
-
-      # Année : scrubber COMMUN aux deux vues (on le fait glisser pour animer la carte).
-      div(class = "px-1 pb-2",
-          sliderInput(ns("annee"), "Année :",
-                      min = an_min_data, max = an_max_data,
-                      value = an_max_data, step = 1, sep = "", width = "100%")),
 
       navset_card_tab(
         id = ns("sousvue"),
