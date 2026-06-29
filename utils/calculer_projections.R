@@ -7,8 +7,9 @@
 #   1) DELTAS fenêtrés ±7 j (moy, p10, p90) par ville × jour calendaire × niveau
 #      de réchauffement — pour le quiz (à ADDITIONNER aux normales ERA5).
 #      Méthode : delta = stat(fenêtre du niveau) − stat(fenêtre de référence).
-#   2) CANICULES PROJETÉES — séries DRIAS ABSOLUES passées dans calculer_canicules()
-#      (même définition officielle Météo-France que l'observé), par niveau.
+#   2) EXTRÊMES PROJETÉS (jours de forte chaleur + jours de gel) par niveau —
+#      méthode delta sur ERA5 (cf. calculer_extremes_projetes), cohérente avec
+#      l'observé (même seuil, même échelle).
 #
 # Les fenêtres temporelles (référence + niveaux) sont des PARAMÈTRES : les bornes
 # officielles TRACC restent à figer (cf. plan §11). Sourcé (fonctions pures).
@@ -17,24 +18,17 @@
 library(dplyr)
 library(lubridate)
 
-# Réutilise la définition officielle des canicules (fonction pure, identique à
-# celle de l'observé) — clé de la cohérence observé/projeté.
+# Réutilise les indicateurs (forte chaleur) et la fenêtre glissante — fonctions
+# pures, MÊMES définitions que l'observé (clé de la cohérence observé/projeté).
 source(here::here("utils", "calculer_indicateurs.R"))
+source(here::here("utils", "fenetre_glissante.R"))
 
 FENETRE_PROJ <- 7  # ±7 jours, cohérent avec les normales du quiz (preparer_data.R)
 
-# --- Machinerie de fenêtre glissante (miroir de preparer_data.R:76-131) -------
-# Indice jour 1..366 (année bissextile fixe 2000) + carte jour_cible -> jours
-# sources de sa fenêtre ±FENETRE (circulaire sur 366).
-.ref_jours <- data.frame(
-  date_ref = seq(as.Date("2000-01-01"), as.Date("2000-12-31"), by = "day")
-) %>%
-  mutate(jour_ref = yday(date_ref), mois = month(date_ref), jour_mois = day(date_ref)) %>%
-  select(jour_ref, mois, jour_mois)
-
-.fenetre_map <- expand.grid(jour_cible = 1:366, offset = -FENETRE_PROJ:FENETRE_PROJ) %>%
-  mutate(jour_ref = ((jour_cible - 1 + offset) %% 366) + 1) %>%
-  select(jour_cible, jour_ref)
+# Fenêtre glissante : définitions partagées (cf. utils/fenetre_glissante.R), pour
+# garantir un lissage identique entre normales observées et deltas projetés.
+.ref_jours <- construire_ref_jours()
+.fenetre_map <- construire_fenetre_map(FENETRE_PROJ)
 
 # Stats fenêtrées ±7 j par (ville, jour calendaire) sur un sous-ensemble.
 # tmax : moyenne + p10/p90 (quiz) ; tmin : moyenne (delta pour le gel projeté).

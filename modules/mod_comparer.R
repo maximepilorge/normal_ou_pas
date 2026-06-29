@@ -113,8 +113,7 @@ mod_comparer_server <- function(id, db_pool) {
     # ================== VUE « DANS L'ANNÉE » : courbe jour-vs-normale =============
 
     est_mobile_courbe <- reactive({
-      w <- session$clientData[[paste0("output_", ns("climate_plot"), "_width")]]
-      !is.null(w) && w > 0 && w < 500
+      largeur_sous_seuil(session, ns("climate_plot"))
     })
 
     output$titre_courbe <- renderUI({
@@ -301,8 +300,7 @@ mod_comparer_server <- function(id, db_pool) {
     # ----- Trajectoire annuelle de la ville focus vs l'ensemble des villes -------
 
     est_mobile_traj <- reactive({
-      w <- session$clientData[[paste0("output_", ns("graphe_ville"), "_width")]]
-      !is.null(w) && w > 0 && w < 500
+      largeur_sous_seuil(session, ns("graphe_ville"))
     })
 
     output$titre_trajectoire <- renderUI({

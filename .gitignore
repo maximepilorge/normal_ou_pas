@@ -22,8 +22,8 @@ data/*
 # Cartes de contrôle HTML générées par les scripts utils/ (artefacts QA)
 carte_controle_*.html
 
-# Fichiers temporaires R
-.RDataTmp
+# Fichiers temporaires R (.RDataTmp, .RDataTmp1, … : reliquats de save.image interrompu)
+.RDataTmp*
 
 # Configuration locale Claude Code
 /.claude/

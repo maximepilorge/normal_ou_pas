@@ -11,11 +11,13 @@
 
 - Structure classique Shiny : `global.R` (init + utils), `ui.R` (interface), `server.R` (orchestration)
 - 3 modules Shiny dans `modules/` :
-  - `mod_quiz.R` — Quiz interactif sur les températures
-  - `mod_visualisation.R` — Comparaison d'une année vs normales de saison
-  - `mod_analyse.R` — Tendances long terme + analyse de seuils
-- `utils/` — Pipeline données : téléchargement ERA5 → préparation → transfert → déploiement production
+  - `mod_quiz.R` — Quiz interactif + boxplot + horizons projetés + carte de partage
+  - `mod_comparer.R` — Comparaison année vs normale + carte des villes (fusion des anciens Comparaison + Carte)
+  - `mod_analyse.R` — Tendances long terme + forte chaleur vs gel (observé + projeté)
+- `utils/` — Pipeline données (téléchargement ERA5 → préparation → transfert → déploiement) + utilitaires partagés purs (`helpers.R`, `villes_reference.R`, `fenetre_glissante.R`, `render_partage.R`)
+- `tests/` — Tests `testthat` des fonctions pures (`Rscript tests/run_tests.R`)
 - `data/` — Fichiers RDS locaux (cache), `www/` — Assets web (social_preview.png)
+- Voir `README.md` pour l'onboarding détaillé (architecture, schéma des tables, pipeline).
 
 ## Base de données
 
@@ -67,8 +69,8 @@ Rscript utils/verifier_extraction_cds.R
 
 ## TODOs connus
 
-- Bug responsive mobile : cacher la courbe tendance rouge sur petits écrans
-- Supprimer les titres des graphiques, mettre ville/année dans les en-têtes de carte
-- Fixer la barre d'onglets lors du scroll
-- Ajouter la comparaison multi-années sur un même graphique
-- Ajouter un compteur de records de chaleur dans l'onglet Évolution
+- Fixer la barre d'onglets en haut de la page lors du scroll (`position = "fixed-top"`)
+- Ajouter la comparaison multi-années sur un même graphique (onglet « Comparer »)
+
+(Faits récemment : masquage de la courbe de tendance sur mobile ; titres dynamiques
+ville/année dans les en-têtes de carte ; fusion Comparaison + Carte.)

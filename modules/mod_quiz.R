@@ -109,8 +109,8 @@ mod_quiz_server <- function(id, db_pool) {
       
       req(input$periode_normale)
       
-      message("Génération d'une nouvelle question !")
-      
+      log_debug("Génération d'une nouvelle question !")
+
       shinyjs::disable("new_question_btn")
       boxplot_data(NULL)
       
@@ -209,9 +209,9 @@ mod_quiz_server <- function(id, db_pool) {
         normale_moy = round(question_valide$bornes$normale_moy, 1)
       ))
       
-      message(paste0("Ville : ", quiz_data()$city))
-      message(paste0("Date (jour/mois) : ", format(quiz_data()$date, "%d/%m")))
-      message(paste0("Température générée : ", quiz_data()$temp))
+      log_debug("Ville : ", quiz_data()$city)
+      log_debug("Date (jour/mois) : ", format(quiz_data()$date, "%d/%m"))
+      log_debug("Température générée : ", quiz_data()$temp)
       
       # On met à jour l'UI
       updateRadioButtons(session, "user_answer", selected = character(0))
@@ -245,34 +245,34 @@ mod_quiz_server <- function(id, db_pool) {
       data <- quiz_data()
       is_correct <- (input$user_answer == data$correct_answer)
 
-      if (is_correct && !input$trash_talk_mode) {
-        nouveau_score_succes <- score_succes() + 1
-        score_succes(nouveau_score_succes)
-      } else if (!is_correct && !input$trash_talk_mode) {
-        nouveau_score_echecs <- score_echecs() + 1
-        score_echecs(nouveau_score_echecs)
+      # Le score est TOUJOURS comptabilisé (pour les analytics ET le choix du
+      # message taquin indexé sur le score), indépendamment du ton choisi.
+      if (is_correct) {
+        score_succes(score_succes() + 1)
+      } else {
+        score_echecs(score_echecs() + 1)
       }
-      
-      messages_succes <- c("C’est la chance du débutant, j’imagine.", 
-                           "Tu es vraiment obligé de montrer que tu sais tout mieux que tout le monde.", 
-                           "Je pourrais presque commencer à t’apprécier, à force.", 
+
+      messages_succes <- c("C’est la chance du débutant, j’imagine.",
+                           "Tu es vraiment obligé de montrer que tu sais tout mieux que tout le monde.",
+                           "Je pourrais presque commencer à t’apprécier, à force.",
                            "Promis, j’arrête d’être désagréable à partir de maintenant car tu l’as bien mérité.")
       message_succes_classique <- "Tu es trop fort !"
-      messages_echecs <- c("Tu feras mieux la prochaine fois, ne t’en fais pas. À vrai dire, tu peux difficilement faire pire.", 
-                           "Tu ne pouvais pas mieux te tromper, félicitations !", 
-                           "Ta détermination à échouer force l’admiration.", 
+      messages_echecs <- c("Tu feras mieux la prochaine fois, ne t’en fais pas. À vrai dire, tu peux difficilement faire pire.",
+                           "Tu ne pouvais pas mieux te tromper, félicitations !",
+                           "Ta détermination à échouer force l’admiration.",
                            "Je pourrais être extrêmement désagréable à ce stade mais je m’en voudrais de ruiner ta confiance en toi.")
       message_echec_classique <- "Dommage, tu feras mieux la prochaine fois !"
-      
-      intro_message <- ""
-      if (!input$trash_talk_mode) {
-        if (is_correct) {
-          intro_message <- if (score_succes() <= length(messages_succes)) messages_succes[score_succes()] else message_succes_classique
-        } else {
-          intro_message <- if (score_echecs() <= length(messages_echecs)) messages_echecs[score_echecs()] else message_echec_classique
-        }
+
+      # Ton taquin par DÉFAUT (case « me forcer à vous répondre poliment »
+      # décochée) : message sarcastique indexé sur le score, avec repli sur le
+      # message classique. Mode poli : message neutre.
+      intro_message <- if (isTRUE(input$trash_talk_mode)) {
+        if (is_correct) message_succes_classique else message_echec_classique
+      } else if (is_correct) {
+        if (score_succes() <= length(messages_succes)) messages_succes[score_succes()] else message_succes_classique
       } else {
-        intro_message <- if (is_correct) message_succes_classique else message_echec_classique
+        if (score_echecs() <= length(messages_echecs)) messages_echecs[score_echecs()] else message_echec_classique
       }
       
       # On prépare les éléments du filtre

@@ -11,8 +11,10 @@ library(RPostgres)
 library(dotenv)
 library(here)
 
-# Fonctions de calcul des indicateurs dérivés (annuels + canicules).
+# Fonctions de calcul des indicateurs dérivés (annuels + forte chaleur).
 source(here::here("utils", "calculer_indicateurs.R"))
+# Machinerie de fenêtre glissante ±7 j (partagée avec calculer_projections.R).
+source(here::here("utils", "fenetre_glissante.R"))
 # Liste des villes + code INSEE (pour le mapping ville -> département des seuils).
 # `source` n'exécute pas le bloc autonome du fichier (cf. sys.nframe()).
 source(here::here("utils", "definir_mailles_communes.R"))
@@ -75,16 +77,10 @@ tryCatch({
   # valeurs) pour des seuils stables, conformément à la pratique (ETCCDI).
   FENETRE <- 7
 
-  # Indice de jour 1..366 via une année bissextile fixe (2000) : ordre cohérent
-  # incluant le 29 février, indépendant de l'année d'observation.
-  ref_jours <- data.frame(date_ref = seq(as.Date("2000-01-01"), as.Date("2000-12-31"), by = "day")) %>%
-    mutate(jour_ref = yday(date_ref), mois = month(date_ref), jour_mois = day(date_ref)) %>%
-    select(jour_ref, mois, jour_mois)
-
-  # Pour chaque jour cible, les indices sources de sa fenêtre (circulaire sur 366).
-  fenetre_map <- expand.grid(jour_cible = 1:366, offset = -FENETRE:FENETRE) %>%
-    mutate(jour_ref = ((jour_cible - 1 + offset) %% 366) + 1) %>%
-    select(jour_cible, jour_ref)
+  # Référence des jours calendaires + carte de la fenêtre ±FENETRE jours
+  # (définitions partagées, cf. utils/fenetre_glissante.R).
+  ref_jours <- construire_ref_jours()
+  fenetre_map <- construire_fenetre_map(FENETRE)
 
   # Indice de jour attaché à chaque observation.
   donnees_avec_jr <- donnees_avec_annee %>%
