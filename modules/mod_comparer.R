@@ -84,6 +84,10 @@ mod_comparer_server <- function(id, db_pool) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
+    # Drapeau : une ville a été choisie pendant que la carte était masquée -> on
+    # recentrera à la réouverture de l'onglet carte.
+    centrage_en_attente <- reactiveVal(FALSE)
+
     # --- État partagé : la ville focus est pilotée par le sélecteur ET par les
     #     clics sur la carte. Le sélecteur reste la source de vérité ; un clic
     #     écrit dedans via updatePickerInput. -------------------------------------
@@ -94,17 +98,27 @@ mod_comparer_server <- function(id, db_pool) {
         updatePickerInput(session, "ville_focus", selected = clk$id)
     })
 
-    # Recentrer la carte sur la ville sélectionnée (liste OU clic d'une pastille) :
-    # sur petit écran on ne voit pas toutes les villes à la fois. On préserve le zoom
-    # courant (isolate → ne pas se relancer à chaque +/-). ignoreInit pour garder la
-    # vue « France entière » au démarrage ; uniquement quand l'onglet carte est visible.
-    observeEvent(input$ville_focus, {
-      req(identical(input$sousvue, "carte"))
-      co <- villes_coords %>% filter(ville == input$ville_focus)
-      req(nrow(co) == 1)
+    # Recentre la carte sur la ville (lng, lat) en préservant le zoom courant
+    # (isolate → pas de relance à chaque +/-). Repli zoom 5 si non connu.
+    recentrer_sur_ville <- function(ville) {
+      co <- villes_coords %>% filter(ville == !!ville)
+      if (nrow(co) != 1) return(invisible())
       z <- isolate(input$carte_zoom)
       leafletProxy("carte", session) %>%
         flyTo(lng = co$longitude, lat = co$latitude, zoom = if (is.null(z)) 5 else z)
+    }
+
+    # Recentrer la carte sur la ville sélectionnée (liste OU clic d'une pastille) :
+    # sur petit écran on ne voit pas toutes les villes à la fois. Si l'onglet carte
+    # est visible, on recentre tout de suite ; sinon on note le recentrage en attente
+    # (réalisé à la réouverture de l'onglet). ignoreInit : on garde la vue « France
+    # entière » au démarrage (aucune ville encore choisie).
+    observeEvent(input$ville_focus, {
+      if (identical(input$sousvue, "carte")) {
+        recentrer_sur_ville(input$ville_focus)
+      } else {
+        centrage_en_attente(TRUE)
+      }
     }, ignoreInit = TRUE)
 
     # Leaflet (et plotly) dans un sous-onglet initialement masqué s'affichent à
@@ -318,6 +332,12 @@ mod_comparer_server <- function(id, db_pool) {
       leafletProxy("carte", session) %>%
         clearGroup("villes")       %>% ajouter_marqueurs(df) %>%
         clearGroup("surbrillance") %>% surligner(input$ville_focus)
+      # Recentrage différé : si la ville a changé pendant que la carte était masquée,
+      # on recentre maintenant qu'elle est (ré)affichée, puis on lève le drapeau.
+      if (isolate(centrage_en_attente())) {
+        recentrer_sur_ville(input$ville_focus)
+        centrage_en_attente(FALSE)
+      }
     })
 
     # ----- Trajectoire annuelle de la ville focus vs l'ensemble des villes -------
