@@ -13,6 +13,21 @@
 mod_carte_ui <- function(id) {
   ns <- NS(id)
   tagList(
+    # Légende Leaflet compactée en portrait : police et marges réduites + léger
+    # zoom arrière uniforme ancré dans le coin (n'altère pas le dégradé continu,
+    # rendu via un seul <i> linear-gradient). Le contenu est aussi allégé côté
+    # serveur (titre sur une ligne, 5 graduations au lieu de 9).
+    tags$head(tags$style(HTML("
+      @media (max-width: 575.98px) {
+        .leaflet-control.legend {
+          font-size: 0.7rem !important;
+          line-height: 1.1 !important;
+          padding: 4px 7px !important;
+          transform: scale(0.92);
+          transform-origin: bottom right;
+        }
+      }
+    "))),
     page_sidebar(
       title = "Le réchauffement, ville par ville et année par année",
       fillable = FALSE,
@@ -119,8 +134,8 @@ mod_carte_server <- function(id, db_pool) {
       carte <- leaflet(options = leafletOptions(minZoom = 4)) %>%
         addProviderTiles(providers$CartoDB.Positron) %>%
         fitBounds(-5.5, 41.0, 9.8, 51.5) %>%
-        addLegend("bottomright", pal = pal, values = dom,
-                  title = paste0("Écart à la<br>normale ", periode_ref_carte, " (°C)"),
+        addLegend("bottomright", pal = pal, values = dom, bins = 4,
+                  title = paste0("Écart ", periode_ref_carte, " (°C)"),
                   opacity = 0.9)
       if (!is.null(df0)) carte <- ajouter_marqueurs(carte, isolate(selection(df0)))
       carte
