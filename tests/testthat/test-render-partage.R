@@ -30,3 +30,34 @@ test_that("dessiner_carte_partage fonctionne sans verdict (juste = NA)", {
     categorie = "Dans les normales de saison", juste = NA))
   expect_s3_class(p, "ggplot")
 })
+
+test_that("dessiner_carte_partage rend la phrase de projection (futur)", {
+  p <- dessiner_carte_partage(list(
+    ville = "Lyon", date = as.Date("2024-08-15"), temp = 36,
+    normale_moy = 29, periode_ref = "1991-2020",
+    categorie = "Au-dessus des normales", juste = TRUE, p10 = 25, p90 = 33,
+    projection_txt = "En 2100, une telle température sera dans les normales.",
+    projection_couleur = "#2E8B57"))
+  expect_s3_class(p, "ggplot")
+})
+
+test_that("dessiner_carte_jour retourne un ggplot (onglet « Une journée »)", {
+  p <- dessiner_carte_jour(list(
+    ville = "Amiens", date = as.Date("2026-06-23"), temp = 39.3,
+    normale_moy = 28.1, periode_ref = "1991-2020",
+    categorie = "Au-dessus des normales",
+    rang_txt = "Jour le plus chaud autour du 23 juin depuis 1950"))
+  expect_s3_class(p, "ggplot")
+})
+
+test_that("sauver_carte_jour produit un PNG non vide", {
+  f <- tempfile(fileext = ".png")
+  on.exit(unlink(f), add = TRUE)
+  sauver_carte_jour(list(
+    ville = "Paris", date = as.Date("2026-06-23"), temp = 39.3,
+    normale_moy = 28.1, periode_ref = "1991-2020",
+    categorie = "Au-dessus des normales",
+    rang_txt = "Jour le plus chaud autour du 23 juin depuis 1950"), f)
+  expect_true(file.exists(f))
+  expect_gt(file.info(f)$size, 1000)
+})

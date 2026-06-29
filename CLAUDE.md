@@ -10,9 +10,10 @@
 ## Architecture
 
 - Structure classique Shiny : `global.R` (init + utils), `ui.R` (interface), `server.R` (orchestration)
-- 3 modules Shiny dans `modules/` :
+- 4 modules Shiny dans `modules/` :
   - `mod_quiz.R` — Quiz interactif + boxplot + horizons projetés + carte de partage
   - `mod_comparer.R` — Comparaison année vs normale + carte des villes (fusion des anciens Comparaison + Carte)
+  - `mod_jour.R` — Analyse d'un jour précis (rang, fréquence, distribution, partage)
   - `mod_analyse.R` — Tendances long terme + forte chaleur vs gel (observé + projeté)
 - `utils/` — Pipeline données (téléchargement ERA5 → préparation → transfert → déploiement) + utilitaires partagés purs (`helpers.R`, `villes_reference.R`, `fenetre_glissante.R`, `render_partage.R`)
 - `tests/` — Tests `testthat` des fonctions pures (`Rscript tests/run_tests.R`)

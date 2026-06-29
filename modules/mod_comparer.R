@@ -30,11 +30,11 @@ mod_comparer_ui <- function(id) {
       title = "Comparer : dans le temps et entre les villes",
       fillable = FALSE,
 
-      # Sidebar : contrôles communs (ville focus + période). Repliée en paysage /
-      # desktop, empilée et visible en portrait (cohérent avec les autres onglets).
+      # Contrôles communs (ville focus + période). Ouverte par défaut sur ordinateur ;
+      # empilée/visible ("always") sur smartphone.
       sidebar = sidebar(
         width = "320px",
-        open = list(mobile = "always", desktop = "closed"),
+        open = list(mobile = "always", desktop = "open"),
         card(
           card_header("Réglages"),
           pickerInput(ns("ville_focus"), "Ville :",

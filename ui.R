@@ -10,6 +10,8 @@ source("modules/mod_quiz.R")
 source("modules/mod_analyse.R")
 # Onglet « Comparer » : fusion des anciens Comparaison + Carte (mod_comparer).
 source("modules/mod_comparer.R")
+# Onglet « Une journée » : analyse d'un jour précis (rang, fréquence, partage).
+source("modules/mod_jour.R")
 
 ui <- fluidPage( # On utilise tagList comme conteneur principal
   
@@ -205,6 +207,11 @@ ui <- fluidPage( # On utilise tagList comme conteneur principal
       "Comparer",
       mod_comparer_ui("comparer_1"),
       icon = icon("chart-bar")
+      ),
+    nav_panel(
+      "Une journée",
+      mod_jour_ui("jour_1"),
+      icon = icon("calendar-day")
       ),
     nav_panel(
       "Evolution",

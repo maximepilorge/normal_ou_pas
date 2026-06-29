@@ -32,7 +32,10 @@ COPY ui.R ui.R
 COPY data data
 COPY modules modules
 COPY www www
-# Seul fichier de utils/ nécessaire au runtime (carte de partage du quiz, sourcé
-# par global.R). Le reste de utils/ est le pipeline de données, exécuté hors conteneur.
+# Fichiers de utils/ nécessaires au RUNTIME (sourcés par global.R) : carte de
+# partage, utilitaires partagés et table de référence des villes. Le reste de
+# utils/ est le pipeline de données, exécuté hors conteneur.
 COPY utils/render_partage.R utils/render_partage.R
+COPY utils/helpers.R utils/helpers.R
+COPY utils/villes_reference.R utils/villes_reference.R
 CMD Rscript -e "shiny::runApp(appDir = '.', host = '0.0.0.0', port = 5000)"

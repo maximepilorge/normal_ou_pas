@@ -26,14 +26,11 @@ mod_analyse_ui <- function(id) {
       title = "Analyser l'évolution des températures",
       fillable = FALSE,
       
-      # Comportement de sidebar adapté à l'orientation (breakpoint bslib 576px) :
-      #   - mobile = "always"  -> en portrait, les filtres s'empilent SOUS les
-      #     graphes, toujours visibles (l'utilisateur voit qu'il peut paramétrer).
-      #   - desktop = "closed" -> en paysage/desktop, sidebar repliée : les graphes
-      #     occupent toute la largeur.
+      # Sidebar OUVERTE par défaut sur ordinateur (paramètres visibles) ;
+      # empilée/visible ("always") sur smartphone.
       sidebar = sidebar(
         width = "350px",
-        open = list(mobile = "always", desktop = "closed"),
+        open = list(mobile = "always", desktop = "open"),
         card(
           card_header("Paramètres de la série temporelle"),
           pickerInput(ns("ville_analyse"),

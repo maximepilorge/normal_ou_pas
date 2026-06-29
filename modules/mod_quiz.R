@@ -7,16 +7,11 @@ mod_quiz_ui <- function(id) {
       title = "Testez votre intuition climatique",
       fillable = FALSE,
       
-      # La sidebar ne contient que des FILTRES optionnels. Comportement adapté à
-      # l'orientation (bslib bascule au breakpoint 576px) :
-      #   - mobile = "always"  -> en portrait (<576px), la sidebar passe en layout
-      #     « flow » empilé SOUS le quiz, toujours visible : l'utilisateur voit
-      #     qu'il peut paramétrer, sans dépendre de la flèche.
-      #   - desktop = "closed" -> en paysage/desktop (>576px), la sidebar démarre
-      #     repliée (flèche pour l'ouvrir) : le graphique reste pleine largeur.
+      # Sidebar OUVERTE par défaut sur ordinateur (filtres période/ville/saison
+      # visibles d'emblée) ; sur smartphone, comportement empilé/visible ("always").
       sidebar = sidebar(
         width = "350px",
-        open = list(mobile = "always", desktop = "closed"),
+        open = list(mobile = "always", desktop = "open"),
         # Carte pour les paramètres généraux
         card(
           card_header("Paramètres"),
@@ -352,6 +347,29 @@ mod_quiz_server <- function(id, db_pool) {
       diff <- round(abs(data$temp - moyenne_reelle), 1)
       direction <- if (data$temp > moyenne_reelle) "supérieure" else "inférieure"
 
+      # Phrase de projection pour la carte de partage : où se situerait cette
+      # température à l'horizon 2100 (« nouvelle normale » TRACC). On classe la
+      # température vs la zone normale projetée 2100. NULL si projections indispo.
+      proj_q <- projections_quiz()
+      proj_txt <- NULL; proj_couleur <- NULL
+      if (!is.null(proj_q) && length(proj_q$niveaux) > 0) {
+        n_fin <- Filter(function(x) startsWith(x$niveau, "2100"), proj_q$niveaux)
+        n_fin <- if (length(n_fin) > 0) n_fin[[1]] else proj_q$niveaux[[length(proj_q$niveaux)]]
+        annee_h <- sub("_.*", "", n_fin$niveau)
+        # Sans point final : la condition « … si le réchauffement suit la trajectoire
+        # actuelle » (ajoutée sur la carte) complète la phrase.
+        if (data$temp > n_fin$p90) {
+          proj_txt <- paste0("Même en ", annee_h, ", elle resterait au-dessus des normales")
+          proj_couleur <- "#E41A1C"
+        } else if (data$temp < n_fin$p10) {
+          proj_txt <- paste0("En ", annee_h, ", elle passerait en-dessous des normales")
+          proj_couleur <- "#1f77b4"
+        } else {
+          proj_txt <- paste0("En ", annee_h, ", une telle température sera dans les normales")
+          proj_couleur <- "#2E8B57"
+        }
+      }
+
       # On mémorise les paramètres du résultat pour la carte de partage,
       # y compris si la réponse de l'utilisateur était correcte.
       dernier_resultat(list(
@@ -362,7 +380,13 @@ mod_quiz_server <- function(id, db_pool) {
         periode_ref = input$periode_normale,
         categorie = data$correct_answer,
         juste = is_correct,
-        reponse_utilisateur = input$user_answer
+        reponse_utilisateur = input$user_answer,
+        # Bornes p10/p90 (période sélectionnée) pour la jauge de la carte (zone « normale »).
+        p10 = if (nrow(seuils_normaux) > 0) seuils_normaux$seuil_bas_p10[1] else NA_real_,
+        p90 = if (nrow(seuils_normaux) > 0) seuils_normaux$seuil_haut_p90[1] else NA_real_,
+        # Phrase « nouvelle normale » du futur (et sa couleur) pour la carte.
+        projection_txt = proj_txt,
+        projection_couleur = proj_couleur
       ))
       
       if (data$correct_answer == "Dans les normales de saison") {
@@ -554,40 +578,7 @@ mod_quiz_server <- function(id, db_pool) {
       }
       nom_fichier <- paste0("normal-ou-pas_", gsub("[^A-Za-z0-9]+", "_", res$ville), ".png")
 
-      btn <- function(label, icone, onclick, classe) {
-        tags$button(type = "button", class = paste("btn", classe, "m-1"),
-                    onclick = onclick, icon(icone), label)
-      }
-
-      showModal(modalDialog(
-        title = "Partager mon résultat",
-        easyClose = TRUE,
-        size = "l",
-        div(
-          id = "partage-zone", `data-texte` = texte,
-          div(class = "text-center",
-              tags$img(id = "apercu-partage-img", src = data_uri,
-                       style = "max-width:100%; height:auto; border:1px solid #dee2e6; border-radius:8px;")),
-          div(class = "text-center mt-3",
-              btn("Copier l'image", "copy", "partageCopier()", "btn-primary"),
-              tags$a(class = "btn btn-outline-secondary m-1", href = data_uri,
-                     download = nom_fichier, icon("download"), " Télécharger"),
-              btn("Partager (mobile)", "share-nodes", "partagePartager()", "btn-outline-secondary")
-          ),
-          tags$p(class = "text-muted small text-center mt-3 mb-1", "Publier sur un réseau :"),
-          div(class = "text-center",
-              btn("LinkedIn", "linkedin", "partageReseau('linkedin')", "btn-outline-primary"),
-              btn("Facebook", "facebook", "partageReseau('facebook')", "btn-outline-primary"),
-              btn("Instagram", "instagram", "partageReseau('instagram')", "btn-outline-primary")
-          ),
-          tags$p(class = "text-muted small text-center mt-3 mb-0",
-                 "Les boutons réseau téléchargent l'image : importez-la via le bouton photo de la ",
-                 "publication (LinkedIn, Instagram et Facebook n'acceptent pas le collage). ",
-                 "« Copier l'image » convient aux applis qui acceptent le collage (X, WhatsApp, e-mail…). ",
-                 "Sur mobile, « Partager » publie directement.")
-        ),
-        footer = modalButton("Fermer")
-      ))
+      showModal(modal_partage(data_uri, texte, nom_fichier))
     })
 
     return(list(

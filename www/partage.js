@@ -83,12 +83,30 @@
     var blob = imgBlob();
     if (!blob) { toast("Image indisponible."); return; }
     var file = new File([blob], "normal-ou-pas.png", { type: "image/png" });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+
+    // Le partage natif avec image (Web Share API niveau 2) n'existe qu'en contexte
+    // sécurisé (HTTPS) et surtout sur mobile / Chrome-Edge desktop. On tente d'abord
+    // ce partage ; en l'absence de support OU en cas d'échec, on RETOMBE TOUJOURS sur
+    // le téléchargement, pour que le bouton ne soit jamais sans effet (desktop Firefox,
+    // http local, etc.). Les annulations volontaires (AbortError) ne déclenchent rien.
+    var peutPartagerFichier =
+      navigator.share && navigator.canShare && navigator.canShare({ files: [file] });
+
+    if (peutPartagerFichier) {
       navigator.share({ files: [file], title: "Climat : Normal ou pas ?", text: texte() })
-        .catch(function (e) { if (!(e && e.name === "AbortError")) toast("Partage impossible."); });
-    } else {
-      toast("Partage natif indisponible sur cet appareil — utilisez Copier ou Télécharger.");
+        .catch(function (e) {
+          if (e && e.name === "AbortError") return; // l'utilisateur a fermé la feuille
+          console.error("Partage natif impossible :", e);
+          telecharger(blob);
+          toast("Partage impossible sur ce navigateur — image téléchargée à la place.");
+        });
+      return;
     }
+
+    // Pas de partage natif disponible : repli sur le téléchargement (jamais muet).
+    telecharger(blob);
+    toast("Partage natif indisponible ici (surtout mobile/HTTPS) — image téléchargée. " +
+          "Sur ordinateur, utilisez « Copier l'image » ou les boutons réseau.");
   };
 
   window.partageReseau = function (reseau) {

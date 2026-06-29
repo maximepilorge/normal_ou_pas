@@ -12,6 +12,8 @@ source("modules/mod_quiz.R")
 source("modules/mod_analyse.R")
 # Onglet « Comparer » : fusion des anciens Comparaison + Carte (mod_comparer).
 source("modules/mod_comparer.R")
+# Onglet « Une journée » : analyse d'un jour précis (rang, fréquence, partage).
+source("modules/mod_jour.R")
 
 server <- function(input, output, session) {
   
@@ -87,6 +89,9 @@ server <- function(input, output, session) {
   # --- APPELS AUX SERVEURS DES MODULES (HORS QUIZ) ---
   # Module Comparer (fusion Comparaison + Carte) : sidebar et contrôles internes.
   mod_comparer_server("comparer_1", db_pool = db_pool)
+
+  # Module « Une journée » : analyse d'un jour précis + partage.
+  mod_jour_server("jour_1", db_pool = db_pool)
 
   # Module Analyse
   mod_analyse_server("analyse_1",

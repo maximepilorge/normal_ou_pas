@@ -1,0 +1,313 @@
+# modules/mod_jour.R
+#
+# Onglet « Une journée » — analyse d'UN jour précis dans UNE ville : à quel point
+# la température maximale de ce jour est-elle exceptionnelle ?
+#   - verdict : valeur observée, écart à la normale, RANG (« jour le plus chaud
+#     autour du 23 juin depuis 1950 ») et fréquence (période de retour) ;
+#   - distribution : nuage des tmax de la fenêtre ±7 j (toutes années), le jour
+#     marqué en rouge, zone normale (p10–p90) ombrée ;
+#   - carte de résultat partageable (réseaux sociaux, mobile et bureau), comme le quiz.
+# Rang/fréquence sur fenêtre ±7 j (cohérent avec les normales) pour la robustesse.
+
+mod_jour_ui <- function(id) {
+  ns <- NS(id)
+  date_min <- as.Date(paste0(an_min_data, "-01-01"))
+  date_max <- as.Date(paste0(an_max_data, "-12-31"))
+  val_def  <- min(Sys.Date(), date_max)   # date du jour, bornée à la couverture
+
+  tagList(
+    page_sidebar(
+      title = "Analyser une journée précise",
+      fillable = FALSE,
+
+      # Sidebar ouverte par défaut sur ordinateur (réglages visibles) ; empilée/
+      # visible ("always") sur smartphone (cohérent avec les autres onglets).
+      sidebar = sidebar(
+        width = "330px",
+        open = list(mobile = "always", desktop = "open"),
+        card(
+          card_header("Réglages"),
+          pickerInput(ns("ville_jour"), "Ville :",
+                      choices = villes_triees, selected = villes_triees[1],
+                      options = list('live-search' = TRUE)),
+          dateInput(ns("date_jour"), "Date :", value = val_def,
+                    min = date_min, max = date_max,
+                    format = "dd/mm/yyyy", language = "fr", weekstart = 1),
+          pickerInput(ns("periode_jour"), "Normale de référence :",
+                      choices = periodes_disponibles,
+                      selected = periodes_disponibles[length(periodes_disponibles)],
+                      options = list('live-search' = FALSE)),
+          helpText(paste0("Rang et fréquence sont calculés sur une fenêtre de ±7 ",
+                          "jours autour de la date, toutes années depuis ",
+                          an_min_data, "."))
+        )
+      ),
+
+      card(
+        full_screen = TRUE,
+        card_header(uiOutput(ns("titre_jour"))),
+        uiOutput(ns("verdict_ui")),
+        hr(),
+        div(class = "small text-muted mb-1",
+            "Distribution des températures maximales autour de cette date (±7 j, toutes années)"),
+        plotlyOutput(ns("dist_plot"), height = "260px"),
+        div(class = "text-center mt-3",
+            p(class = "text-muted small mb-2",
+              "Partagez cette journée autour de vous :"),
+            actionButton(ns("partager_btn"), "Partager cette journée",
+                         icon = icon("share-nodes"), class = "btn-primary")),
+        card_footer(
+          tags$small(class = "text-muted", HTML(paste0(
+            "Température = moyenne spatiale pondérée sur la commune (réanalyse ",
+            "ERA5-Land) : elle peut différer d'une mesure de station locale. ",
+            "Historique disponible depuis ", an_min_data, "."
+          )))
+        )
+      )
+    )
+  )
+}
+
+mod_jour_server <- function(id, db_pool) {
+  moduleServer(id, function(input, output, session) {
+    ns <- session$ns
+
+    est_mobile <- reactive({ largeur_sous_seuil(session, ns("dist_plot")) })
+
+    # Date sans l'année (« 23 juin ») pour les phrases de rang.
+    date_sans_annee <- function(d) paste(lubridate::day(d),
+                                          tolower(mois_fr[lubridate::month(d)]))
+
+    # --- Calcul central : tout ce dont les sorties ont besoin pour (ville, date,
+    #     période). Renvoie ok = FALSE + message si la date n'est pas couverte. ---
+    donnees_jour <- reactive({
+      req(input$ville_jour, input$date_jour, input$periode_jour)
+      d <- as.Date(input$date_jour)
+      ville <- input$ville_jour
+
+      obs <- tbl(db_pool, "temperatures_max") %>%
+        filter(ville == !!ville, date == !!d) %>%
+        select(temperature_max) %>% collect()
+      if (nrow(obs) == 0 || !is.finite(obs$temperature_max[1])) {
+        return(list(ok = FALSE, msg = paste0(
+          "Pas de donnée ", autour_de(ville), " le ", format(d, "%d/%m/%Y"),
+          " (couverture : ", an_min_data, "–", an_max_data, ").")))
+      }
+      temp <- round(obs$temperature_max[1], 1)
+
+      # Fenêtre ±7 jours, toutes années (clé mois*100 + jour, comme le quiz).
+      jours_fenetre <- d + (-7:7)
+      cles <- unique(lubridate::month(jours_fenetre) * 100 + lubridate::day(jours_fenetre))
+      win <- tbl(db_pool, "temperatures_max") %>%
+        filter(ville == !!ville, (mois * 100L + jour_mois) %in% !!cles) %>%
+        select(annee, temperature_max) %>% collect() %>%
+        rename(tmax = temperature_max)
+
+      # Normale + bornes p10/p90 du jour calendaire pour la période choisie.
+      norm <- tbl(db_pool, "stats_normales") %>%
+        filter(ville == !!ville, mois == !!lubridate::month(d),
+               jour_mois == !!lubridate::day(d), periode_ref == !!input$periode_jour) %>%
+        select(t_moy, seuil_bas_p10, seuil_haut_p90) %>% collect()
+      a_normale <- nrow(norm) > 0 && is.finite(norm$t_moy[1])
+      t_moy <- if (a_normale) norm$t_moy[1] else NA_real_
+      p10   <- if (a_normale) norm$seuil_bas_p10[1] else NA_real_
+      p90   <- if (a_normale) norm$seuil_haut_p90[1] else NA_real_
+
+      categorie <- if (a_normale && temp > p90) "Au-dessus des normales"
+                   else if (a_normale && temp < p10) "En-dessous des normales"
+                   else "Dans les normales de saison"
+
+      rang <- classer_jour_extreme(win$tmax, temp)
+
+      # Sens de l'événement (chaud/froid) par rapport au centre de la distribution.
+      ref_centre <- if (a_normale) t_moy else stats::median(win$tmax, na.rm = TRUE)
+      chaud <- temp >= ref_centre
+
+      # Fréquence : nb d'années (hors année du jour) dont la fenêtre atteint cette
+      # intensité (≥ valeur si chaud, ≤ valeur si froid). Base de la période de retour.
+      annee_jour <- lubridate::year(d)
+      par_annee <- win %>% group_by(annee) %>%
+        summarise(extr = if (chaud) max(tmax, na.rm = TRUE) else min(tmax, na.rm = TRUE),
+                  .groups = "drop") %>%
+        filter(annee != annee_jour)
+      n_autres <- if (chaud) sum(par_annee$extr >= temp, na.rm = TRUE)
+                  else sum(par_annee$extr <= temp, na.rm = TRUE)
+
+      # Rang ABSOLU sur toute la série (tous mois confondus) : compté en base pour
+      # éviter de rapatrier ~27 000 lignes. 1 = record. Sens selon chaud/froid.
+      n_depasse <- if (chaud) {
+        tbl(db_pool, "temperatures_max") %>%
+          filter(ville == !!ville, temperature_max > !!temp) %>%
+          summarise(n = n()) %>% pull(n)
+      } else {
+        tbl(db_pool, "temperatures_max") %>%
+          filter(ville == !!ville, temperature_max < !!temp) %>%
+          summarise(n = n()) %>% pull(n)
+      }
+      rang_abs <- as.numeric(n_depasse) + 1
+
+      list(ok = TRUE, ville = ville, date = d, temp = temp,
+           t_moy = t_moy, p10 = p10, p90 = p90, a_normale = a_normale,
+           categorie = categorie, periode = input$periode_jour,
+           rang_haut = rang$rang_haut, rang_bas = rang$rang_bas, rang_abs = rang_abs,
+           n_annees = dplyr::n_distinct(win$annee), chaud = chaud,
+           n_autres = n_autres, win = win)
+    }) %>% bindCache(input$ville_jour, input$date_jour, input$periode_jour)
+
+    # Phrase de rang (« Jour le plus chaud autour du 23 juin depuis 1950 »).
+    phrase_rang <- function(res) {
+      jour <- date_sans_annee(res$date)
+      if (res$chaud) {
+        if (res$rang_haut == 1) paste0("Jour le plus chaud autour du ", jour, " depuis ", an_min_data)
+        else paste0(res$rang_haut, "ᵉ jour le plus chaud autour du ", jour, " depuis ", an_min_data)
+      } else {
+        if (res$rang_bas == 1) paste0("Jour le plus froid autour du ", jour, " depuis ", an_min_data)
+        else paste0(res$rang_bas, "ᵉ jour le plus froid autour du ", jour, " depuis ", an_min_data)
+      }
+    }
+
+    # Phrase de fréquence / période de retour.
+    phrase_frequence <- function(res) {
+      if (res$n_autres == 0) {
+        if (res$chaud) "Une telle chaleur n'a jamais été atteinte sur tout l'historique disponible."
+        else "Un tel froid n'a jamais été atteint sur tout l'historique disponible."
+      } else {
+        retour <- max(1, round(res$n_annees / (res$n_autres + 1)))
+        if (retour <= 1) "Une intensité atteinte presque chaque année."
+        else paste0("Une intensité atteinte en moyenne une fois tous les ", retour, " ans.")
+      }
+    }
+
+    # Phrase de rang ABSOLU (tous mois confondus), affichée en valeur seulement si
+    # le jour est un record (rang 1) ou proche (top SEUIL_TOP_ABS). NULL sinon.
+    SEUIL_TOP_ABS <- 10
+    phrase_record_abs <- function(res) {
+      if (res$rang_abs > SEUIL_TOP_ABS) return(NULL)
+      if (res$chaud) {
+        if (res$rang_abs == 1)
+          paste0("Record absolu de chaleur depuis ", an_min_data, " (tous mois confondus)")
+        else
+          paste0(res$rang_abs, "ᵉ jour le plus chaud depuis ", an_min_data, ", tous mois confondus")
+      } else {
+        if (res$rang_abs == 1)
+          paste0("Température maximale la plus basse depuis ", an_min_data, " (tous mois confondus)")
+        else
+          paste0(res$rang_abs, "ᵉ température maximale la plus basse depuis ", an_min_data, ", tous mois confondus")
+      }
+    }
+
+    output$titre_jour <- renderUI({
+      req(input$ville_jour, input$date_jour)
+      HTML(paste0("Le <strong>", format(as.Date(input$date_jour), "%d/%m/%Y"),
+                  "</strong> ", autour_de(input$ville_jour)))
+    })
+
+    output$verdict_ui <- renderUI({
+      res <- donnees_jour()
+      req(res)
+      if (!isTRUE(res$ok)) return(div(class = "alert alert-warning mb-0", res$msg))
+
+      fmt1 <- function(x) format(round(x, 1), nsmall = 1, decimal.mark = ",")
+      couleur <- if (grepl("Au-dessus", res$categorie)) "#E41A1C"
+                 else if (grepl("En-dessous", res$categorie)) "#1f77b4" else "#2E8B57"
+      ligne_ecart <- if (res$a_normale) {
+        ecart <- round(res$temp - res$t_moy, 1)
+        sens <- if (ecart > 0) "au-dessus" else if (ecart < 0) "en-dessous" else "pile dans"
+        HTML(paste0("<b>", sprintf("%+.1f", ecart), " °C</b> ", sens,
+                    " de la normale ", res$periode, " (", fmt1(res$t_moy), " °C)"))
+      } else "Normale indisponible pour cette date."
+
+      # Bannière « record absolu » (tous mois confondus) mise en valeur si rang 1 ;
+      # simple ligne pour un top-N. NULL si le jour n'est pas remarquable à l'échelle
+      # de toute la série (la fenêtre ±7 j reste alors la lecture principale).
+      rec <- phrase_record_abs(res)
+      banniere <- if (!is.null(rec)) {
+        if (res$rang_abs == 1)
+          tags$div(class = "alert mb-2 py-2",
+                   style = paste0("background:", couleur, "; color:#fff; font-weight:700;"),
+                   tags$span(class = "badge bg-light text-dark me-2", "RECORD"), rec)
+        else
+          tags$div(class = "mb-2 fw-semibold", style = paste0("color:", couleur, ";"), rec)
+      }
+
+      tagList(
+        tags$div(style = paste0("font-size:2.4rem; font-weight:800; line-height:1.1; color:", couleur, ";"),
+                 paste0(fmt1(res$temp), " °C")),
+        banniere,
+        tags$div(class = "mb-2", ligne_ecart),
+        tags$span(class = "badge",
+                  style = paste0("background:", couleur, "; color:#fff; font-size:0.95rem; white-space:normal;"),
+                  phrase_rang(res)),
+        tags$div(class = "text-muted mt-2", phrase_frequence(res))
+      )
+    })
+
+    output$dist_plot <- renderPlotly({
+      res <- donnees_jour()
+      req(res, isTRUE(res$ok))
+      mob <- est_mobile()
+      win <- res$win
+
+      p <- ggplot(win, aes(x = tmax, y = ""))
+      if (res$a_normale) {
+        p <- p +
+          annotate("rect", xmin = res$p10, xmax = res$p90, ymin = -Inf, ymax = Inf,
+                   fill = "#2E8B57", alpha = 0.13) +
+          geom_vline(xintercept = c(res$p10, res$p90), linetype = "dashed",
+                     color = "#2E8B57", linewidth = 0.7)
+      }
+      p <- p +
+        geom_jitter(aes(text = paste0("Année ", annee, " : ", round(tmax, 1), " °C")),
+                    height = 0.28, width = 0, alpha = 0.4, color = "#1f77b4") +
+        geom_point(data = data.frame(x = res$temp),
+                   aes(x = x, y = "",
+                       text = paste0(format(res$date, "%d/%m/%Y"), " : ",
+                                     format(round(res$temp, 1), nsmall = 1, decimal.mark = ","), " °C")),
+                   shape = 4, size = 6, stroke = 1.8, color = "#E41A1C") +
+        scale_x_continuous(labels = ~paste0(.x, " °C")) +
+        labs(x = NULL, y = NULL) +
+        theme_minimal(base_size = if (mob) 11 else 13) +
+        theme(axis.text.y = element_blank(),
+              panel.grid.major.y = element_blank(),
+              panel.grid.minor.y = element_blank())
+
+      ggplotly(p, tooltip = "text") %>%
+        layout(xaxis = list(fixedrange = TRUE), yaxis = list(fixedrange = TRUE),
+               margin = list(t = 10)) %>%
+        config(displayModeBar = FALSE, responsive = TRUE)
+    }) %>% bindCache(input$ville_jour, input$date_jour, input$periode_jour, est_mobile())
+
+    # --- Partage : carte PNG 1200×630 régénérée + modal (mêmes canaux que le quiz) ---
+    observeEvent(input$partager_btn, {
+      res <- donnees_jour()
+      req(res, isTRUE(res$ok))
+
+      # Sur la carte/texte, on met en avant la phrase la PLUS forte : le record
+      # absolu (tous mois confondus) s'il s'applique, sinon le rang saisonnier.
+      rec <- phrase_record_abs(res)
+      phrase_principale <- if (!is.null(rec) && res$rang_abs == 1) rec else phrase_rang(res)
+
+      normale_aff <- if (res$a_normale) res$t_moy else NA_real_
+      params <- list(ville = res$ville, date = res$date, temp = res$temp,
+                     normale_moy = normale_aff, periode_ref = res$periode,
+                     categorie = res$categorie, rang_txt = phrase_principale,
+                     p10 = if (res$a_normale) res$p10 else NA_real_,
+                     p90 = if (res$a_normale) res$p90 else NA_real_)
+
+      f <- tempfile(fileext = ".png")
+      sauver_carte_jour(params, f)
+      on.exit(unlink(f), add = TRUE)
+      data_uri <- paste0("data:image/png;base64,",
+                         jsonlite::base64_enc(readBin(f, "raw", n = file.info(f)$size)))
+
+      texte <- paste0(format(round(res$temp, 1), nsmall = 1, decimal.mark = ","), "°C ",
+                      autour_de(res$ville), " le ", format(res$date, "%d/%m/%Y"), " : ",
+                      phrase_principale, ". Et vous, sauriez-vous situer ce qui est normal ?")
+      nom_fichier <- paste0("normal-ou-pas_jour_",
+                            gsub("[^A-Za-z0-9]+", "_", res$ville), ".png")
+
+      showModal(modal_partage(data_uri, texte, nom_fichier, titre = "Partager cette journée"))
+    })
+
+  })
+}
