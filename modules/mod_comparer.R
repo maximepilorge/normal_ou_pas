@@ -94,6 +94,19 @@ mod_comparer_server <- function(id, db_pool) {
         updatePickerInput(session, "ville_focus", selected = clk$id)
     })
 
+    # Recentrer la carte sur la ville sélectionnée (liste OU clic d'une pastille) :
+    # sur petit écran on ne voit pas toutes les villes à la fois. On préserve le zoom
+    # courant (isolate → ne pas se relancer à chaque +/-). ignoreInit pour garder la
+    # vue « France entière » au démarrage ; uniquement quand l'onglet carte est visible.
+    observeEvent(input$ville_focus, {
+      req(identical(input$sousvue, "carte"))
+      co <- villes_coords %>% filter(ville == input$ville_focus)
+      req(nrow(co) == 1)
+      z <- isolate(input$carte_zoom)
+      leafletProxy("carte", session) %>%
+        flyTo(lng = co$longitude, lat = co$latitude, zoom = if (is.null(z)) 5 else z)
+    }, ignoreInit = TRUE)
+
     # Leaflet (et plotly) dans un sous-onglet initialement masqué s'affichent à
     # taille nulle (carte grise). À chaque bascule, on force le recalcul des
     # dimensions : invalidateSize() sur la carte + un 'resize' pour la trajectoire.
