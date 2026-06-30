@@ -181,7 +181,10 @@ ui <- fluidPage( # On utilise tagList comme conteneur principal
     )')),
 
     # 4. Logique de partage de la carte de résultat du quiz
-    tags$script(src = "partage.js")
+    tags$script(src = "partage.js"),
+
+    # 5. Habillage du quiz « Série de 10 » (carte, progression, anneau, révélation)
+    tags$link(rel = "stylesheet", href = "quiz_serie.css")
   ),
   
   

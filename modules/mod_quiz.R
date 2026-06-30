@@ -1,80 +1,216 @@
 # modules/mod_quiz.R
+#
+# Quiz « Série de 10 » : machine à états en 3 actes — accueil (paramétrer) ->
+# jeu (10 manches) -> résultats (score + commentaire + partage + rejouer).
+# La génération d'une question et le calcul du feedback réutilisent la mécanique
+# historique du quiz, extraite ici en fonctions de fichier réutilisables.
 
+# --- Pré-chargement des candidats d'une série -------------------------------
+# Une requête agrégée unique : pour le combo (période, ville, saison), une ligne
+# par couple (ville, jour calendaire, catégorie) existant avec min/max/normale.
+# On échantillonne ensuite EN MÉMOIRE (echantillonner_serie, helpers.R), ce qui
+# supprime les allers-retours BDD et garantit qu'on sait d'emblée si le combo
+# fournit assez de questions.
+charger_candidats_quiz <- function(db_pool, periode, ville, saison) {
+  requete <- tbl(db_pool, "quiz_data_precalculee") %>%
+    filter(periode_ref == !!periode)
+  if (!identical(ville, "Toutes les villes")) {
+    requete <- requete %>% filter(ville == !!ville)
+  }
+  mois_s <- mois_saison(saison)
+  if (!is.null(mois_s)) {
+    requete <- requete %>% filter(mois %in% !!mois_s)
+  }
+  requete %>%
+    group_by(ville, mois, jour_mois, categorie) %>%
+    summarise(
+      min_temp    = min(tmax_celsius, na.rm = TRUE),
+      max_temp    = max(tmax_celsius, na.rm = TRUE),
+      normale_moy = min(t_moy, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    collect()
+}
+
+# --- Calcul du feedback d'une manche ----------------------------------------
+# Reprend la logique historique (seuils p10/p90, projections TRACC, fenêtre ±7 j,
+# explication écart/fréquence) MAIS sous forme de fonction pilotée par les données
+# de la manche : aucune déclaration d'output ici (celles-ci vivent, une seule fois,
+# dans le serveur). Renvoie list(explication, seuils, projections, boxplot_data).
+calculer_feedback_manche <- function(db_pool, data, periode_ref) {
+  annees_periode <- as.numeric(unlist(strsplit(periode_ref, "-")))
+  annee_debut <- annees_periode[1]
+  annee_fin   <- annees_periode[2]
+  annees_a_filtrer <- seq(annee_debut, annee_fin)
+  jour_quiz <- lubridate::day(data$date)
+  mois_quiz <- lubridate::month(data$date)
+
+  # Seuils p10/p90 du jour (période sélectionnée), pour la zone normale du boxplot.
+  seuils_normaux <- tbl(db_pool, "stats_normales") %>%
+    filter(ville == !!data$city, mois == !!mois_quiz, jour_mois == !!jour_quiz,
+           periode_ref == !!periode_ref) %>%
+    select(seuil_bas_p10, seuil_haut_p90) %>%
+    collect()
+  seuils <- if (nrow(seuils_normaux) > 0)
+    list(p10 = seuils_normaux$seuil_bas_p10[1], p90 = seuils_normaux$seuil_haut_p90[1])
+  else NULL
+
+  # Normales projetées (TRACC) : normale 1991-2020 + delta DRIAS par niveau.
+  projections <- NULL
+  if (projections_disponibles) {
+    base_9120 <- tbl(db_pool, "stats_normales") %>%
+      filter(ville == !!data$city, mois == !!mois_quiz, jour_mois == !!jour_quiz,
+             periode_ref == !!PERIODE_REF_PROJECTION) %>%
+      select(t_moy, seuil_bas_p10, seuil_haut_p90) %>% collect()
+    deltas_proj <- tbl(db_pool, "stats_normales_projetees") %>%
+      filter(ville == !!data$city, mois == !!mois_quiz, jour_mois == !!jour_quiz) %>%
+      collect()
+    if (nrow(base_9120) > 0 && nrow(deltas_proj) > 0) {
+      labels_niv <- c("2050_+2.7" = "2050 (+2,7 °C)", "2100_+4.0" = "2100 (+4 °C)")
+      niveaux <- lapply(names(labels_niv), function(niv) {
+        d <- deltas_proj[deltas_proj$niveau_rechauffement == niv, ]
+        if (nrow(d) == 0) return(NULL)
+        list(niveau = niv, label = unname(labels_niv[niv]),
+             moy      = base_9120$t_moy[1]          + d$delta_moy[1],
+             p10      = base_9120$seuil_bas_p10[1]  + d$delta_p10[1],
+             p90      = base_9120$seuil_haut_p90[1] + d$delta_p90[1],
+             moy_bas  = base_9120$t_moy[1]          + d$delta_moy_bas[1],
+             moy_haut = base_9120$t_moy[1]          + d$delta_moy_haut[1])
+      })
+      niveaux <- Filter(Negate(is.null), niveaux)
+      if (length(niveaux) > 0) projections <- list(
+        present = list(p10 = base_9120$seuil_bas_p10[1],
+                       p90 = base_9120$seuil_haut_p90[1], moy = base_9120$t_moy[1]),
+        niveaux = niveaux)
+    }
+  }
+
+  # Fenêtre ±7 jours (cohérente avec la classification) pour le boxplot.
+  jours_fenetre <- data$date + (-7:7)
+  cles_fenetre <- unique(lubridate::month(jours_fenetre) * 100 + lubridate::day(jours_fenetre))
+  donnees_historiques_jour <- tbl(db_pool, "temperatures_max") %>%
+    filter(ville == !!data$city, annee %in% !!annees_a_filtrer,
+           (mois * 100L + jour_mois) %in% !!cles_fenetre) %>%
+    select(date, temperature_max) %>%
+    collect() %>%
+    rename(tmax_celsius = temperature_max)
+
+  moyenne_reelle <- data$normale_moy
+  diff <- round(abs(data$temp - moyenne_reelle), 1)
+  direction <- if (data$temp > moyenne_reelle) "supérieure" else "inférieure"
+
+  if (data$correct_answer == "Dans les normales de saison") {
+    explication_text <- paste0("Cette température est <b>", diff, "°C</b> ", direction,
+      " à la moyenne de saison (", round(moyenne_reelle, 1), "°C) et est considérée comme normale à cette période de l'année (vers le ",
+      paste(format(data$date, "%d"), mois_fr[as.numeric(format(data$date, "%m"))]), ") ",
+      autour_de(data$city), ".")
+  } else {
+    explication_principale <- paste0("Cette température est <b>", diff, "°C</b> ", direction,
+      " à la moyenne de saison (", round(moyenne_reelle, 1), "°C) pour la période ", periode_ref, ".")
+
+    nombre_occurrences_jour <- if (direction == "supérieure")
+      sum(donnees_historiques_jour$tmax_celsius >= data$temp, na.rm = TRUE)
+    else sum(donnees_historiques_jour$tmax_celsius <= data$temp, na.rm = TRUE)
+    frequence_jour_text <- if (nombre_occurrences_jour == 0)
+      paste0("Autour de cette date (fenêtre de ±7 jours), un événement de cette intensité ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".")
+    else paste0("Autour de cette date (fenêtre de ±7 jours), une température égale ou ", direction,
+                " est arrivée <b>", nombre_occurrences_jour, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
+
+    saison <- get_season_info(data$date)
+    donnees_historiques_saison <- tbl(db_pool, "temperatures_max") %>%
+      filter(ville == !!data$city, annee %in% !!annees_a_filtrer, mois %in% !!saison$mois) %>%
+      select(date, temperature_max) %>% collect() %>%
+      rename(tmax_celsius = temperature_max)
+    nombre_occurrences_saison <- if (direction == "supérieure")
+      sum(donnees_historiques_saison$tmax_celsius >= data$temp, na.rm = TRUE)
+    else sum(donnees_historiques_saison$tmax_celsius <= data$temp, na.rm = TRUE)
+    message_occurrence_saison <- if (round(nombre_occurrences_saison / (annee_fin - annee_debut + 1) >= 1)) {
+      paste0(round(nombre_occurrences_saison / (annee_fin - annee_debut + 1), 0))
+    } else if (round(nombre_occurrences_saison / (annee_fin - annee_debut + 1) > 0)) {
+      "moins d'une"
+    } else {
+      "0"
+    }
+    frequence_saison_text <- if (nombre_occurrences_saison == 0)
+      paste0("À l'échelle de la saison (", saison$nom, "), une température aussi ",
+             if (direction == "supérieure") "élevée" else "basse",
+             " ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".")
+    else paste0("À l'échelle de la saison (", saison$nom, "), une température égale ou ", direction,
+                " est arrivée en moyenne <b>", message_occurrence_saison, " fois</b> par an entre ",
+                annee_debut, " et ", annee_fin, ".")
+
+    explication_text <- paste(explication_principale, frequence_jour_text, frequence_saison_text,
+                              sep = "<br><br>")
+  }
+
+  # Phrase projections (TRACC) : situe la température aux horizons futurs.
+  if (!is.null(projections)) {
+    classer <- function(temp, p10, p90) {
+      if (temp < p10) "<b>en dessous des normales</b>"
+      else if (temp > p90) "<b>au-dessus des normales</b>"
+      else "<b>dans les normales de saison</b>"
+    }
+    phrases <- vapply(projections$niveaux, function(nv)
+      paste0("à l'horizon <b>", nv$label, "</b>, elle serait ",
+             classer(data$temp, nv$p10, nv$p90)), character(1))
+    explication_text <- paste0(explication_text,
+      "<br><br><span style='color:#555'>🌡️ Avec le réchauffement (trajectoire de référence ",
+      "TRACC ; les niveaux +2,7 °C et +4 °C s'entendent par rapport à l'ère préindustrielle) : ",
+      paste(phrases, collapse = " ; "), ".</span>")
+  }
+
+  list(explication = explication_text, seuils = seuils,
+       projections = projections, boxplot_data = donnees_historiques_jour)
+}
+
+# Libellé court d'une catégorie (pour le récap du bilan).
+verdict_court_quiz <- function(categorie) {
+  if (grepl("Au-dessus", categorie)) "au-dessus des normales"
+  else if (grepl("En-dessous", categorie)) "en-dessous des normales"
+  else "dans les normales de saison"
+}
+
+# --- UI : simple conteneur plein écran (les 3 écrans sont rendus côté serveur) --
 mod_quiz_ui <- function(id) {
   ns <- NS(id)
-  tagList(
-    page_sidebar(
-      title = "Testez votre intuition climatique",
-      fillable = FALSE,
-      
-      # Sidebar OUVERTE par défaut sur ordinateur (filtres période/ville/saison
-      # visibles d'emblée) ; sur smartphone, comportement empilé/visible ("always").
-      sidebar = sidebar(
-        width = "350px",
-        open = list(mobile = "always", desktop = "open"),
-        # Carte pour les paramètres généraux
-        card(
-          card_header("Paramètres"),
-          # container = "body" : le menu déroulant flotte au-dessus de la sidebar
-          # (évite le rognage et la double barre de défilement). live-search sur la
-          # ville (liste longue), size pour plafonner la hauteur du menu.
-          pickerInput(ns("periode_normale"),
-                      "Période de référence climatique",
-                      choices = periodes_disponibles,
-                      options = list(container = "body", 'live-search' = FALSE)),
-          pickerInput(ns("ville_select_quiz"),
-                      "Filtrer par ville (optionnel) :",
-                      choices = c("Toutes les villes", villes_triees),
-                      selected = "Toutes les villes",
-                      options = list(container = "body", 'live-search' = TRUE, size = 8)),
-          pickerInput(ns("saison_select"),
-                           "Filtrer par saison (optionnel) :",
-                           choices = c("Toutes les saisons", "Hiver", "Printemps", "Été", "Automne"),
-                           selected = "Toutes les saisons",
-                           options = list(container = "body", 'live-search' = FALSE))
-        ),
-        checkboxInput(ns("trash_talk_mode"), "Me forcer à vous répondre poliment", value = FALSE)
-      ),
-
-      # Contenu principal de la page
-      card(
-        card_header(h3(textOutput(ns("question_text")))),
-        # La CTA principale vit dans le corps du quiz (et non dans la sidebar) :
-        # tirer une nouvelle question reste accessible sidebar fermée.
-        actionButton(ns("new_question_btn"), "Tirer une température au hasard !", icon = icon("dice"), class = "btn-primary w-100 mb-3"),
-        # Déplacer les réponses et le bouton de validation dans le corps principal
-        h4("Votre Réponse"),
-        radioButtons(ns("user_answer"), "Cette température est :",
-                     choices = c("En-dessous des normales", "Dans les normales de saison", "Au-dessus des normales"),
-                     selected = character(0)),
-        actionButton(ns("submit_answer_btn"), "Valider", icon = icon("check"), class = "btn-success w-100"),
-        hr(),
-        uiOutput(ns("feedback_ui"))
-      )
-    )
-  )
+  div(class = "quiz-module", uiOutput(ns("quiz_zone")))
 }
 
 mod_quiz_server <- function(id, db_pool) {
   moduleServer(id, function(input, output, session) {
-    
+
     ns <- session$ns
-    
-    quiz_data <- reactiveVal(NULL)
-    boxplot_data <- reactiveVal(NULL)
+    N_QUESTIONS <- 10L
+
+    # --- État de la machine -------------------------------------------------
+    etat            <- reactiveVal("accueil")   # accueil | jeu | resultats
+    serie           <- reactiveVal(NULL)        # liste des questions pré-tirées
+    idx             <- reactiveVal(1L)          # manche courante
+    reponses        <- reactiveVal(list())      # par manche : list(user_answer, juste)
+    phase_manche    <- reactiveVal("question")  # question | feedback
+    feedback_courant<- reactiveVal(NULL)
+    filtres_serie   <- reactiveVal(NULL)        # list(periode, ville, saison, poli)
+    debut_serie     <- reactiveVal(NULL)
+    serie_terminee  <- reactiveVal(NULL)        # événement remonté à server.R (BDD)
+
+    # Données de la manche courante (alimentent les outputs du boxplot, déclarés
+    # une seule fois plus bas).
+    quiz_data       <- reactiveVal(NULL)
+    boxplot_data    <- reactiveVal(NULL)
+    seuils_quiz     <- reactiveVal(NULL)
+    projections_quiz<- reactiveVal(NULL)
+
+    # Score CUMULÉ sur la session (compat analytics_visits / server.R) — incrémenté
+    # à chaque validation, exactement comme le quiz historique.
     score_succes <- reactiveVal(0)
     score_echecs <- reactiveVal(0)
-    # Paramètres du dernier résultat validé (pour la carte de partage).
-    dernier_resultat <- reactiveVal(NULL)
-    # Seuils p10/p90 (bornes du « normal ») du jour, pour le boxplot.
-    seuils_quiz <- reactiveVal(NULL)
-    # Normales projetées (TRACC) du jour : présent + niveaux 2050/2100, pour le boxplot.
-    projections_quiz <- reactiveVal(NULL)
 
-    # Repère « normale » ACTIF selon le bouton horizon (présent / 2050 / 2100).
-    # Présent = période de classification choisie ; 2050/2100 = normales projetées
-    # absolues (1991-2020 + delta). Centralisé ici car réutilisé par le titre HTML
-    # (sous-titre dynamique) ET par le boxplot. NULL si aucun repère disponible.
+    # Score de la SÉRIE courante, dérivé des réponses (indépendant du cumul session).
+    score_serie <- reactive({
+      sum(vapply(reponses(), function(x) isTRUE(x$juste), logical(1)))
+    })
+
+    # Repère « normale » actif selon le bouton horizon (présent / 2050 / 2100).
     repere_actif <- reactive({
       data_quiz <- quiz_data()
       req(data_quiz)
@@ -84,7 +220,7 @@ mod_quiz_server <- function(id, db_pool) {
       if (horizon == "present") {
         if (!is.null(seuils) && is.finite(seuils$p10) && is.finite(seuils$p90))
           return(list(p10 = seuils$p10, p90 = seuils$p90, moy = data_quiz$normale_moy,
-                      titre = paste0("Normale actuelle (", input$periode_normale, ")"),
+                      titre = paste0("Normale actuelle (", filtres_serie()$periode, ")"),
                       couleur = "#2E8B57"))
       } else if (!is.null(proj)) {
         n <- Filter(function(x) startsWith(x$niveau, horizon), proj$niveaux)
@@ -98,496 +234,344 @@ mod_quiz_server <- function(id, db_pool) {
       NULL
     })
 
-    observeEvent(req(input$periode_normale), {
-      shinyjs::click("new_question_btn")
-    }, once = TRUE)
-    
-    # --- NOUVELLE QUESTION ---
-    observeEvent(input$new_question_btn, {
-      
-      req(input$periode_normale)
-      
-      log_debug("Génération d'une nouvelle question !")
+    # === ÉCRAN 0 : ACCUEIL (paramétrer la série) ============================
+    ecran_accueil <- function() {
+      f <- filtres_serie()
+      sel <- function(cle, defaut) if (!is.null(f) && !is.null(f[[cle]])) f[[cle]] else defaut
+      div(class = "quiz-card card",
+        div(class = "card-body",
+          h2("Prêt à tester vos repères climatiques ?", class = "quiz-titre"),
+          p(class = "text-muted",
+            "10 températures, 10 verdicts. Saurez-vous dire si chacune est normale ou pas ?"),
+          layout_columns(
+            col_widths = c(4, 4, 4), gap = "0.75rem",
+            pickerInput(ns("periode_normale"), "Période de référence",
+                        choices = periodes_disponibles, selected = sel("periode", periodes_disponibles[1]),
+                        options = list(container = "body")),
+            pickerInput(ns("ville_select_quiz"), "Ville",
+                        choices = c("Toutes les villes", villes_triees),
+                        selected = sel("ville", "Toutes les villes"),
+                        options = list(container = "body", `live-search` = TRUE, size = 8)),
+            pickerInput(ns("saison_select"), "Saison",
+                        choices = c("Toutes les saisons", "Hiver", "Printemps", "Été", "Automne"),
+                        selected = sel("saison", "Toutes les saisons"),
+                        options = list(container = "body"))
+          ),
+          checkboxInput(ns("trash_talk_mode"), "Me forcer à vous répondre poliment",
+                        value = if (!is.null(f)) isTRUE(f$poli) else FALSE),
+          actionButton(ns("lancer_btn"), "Lancer la série", icon = icon("dice"),
+                       class = "btn-primary btn-lg w-100 mt-2"),
+          p(class = "text-muted small text-center mt-2",
+            "Une série = 10 questions tirées au hasard.")
+        ))
+    }
 
-      shinyjs::disable("new_question_btn")
+    # === ÉCRAN 1 : JEU (manche courante) ====================================
+    ecran_jeu <- function() {
+      q <- serie()[[idx()]]
+      req(q)
+      n <- length(serie())
+      formatted_date <- paste(format(q$date, "%d"), mois_fr[as.numeric(format(q$date, "%m"))])
+      enonce <- paste0("Le ", formatted_date, ", ", autour_de(q$city),
+                       ", la température maximale observée est de ", q$temp, " °C. Normal ou pas ?")
+
+      # Barre de progression : pastilles juste / faux / courante / à venir.
+      pastilles <- lapply(seq_len(n), function(i) {
+        rp <- reponses()[[i]]
+        cls <- if (!is.null(rp)) (if (isTRUE(rp$juste)) "pastille pastille-juste" else "pastille pastille-faux")
+               else if (i == idx()) "pastille pastille-courante"
+               else "pastille pastille-avenir"
+        div(class = cls)
+      })
+      barre <- tagList(
+        div(class = "quiz-progress", pastilles),
+        p(class = "text-muted small text-center mb-3", sprintf("Question %d / %d", idx(), n))
+      )
+
+      corps <- if (phase_manche() == "question") {
+        tagList(
+          div(class = "carte-question", h3(enonce, class = "enonce")),
+          radioGroupButtons(ns(paste0("rep_", idx())),
+            label = "Cette température est :",
+            choices = CATEGORIES_QUIZ, selected = character(0),
+            direction = "vertical", width = "100%",
+            status = "outline-primary", size = "lg"),
+          actionButton(ns("valider_btn"), "Valider", icon = icon("check"),
+                       class = "btn-success btn-lg w-100")
+        )
+      } else {
+        rp <- reponses()[[idx()]]
+        juste <- isTRUE(rp$juste)
+        badge <- div(class = "text-center mb-2",
+          span(class = paste("badge fs-6", if (juste) "bg-success" else "bg-danger"),
+               if (juste) "BONNE RÉPONSE" else "RATÉ"))
+        # Révélation : chaque option marquée correcte / mauvais choix.
+        options <- lapply(CATEGORIES_QUIZ, function(o) {
+          cls <- "option-reveal"; ic <- NULL
+          if (identical(o, q$correct_answer)) { cls <- paste(cls, "option-correcte"); ic <- icon("check") }
+          else if (identical(o, rp$user_answer)) { cls <- paste(cls, "option-incorrecte"); ic <- icon("xmark") }
+          div(class = cls, ic, span(o))
+        })
+        fb <- feedback_courant()
+        distribution <- accordion(open = FALSE,
+          accordion_panel("Voir la distribution",
+            if (!is.null(projections_quiz()))
+              div(class = "text-center mb-2",
+                  radioGroupButtons(ns("horizon_proj"), label = "Comparer à la normale de :",
+                    choices = c("Aujourd'hui" = "present", "2050 (+2,7 °C)" = "2050",
+                                "2100 (+4 °C)" = "2100"),
+                    selected = "present", size = "sm", status = "primary")),
+            uiOutput(ns("boxplot_titre")),
+            plotlyOutput(ns("feedback_boxplot"), height = "340px")))
+        tagList(
+          div(class = "carte-question carte-reveal", h3(enonce, class = "enonce")),
+          badge,
+          div(class = "options-reveal", options),
+          div(class = "feedback-explication mt-3", HTML(fb$explication)),
+          distribution,
+          actionButton(ns("suivant_btn"),
+                       if (idx() < n) "Question suivante" else "Voir mon bilan",
+                       icon = icon(if (idx() < n) "arrow-right" else "flag-checkered"),
+                       class = "btn-primary btn-lg w-100 mt-3")
+        )
+      }
+
+      div(class = "quiz-card card", div(class = "card-body", barre, corps))
+    }
+
+    # === ÉCRAN 2 : RÉSULTATS (bilan) ========================================
+    ecran_resultats <- function() {
+      f <- filtres_serie(); req(f)
+      n <- length(serie()); sc <- score_serie()
+      pal <- palier_score(sc, n)
+      comm <- commentaire_serie(sc, n, isTRUE(f$poli))
+
+      lignes <- lapply(seq_len(n), function(i) {
+        q <- serie()[[i]]; rp <- reponses()[[i]]; juste <- isTRUE(rp$juste)
+        date_txt <- paste(format(q$date, "%d"), mois_fr[as.numeric(format(q$date, "%m"))])
+        div(class = paste("recap-ligne", if (juste) "recap-juste" else "recap-faux"),
+          span(class = "recap-icone", if (juste) icon("check") else icon("xmark")),
+          div(class = "recap-info",
+            div(class = "recap-fait", paste0(date_txt, " · ", autour_de(q$city), " · ", q$temp, " °C")),
+            if (!juste) div(class = "recap-detail",
+              sprintf("Votre réponse : %s — Bonne réponse : %s",
+                      verdict_court_quiz(rp$user_answer), verdict_court_quiz(q$correct_answer)))))
+      })
+
+      div(class = "quiz-card card", div(class = "card-body text-center",
+        div(class = "anneau-score",
+            style = sprintf("--accent:%s; --pct:%d;", pal$couleur, as.integer(round(100 * sc / n))),
+            span(class = "anneau-chiffre", sprintf("%d/%d", sc, n))),
+        h3(pal$libelle, class = "mt-2", style = sprintf("color:%s;", pal$couleur)),
+        p(comm, class = "lead"),
+        uiOutput(ns("record_perso")),
+        hr(),
+        h5("Le détail de votre série", class = "text-start"),
+        div(class = "recap text-start", lignes),
+        p(class = "text-muted small mt-2", .contexte_serie(f$ville, f$saison, f$periode)),
+        div(class = "mt-3",
+          actionButton(ns("partager_serie_btn"), "Partager mon score",
+                       icon = icon("share-nodes"), class = "btn-primary btn-lg me-2"),
+          actionButton(ns("rejouer_btn"), "Rejouer", icon = icon("rotate-right"),
+                       class = "btn-success btn-lg")),
+        div(class = "mt-2", actionLink(ns("reglages_btn"), "Changer les réglages"))
+      ))
+    }
+
+    # --- Rendu maître : un seul uiOutput pilote l'écran courant -------------
+    output$quiz_zone <- renderUI({
+      switch(etat(),
+             accueil   = ecran_accueil(),
+             jeu       = ecran_jeu(),
+             resultats = ecran_resultats())
+    })
+
+    # --- Outputs du boxplot (déclarés UNE seule fois) -----------------------
+    output$boxplot_titre <- renderUI({
+      data_quiz <- quiz_data()
+      req(data_quiz, boxplot_data())
+      fmt1 <- function(x) format(round(x, 1), nsmall = 1, decimal.mark = ",")
+      main_title <- paste0("Distribution historique ", autour_de(data_quiz$city),
+                           " (vers le ", paste(format(data_quiz$date, "%d"),
+                           mois_fr[as.numeric(format(data_quiz$date, "%m"))]), ", ±7 j)")
+      actif <- repere_actif()
+      sous_titre <- if (!is.null(actif))
+        paste0(actif$titre, " : zone normale ", fmt1(actif$p10), "–", fmt1(actif$p90),
+               " °C · moyenne ", fmt1(actif$moy), " °C")
+      else paste("Période", filtres_serie()$periode)
+      tagList(
+        tags$p(class = "fw-bold mb-1", main_title),
+        tags$p(class = "text-muted small mb-2", sous_titre)
+      )
+    })
+
+    output$feedback_boxplot <- renderPlotly({
+      req(boxplot_data())
+      data_quiz <- quiz_data()
+      donnees_historiques_jour_plot <- boxplot_data()
+      fmt1 <- function(x) format(round(x, 1), nsmall = 1, decimal.mark = ",")
+      seuils <- seuils_quiz()
+      proj   <- projections_quiz()
+      actif  <- repere_actif()
+
+      all_y <- c(donnees_historiques_jour_plot$tmax_celsius, data_quiz$temp)
+      if (!is.null(seuils)) all_y <- c(all_y, seuils$p10, seuils$p90)
+      if (!is.null(proj)) for (n in proj$niveaux) all_y <- c(all_y, n$p10, n$p90)
+      yr <- range(all_y, na.rm = TRUE); yr <- yr + c(-1, 1) * 0.06 * diff(yr)
+
+      p <- ggplot(donnees_historiques_jour_plot, aes(x = "", y = tmax_celsius)) +
+        geom_boxplot(width = 0.5, fill = "skyblue", alpha = 0.7) +
+        geom_jitter(aes(text = paste("Date :", format(date, "%d %b %Y"),
+                                     "<br>Température :", round(tmax_celsius, 1), "°C")),
+                    width = 0.18, alpha = 0.4, color = "darkblue") +
+        geom_point(data = data.frame(temp_quiz = data_quiz$temp),
+                   aes(x = "", y = temp_quiz,
+                       text = paste("Température du quiz :", data_quiz$temp, "°C")),
+                   color = "red", size = 4, shape = 4, stroke = 1.5, alpha = 0.85) +
+        scale_y_continuous(labels = ~paste(.x, "°C")) +
+        labs(x = "", y = "Température Maximale") +
+        theme_minimal(base_size = 12)
+
+      if (!is.null(actif)) {
+        p <- p +
+          annotate("rect", xmin = 0.5, xmax = 1.5, ymin = actif$p10, ymax = actif$p90,
+                   fill = actif$couleur, alpha = 0.15) +
+          geom_hline(yintercept = c(actif$p10, actif$p90),
+                     linetype = "dashed", color = actif$couleur, linewidth = 0.8) +
+          geom_point(data = data.frame(y = actif$moy),
+                     aes(x = "", y = y, text = paste("Moyenne :", fmt1(actif$moy), "°C")),
+                     shape = 4, size = 4, color = "black")
+      }
+
+      ggplotly(p, tooltip = "text") %>%
+        layout(xaxis = list(fixedrange = TRUE),
+               yaxis = list(fixedrange = TRUE, range = yr),
+               margin = list(t = 10)) %>%
+        config(displayModeBar = FALSE, responsive = TRUE)
+    })
+
+    # --- Transitions --------------------------------------------------------
+    tirer_serie <- function(periode, ville, saison) {
+      candidats <- tryCatch(
+        charger_candidats_quiz(db_pool, periode, ville, saison),
+        error = function(e) { log_debug("charger_candidats_quiz : ", conditionMessage(e)); NULL })
+      echantillonner_serie(candidats, N_QUESTIONS)
+    }
+
+    demarrer_serie <- function(nouvelle) {
+      serie(nouvelle)
+      idx(1L)
+      reponses(vector("list", length(nouvelle)))
+      phase_manche("question")
+      feedback_courant(NULL)
       boxplot_data(NULL)
-      
-      # Boucle de robustesse : on essaie jusqu'à 10 fois de trouver un combo valide
-      # pour éviter une boucle infinie si les filtres sont trop stricts.
-      question_valide <- NULL
-      
-      # On prépare la liste des jours possibles en amont de la boucle
-      # 1. On crée une table de tous les jours d'une année bissextile
-      tous_les_jours <- tibble(date = seq(as.Date("2024-01-01"), as.Date("2024-12-31"), by = "day")) %>%
-        mutate(mois = month(date))
-      
-      # 2. On filtre cette table si une saison est sélectionnée
-      jours_possibles <- if (input$saison_select != "Toutes les saisons") {
-        saison_mois <- switch(input$saison_select,
-                              "Hiver"   = c(12, 1, 2), "Printemps" = c(3, 4, 5),
-                              "Été"     = c(6, 7, 8), "Automne"   = c(9, 10, 11))
-        tous_les_jours %>% filter(mois %in% saison_mois)
-      } else {
-        tous_les_jours
-      }
-      
-      for (i in 1:10) {
-        
-        # --- ÉTAPE 1 : Tirer une réponse, un jour et une ville ---
-        # Tirage équilibré : 1/3 par catégorie (la réponse est tirée avant la
-        # température, donc ceci garantit ~33 % de chances pour chaque réponse).
-        categorie_choisie <- sample(
-          c("Au-dessus des normales", "En-dessous des normales", "Dans les normales de saison"),
-          size = 1,
-          prob = rep(1/3, 3)
-        )
-        
-        # On tire un jour et un mois au hasard
-        date_aleatoire <- jours_possibles %>% sample_n(1) %>% pull(date)
-        jour_aleatoire <- day(date_aleatoire)
-        mois_aleatoire <- month(date_aleatoire)
-        
-        ville_choisie <- if (input$ville_select_quiz == "Toutes les villes") {
-          sample(villes_triees, 1)
-        } else {
-          input$ville_select_quiz
-        }
-        
-        # --- ÉTAPE 2 : Filtrer les données ---
-        requete_base <- tbl(db_pool, "quiz_data_precalculee") %>%
-          filter(
-            periode_ref == !!input$periode_normale,
-            categorie == !!categorie_choisie,
-            ville == !!ville_choisie,
-            mois == !!mois_aleatoire,
-            jour_mois == !!jour_aleatoire
-          )
-        
-        # --- ÉTAPE 3 : Récupérer min, max et moyenne en une seule requête ---
-        bornes_et_moyenne <- requete_base %>%
-          summarise(
-            min_temp = min(tmax_celsius, na.rm = TRUE),
-            max_temp = max(tmax_celsius, na.rm = TRUE),
-            normale_moy = min(t_moy, na.rm = TRUE)
-          ) %>%
-          collect()
-        
-        # On vérifie si on a un résultat valide
-        if (nrow(bornes_et_moyenne) > 0 && is.finite(bornes_et_moyenne$min_temp)) {
-          question_valide <- list(
-            bornes = bornes_et_moyenne,
-            categorie = categorie_choisie,
-            ville = ville_choisie,
-            date = date_aleatoire
-          )
-          break # On a trouvé, on sort de la boucle
-        }
-      }
-      
-      req(question_valide, cancelOutput = TRUE)
-      
-      # --- ÉTAPE 4 : Tirer une température au hasard entre les bornes ---
-      min_val <- round(question_valide$bornes$min_temp, 1)
-      max_val <- round(question_valide$bornes$max_temp, 1)
-      
-      temp_selectionnee <- if (min_val == max_val) {
-        min_val
-      } else {
-        # On crée une séquence de valeurs possibles avec un pas de 0.1
-        valeurs_possibles <- seq(min_val, max_val, by = 0.1)
-        sample(valeurs_possibles, 1)
-      }
+      quiz_data(nouvelle[[1]])
+      debut_serie(Sys.time())
+      etat("jeu")
+    }
 
-      # --- ÉTAPE 5 : Alimenter quiz_data avec ces informations ---
-      quiz_data(list(
-        city = question_valide$ville,
-        date = question_valide$date,
-        temp = temp_selectionnee,
-        correct_answer = question_valide$categorie,
-        normale_moy = round(question_valide$bornes$normale_moy, 1)
-      ))
-      
-      log_debug("Ville : ", quiz_data()$city)
-      log_debug("Date (jour/mois) : ", format(quiz_data()$date, "%d/%m"))
-      log_debug("Température générée : ", quiz_data()$temp)
-      
-      # On met à jour l'UI
-      updateRadioButtons(session, "user_answer", selected = character(0))
-      output$feedback_ui <- renderUI(NULL)
-      shinyjs::enable("user_answer")
-      shinyjs::enable("submit_answer_btn")
-      shinyjs::enable("new_question_btn")
-      js$enablePicker(ns("periode_normale"))
-      js$enablePicker(ns("ville_select_quiz"))
-      js$enablePicker(ns("saison_select"))
+    observeEvent(input$lancer_btn, {
+      req(input$periode_normale)
+      periode <- input$periode_normale
+      ville   <- if (is.null(input$ville_select_quiz)) "Toutes les villes" else input$ville_select_quiz
+      saison  <- if (is.null(input$saison_select)) "Toutes les saisons" else input$saison_select
+      poli    <- isTRUE(input$trash_talk_mode)
+
+      nouvelle <- tirer_serie(periode, ville, saison)
+      if (length(nouvelle) == 0) {
+        showNotification(
+          "Aucune donnée pour ce choix. Essayez « Toutes les villes » ou « Toutes les saisons ».",
+          type = "error", duration = 8)
+        return()
+      }
+      if (length(nouvelle) < N_QUESTIONS) {
+        showNotification(
+          sprintf("Données limitées pour ce choix : série de %d questions. Élargissez la ville ou la saison pour 10.",
+                  length(nouvelle)),
+          type = "warning", duration = 7)
+      }
+      filtres_serie(list(periode = periode, ville = ville, saison = saison, poli = poli))
+      demarrer_serie(nouvelle)
     })
-    
-    # --- AFFICHAGE QUESTION ---
-    output$question_text <- renderText({
-      req(quiz_data())
-      data <- quiz_data()
-      formatted_date <- paste(format(data$date, "%d"), mois_fr[as.numeric(format(data$date, "%m"))])
-      paste0('Le ', formatted_date, ', ', autour_de(data$city), ', la température maximale observée est de ', data$temp, '°C. Normal ou pas ?')
+
+    observeEvent(input$valider_btn, {
+      req(etat() == "jeu", phase_manche() == "question")
+      ans <- input[[paste0("rep_", idx())]]
+      if (is.null(ans) || !nzchar(ans)) {
+        showNotification("Choisissez une réponse avant de valider.", type = "message", duration = 3)
+        return()
+      }
+      q <- serie()[[idx()]]
+      is_correct <- identical(ans, q$correct_answer)
+      if (is_correct) score_succes(score_succes() + 1) else score_echecs(score_echecs() + 1)
+
+      r <- reponses(); r[[idx()]] <- list(user_answer = ans, juste = is_correct); reponses(r)
+
+      quiz_data(q)
+      fb <- calculer_feedback_manche(db_pool, q, filtres_serie()$periode)
+      feedback_courant(fb)
+      boxplot_data(fb$boxplot_data)
+      seuils_quiz(fb$seuils)
+      projections_quiz(fb$projections)
+      phase_manche("feedback")
     })
-    
-    # --- ENVOI RÉPONSE ---
-    observeEvent(input$submit_answer_btn, {
-      
-      req(quiz_data(), input$user_answer, input$periode_normale)
-      
-      shinyjs::disable("submit_answer_btn")
-      js$disablePicker(ns("periode_normale"))
-      js$disablePicker(ns("ville_select_quiz"))
-      js$disablePicker(ns("saison_select"))
-      
-      data <- quiz_data()
-      is_correct <- (input$user_answer == data$correct_answer)
 
-      # Le score est TOUJOURS comptabilisé (pour les analytics ET le choix du
-      # message taquin indexé sur le score), indépendamment du ton choisi.
-      if (is_correct) {
-        score_succes(score_succes() + 1)
+    observeEvent(input$suivant_btn, {
+      req(etat() == "jeu", phase_manche() == "feedback")
+      if (idx() < length(serie())) {
+        idx(idx() + 1L)
+        quiz_data(serie()[[idx()]])
+        feedback_courant(NULL)
+        boxplot_data(NULL)
+        phase_manche("question")
       } else {
-        score_echecs(score_echecs() + 1)
+        # Fin de série : on fige le bilan et on remonte l'événement à server.R.
+        f <- filtres_serie()
+        duree <- if (!is.null(debut_serie()))
+          as.integer(round(difftime(Sys.time(), debut_serie(), units = "secs"))) else NA_integer_
+        serie_terminee(list(
+          score = score_serie(), nb_questions = length(serie()),
+          periode_ref = f$periode, ville_filtre = f$ville, saison_filtre = f$saison,
+          duree_seconds = duree, stamp = Sys.time()))
+        etat("resultats")
       }
-
-      messages_succes <- c("C’est la chance du débutant, j’imagine.",
-                           "Tu es vraiment obligé de montrer que tu sais tout mieux que tout le monde.",
-                           "Je pourrais presque commencer à t’apprécier, à force.",
-                           "Promis, j’arrête d’être désagréable à partir de maintenant car tu l’as bien mérité.")
-      message_succes_classique <- "Tu es trop fort !"
-      messages_echecs <- c("Tu feras mieux la prochaine fois, ne t’en fais pas. À vrai dire, tu peux difficilement faire pire.",
-                           "Tu ne pouvais pas mieux te tromper, félicitations !",
-                           "Ta détermination à échouer force l’admiration.",
-                           "Je pourrais être extrêmement désagréable à ce stade mais je m’en voudrais de ruiner ta confiance en toi.")
-      message_echec_classique <- "Dommage, tu feras mieux la prochaine fois !"
-
-      # Ton taquin par DÉFAUT (case « me forcer à vous répondre poliment »
-      # décochée) : message sarcastique indexé sur le score, avec repli sur le
-      # message classique. Mode poli : message neutre.
-      intro_message <- if (isTRUE(input$trash_talk_mode)) {
-        if (is_correct) message_succes_classique else message_echec_classique
-      } else if (is_correct) {
-        if (score_succes() <= length(messages_succes)) messages_succes[score_succes()] else message_succes_classique
-      } else {
-        if (score_echecs() <= length(messages_echecs)) messages_echecs[score_echecs()] else message_echec_classique
-      }
-      
-      # On prépare les éléments du filtre
-      annees_periode <- as.numeric(unlist(strsplit(input$periode_normale, "-")))
-      annee_debut <- annees_periode[1]
-      annee_fin <- annees_periode[2]
-      annees_a_filtrer <- seq(annee_debut, annee_fin)
-      jour_quiz <- lubridate::day(data$date)
-      mois_quiz <- lubridate::month(data$date)
-
-      # Seuils p10/p90 du jour (bornes officielles du « normal » dans le quiz) :
-      # on les récupère pour les superposer au boxplot.
-      seuils_normaux <- tbl(db_pool, "stats_normales") %>%
-        filter(
-          ville == !!data$city,
-          mois == !!mois_quiz,
-          jour_mois == !!jour_quiz,
-          periode_ref == !!input$periode_normale
-        ) %>%
-        select(seuil_bas_p10, seuil_haut_p90) %>%
-        collect()
-      seuils_quiz(if (nrow(seuils_normaux) > 0)
-        list(p10 = seuils_normaux$seuil_bas_p10[1], p90 = seuils_normaux$seuil_haut_p90[1])
-        else NULL)
-
-      # --- Normales projetées (TRACC) : normale 1991-2020 + delta DRIAS par niveau.
-      # Ancrage sur le PRÉSENT (1991-2020), indépendant de la période de
-      # classification choisie. La fourchette (bas/haut) = enveloppe inter-modèles.
-      projections_quiz(NULL)
-      if (projections_disponibles) {
-        base_9120 <- tbl(db_pool, "stats_normales") %>%
-          filter(ville == !!data$city, mois == !!mois_quiz, jour_mois == !!jour_quiz,
-                 periode_ref == !!PERIODE_REF_PROJECTION) %>%
-          select(t_moy, seuil_bas_p10, seuil_haut_p90) %>% collect()
-        deltas_proj <- tbl(db_pool, "stats_normales_projetees") %>%
-          filter(ville == !!data$city, mois == !!mois_quiz, jour_mois == !!jour_quiz) %>%
-          collect()
-        if (nrow(base_9120) > 0 && nrow(deltas_proj) > 0) {
-          labels_niv <- c("2050_+2.7" = "2050 (+2,7 °C)", "2100_+4.0" = "2100 (+4 °C)")
-          niveaux <- lapply(names(labels_niv), function(niv) {
-            d <- deltas_proj[deltas_proj$niveau_rechauffement == niv, ]
-            if (nrow(d) == 0) return(NULL)
-            list(niveau = niv, label = unname(labels_niv[niv]),
-                 moy      = base_9120$t_moy[1]          + d$delta_moy[1],
-                 p10      = base_9120$seuil_bas_p10[1]  + d$delta_p10[1],
-                 p90      = base_9120$seuil_haut_p90[1] + d$delta_p90[1],
-                 moy_bas  = base_9120$t_moy[1]          + d$delta_moy_bas[1],
-                 moy_haut = base_9120$t_moy[1]          + d$delta_moy_haut[1])
-          })
-          niveaux <- Filter(Negate(is.null), niveaux)
-          if (length(niveaux) > 0) projections_quiz(list(
-            present = list(p10 = base_9120$seuil_bas_p10[1],
-                           p90 = base_9120$seuil_haut_p90[1], moy = base_9120$t_moy[1]),
-            niveaux = niveaux))
-        }
-      }
-
-      # Fenêtre ±7 jours autour de la date, cohérente avec la classification du
-      # quiz (seuils p10/p90 lissés sur ±7 j). On filtre sur l'ensemble des
-      # couples (mois, jour) de la fenêtre via une clé mois*100 + jour.
-      jours_fenetre <- data$date + (-7:7)
-      cles_fenetre <- unique(lubridate::month(jours_fenetre) * 100 + lubridate::day(jours_fenetre))
-
-      donnees_historiques_jour <- tbl(db_pool, "temperatures_max") %>%
-        filter(
-          ville == !!data$city,
-          annee %in% !!annees_a_filtrer,
-          (mois * 100L + jour_mois) %in% !!cles_fenetre
-        ) %>%
-        select(date, temperature_max) %>%
-        collect() %>%
-        rename(tmax_celsius = temperature_max)
-
-      # On stocke immédiatement les données (fenêtre ±7 j) pour le graphique
-      boxplot_data(donnees_historiques_jour)
-      moyenne_reelle <- data$normale_moy
-      diff <- round(abs(data$temp - moyenne_reelle), 1)
-      direction <- if (data$temp > moyenne_reelle) "supérieure" else "inférieure"
-
-      # Phrase de projection pour la carte de partage : où se situerait cette
-      # température à l'horizon 2100 (« nouvelle normale » TRACC). On classe la
-      # température vs la zone normale projetée 2100. NULL si projections indispo.
-      proj_q <- projections_quiz()
-      proj_txt <- NULL; proj_couleur <- NULL
-      if (!is.null(proj_q) && length(proj_q$niveaux) > 0) {
-        n_fin <- Filter(function(x) startsWith(x$niveau, "2100"), proj_q$niveaux)
-        n_fin <- if (length(n_fin) > 0) n_fin[[1]] else proj_q$niveaux[[length(proj_q$niveaux)]]
-        annee_h <- sub("_.*", "", n_fin$niveau)
-        # Sans point final : la condition « … si le réchauffement suit la trajectoire
-        # actuelle » (ajoutée sur la carte) complète la phrase.
-        if (data$temp > n_fin$p90) {
-          proj_txt <- paste0("Même en ", annee_h, ", elle resterait au-dessus des normales")
-          proj_couleur <- "#E41A1C"
-        } else if (data$temp < n_fin$p10) {
-          proj_txt <- paste0("En ", annee_h, ", elle passerait en-dessous des normales")
-          proj_couleur <- "#1f77b4"
-        } else {
-          proj_txt <- paste0("En ", annee_h, ", une telle température sera dans les normales")
-          proj_couleur <- "#2E8B57"
-        }
-      }
-
-      # On mémorise les paramètres du résultat pour la carte de partage,
-      # y compris si la réponse de l'utilisateur était correcte.
-      dernier_resultat(list(
-        ville = data$city,
-        date = data$date,
-        temp = data$temp,
-        normale_moy = moyenne_reelle,
-        periode_ref = input$periode_normale,
-        categorie = data$correct_answer,
-        juste = is_correct,
-        reponse_utilisateur = input$user_answer,
-        # Bornes p10/p90 (période sélectionnée) pour la jauge de la carte (zone « normale »).
-        p10 = if (nrow(seuils_normaux) > 0) seuils_normaux$seuil_bas_p10[1] else NA_real_,
-        p90 = if (nrow(seuils_normaux) > 0) seuils_normaux$seuil_haut_p90[1] else NA_real_,
-        # Phrase « nouvelle normale » du futur (et sa couleur) pour la carte.
-        projection_txt = proj_txt,
-        projection_couleur = proj_couleur
-      ))
-      
-      if (data$correct_answer == "Dans les normales de saison") {
-        explication_text <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", round(moyenne_reelle, 1), "°C) et est considérée comme normale à cette période de l'année (vers le ", paste(format(data$date, "%d"), mois_fr[as.numeric(format(data$date, "%m"))]), ") ", autour_de(data$city), ".")
-      } else {
-        
-        explication_principale <- paste0("Cette température est <b>", diff, "°C</b> ", direction, " à la moyenne de saison (", round(moyenne_reelle, 1), "°C) pour la période ", input$periode_normale, ".")
-        
-        nombre_occurrences_jour <- if (direction == "supérieure") sum(donnees_historiques_jour$tmax_celsius >= data$temp, na.rm = TRUE) else sum(donnees_historiques_jour$tmax_celsius <= data$temp, na.rm = TRUE)
-        frequence_jour_text <- if (nombre_occurrences_jour == 0) paste0("Autour de cette date (fenêtre de ±7 jours), un événement de cette intensité ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".") else paste0("Autour de cette date (fenêtre de ±7 jours), une température égale ou ", direction, " est arrivée <b>", nombre_occurrences_jour, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
-        
-        saison <- get_season_info(data$date)
-
-        donnees_historiques_saison <- tbl(db_pool, "temperatures_max") %>%
-          filter(
-            ville == !!data$city,
-            annee %in% !!annees_a_filtrer,
-            mois %in% !!saison$mois
-          ) %>%
-          select(date, temperature_max) %>%
-          collect() %>%
-          rename(tmax_celsius = temperature_max)
-        
-        nombre_occurrences_saison <- if (direction == "supérieure") sum(donnees_historiques_saison$tmax_celsius >= data$temp, na.rm = TRUE) else sum(donnees_historiques_saison$tmax_celsius <= data$temp, na.rm = TRUE)
-        message_occurrence_saison <- if (round(nombre_occurrences_saison/(annee_fin-annee_debut+1) >= 1)) {
-           paste0(round(nombre_occurrences_saison/(annee_fin-annee_debut+1), 0))
-        } else if (round(nombre_occurrences_saison/(annee_fin-annee_debut+1) > 0)) {
-          "moins d'une"
-        } else {
-          "0"
-        }
-        frequence_saison_text <- if (nombre_occurrences_saison == 0) paste0("À l'échelle de la saison (", saison$nom, "), une température aussi ", if (direction == "supérieure") "élevée" else "basse", " ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".") else paste0("À l'échelle de la saison (", saison$nom, "), une température égale ou ", direction, " est arrivée en moyenne <b>", message_occurrence_saison, " fois</b> par an entre ", annee_debut, " et ", annee_fin, ".")
-        
-        explication_text <- paste(explication_principale, frequence_jour_text, frequence_saison_text, sep = "<br><br>")
-      }
-      
-      feedback_body <- paste0("<b>", intro_message, "</b><br><br>", explication_text)
-
-      # --- Phrase projections (TRACC) : situe la température aux horizons futurs.
-      proj <- projections_quiz()
-      if (!is.null(proj)) {
-        classer <- function(temp, p10, p90) {
-          if (temp < p10) "<b>en dessous des normales</b>"
-          else if (temp > p90) "<b>au-dessus des normales</b>"
-          else "<b>dans les normales de saison</b>"
-        }
-        phrases <- vapply(proj$niveaux, function(n)
-          paste0("à l'horizon <b>", n$label, "</b>, elle serait ",
-                 classer(data$temp, n$p10, n$p90)), character(1))
-        feedback_body <- paste0(
-          feedback_body,
-          "<br><br><span style='color:#555'>🌡️ Avec le réchauffement (trajectoire de référence ",
-          "TRACC ; les niveaux +2,7 °C et +4 °C s'entendent par rapport à l'ère préindustrielle) : ",
-          paste(phrases, collapse = " ; "), ".</span>")
-      }
-
-      # --- TITRE DU BOXPLOT (HTML) ---
-      # Rendu hors du graphique plotly (qui ne sait pas passer à la ligne et se
-      # tronque sur écran étroit). En HTML, le titre s'enroule naturellement et
-      # reste responsive. Le sous-titre suit l'horizon actif (présent/2050/2100).
-      output$boxplot_titre <- renderUI({
-        data_quiz <- quiz_data()
-        req(data_quiz, boxplot_data())
-        fmt1 <- function(x) format(round(x, 1), nsmall = 1, decimal.mark = ",")
-        main_title <- paste0("Distribution historique ", autour_de(data_quiz$city),
-                             " (vers le ", paste(format(data_quiz$date, "%d"),
-                             mois_fr[as.numeric(format(data_quiz$date, "%m"))]), ", ±7 j)")
-        actif <- repere_actif()
-        sous_titre <- if (!is.null(actif))
-          paste0(actif$titre, " : zone normale ", fmt1(actif$p10), "–", fmt1(actif$p90),
-                 " °C · moyenne ", fmt1(actif$moy), " °C")
-        else paste("Période", input$periode_normale)
-        tagList(
-          tags$p(class = "fw-bold mb-1", main_title),
-          tags$p(class = "text-muted small mb-2", sous_titre)
-        )
-      })
-
-      # --- BOXPLOT ---
-      output$feedback_boxplot <- renderPlotly({
-
-        req(boxplot_data())
-
-        data_quiz <- quiz_data()
-        donnees_historiques_jour_plot <- boxplot_data()
-
-        fmt1 <- function(x) format(round(x, 1), nsmall = 1, decimal.mark = ",")
-        seuils <- seuils_quiz()
-        proj   <- projections_quiz()
-        actif  <- repere_actif()
-
-        # Cadre Y fixe couvrant présent + 2050 + 2100 : en basculant, la zone
-        # « normale » glisse vers le haut sans que le boxplot soit redimensionné.
-        all_y <- c(donnees_historiques_jour_plot$tmax_celsius, data_quiz$temp)
-        if (!is.null(seuils)) all_y <- c(all_y, seuils$p10, seuils$p90)
-        if (!is.null(proj)) for (n in proj$niveaux) all_y <- c(all_y, n$p10, n$p90)
-        yr <- range(all_y, na.rm = TRUE); yr <- yr + c(-1, 1) * 0.06 * diff(yr)
-
-        # Boîte et nuage élargis pour mieux occuper la colonne étroite du mobile,
-        # police réduite (base_size) pour rester lisible sans déborder.
-        p <- ggplot(donnees_historiques_jour_plot, aes(x = "", y = tmax_celsius)) +
-          geom_boxplot(width = 0.5, fill = "skyblue", alpha = 0.7) +
-          geom_jitter(aes(text = paste("Date :", format(date, "%d %b %Y"),
-                                       "<br>Température :", round(tmax_celsius, 1), "°C")),
-                      width = 0.18, alpha = 0.4, color = "darkblue") +
-          geom_point(data = data.frame(temp_quiz = data_quiz$temp),
-                     aes(x = "", y = temp_quiz,
-                         text = paste("Température du quiz :", data_quiz$temp, "°C")),
-                     color = "red", size = 4, shape = 4, stroke = 1.5, alpha = 0.85) +
-          scale_y_continuous(labels = ~paste(.x, "°C")) +
-          labs(x = "", y = "Température Maximale") +
-          theme_minimal(base_size = 12)
-
-        # Zone normale de l'horizon actif (rectangle + bornes p10/p90 + moyenne).
-        if (!is.null(actif)) {
-          p <- p +
-            annotate("rect", xmin = 0.5, xmax = 1.5, ymin = actif$p10, ymax = actif$p90,
-                     fill = actif$couleur, alpha = 0.15) +
-            geom_hline(yintercept = c(actif$p10, actif$p90),
-                       linetype = "dashed", color = actif$couleur, linewidth = 0.8) +
-            geom_point(data = data.frame(y = actif$moy),
-                       aes(x = "", y = y, text = paste("Moyenne :", fmt1(actif$moy), "°C")),
-                       shape = 4, size = 4, color = "black")
-        }
-
-        ggplotly(p, tooltip = "text") %>%
-          layout(xaxis = list(fixedrange = TRUE),
-                 yaxis = list(fixedrange = TRUE, range = yr),
-                 margin = list(t = 10)) %>%
-          config(displayModeBar = FALSE, responsive = TRUE)
-
-      })
-      
-      # --- Affichage du texte et du graphique dans l'UI ---
-      output$feedback_ui <- renderUI({
-        tagList(
-          HTML(feedback_body),
-          hr(),
-          h4("Visualisation de la distribution"),
-          if (!is.null(projections_quiz()))
-            div(class = "text-center mb-2",
-                radioGroupButtons(
-                  session$ns("horizon_proj"),
-                  label = "Comparer à la normale de :",
-                  choices = c("Aujourd'hui" = "present",
-                              "2050 (+2,7 °C)" = "2050",
-                              "2100 (+4 °C)" = "2100"),
-                  selected = "present", size = "sm", status = "primary")),
-          uiOutput(session$ns("boxplot_titre")),
-          plotlyOutput(session$ns("feedback_boxplot"), height = "340px"),
-          hr(),
-          div(
-            class = "text-center",
-            p(class = "text-muted small mb-2",
-              "Partagez ce repère de température autour de vous :"),
-            actionButton(session$ns("partager_btn"),
-                         "Partager mon résultat",
-                         icon = icon("share-nodes"), class = "btn-primary")
-          )
-        )
-      })
-      
-      shinyjs::disable("user_answer")
-      shinyjs::disable("submit_answer_btn")
-      
     })
-    
-    # --- Partage de la carte de résultat (PNG 1200×630) ---
-    # On génère l'image côté serveur, on l'embarque (base64) dans un modal
-    # d'aperçu, où l'utilisateur choisit le canal : copier, télécharger, partage
-    # natif (mobile) ou ouverture d'un réseau social (cf. www/partage.js).
-    observeEvent(input$partager_btn, {
-      res <- dernier_resultat()
-      req(res)
 
-      f <- tempfile(fileext = ".png")
-      sauver_carte_partage(res, f)
-      on.exit(unlink(f), add = TRUE)
+    observeEvent(input$rejouer_btn, {
+      f <- filtres_serie(); req(f)
+      nouvelle <- tirer_serie(f$periode, f$ville, f$saison)
+      if (length(nouvelle) == 0) {
+        showNotification("Impossible de regénérer une série pour ce choix.", type = "error")
+        return()
+      }
+      demarrer_serie(nouvelle)
+    })
+
+    observeEvent(input$reglages_btn, { etat("accueil") })
+
+    # --- Partage de la carte de série (PNG 1200×630) ------------------------
+    observeEvent(input$partager_serie_btn, {
+      f <- filtres_serie(); req(f)
+      n <- length(serie()); sc <- score_serie()
+      pal <- palier_score(sc, n)
+      params <- list(score = sc, n = n, ville_filtre = f$ville, saison_filtre = f$saison,
+                     periode_ref = f$periode, couleur = pal$couleur, libelle = pal$libelle)
+      fpng <- tempfile(fileext = ".png")
+      sauver_carte_serie(params, fpng)
+      on.exit(unlink(fpng), add = TRUE)
       data_uri <- paste0("data:image/png;base64,",
-                         jsonlite::base64_enc(readBin(f, "raw", n = file.info(f)$size)))
-
-      ecart <- round(res$temp - res$normale_moy, 1)
-      sens <- if (ecart > 0) "au-dessus" else if (ecart < 0) "en-dessous" else "dans"
-      texte <- if (ecart == 0) {
-        paste0(res$temp, "°C ", autour_de(res$ville), " : exactement dans la normale de saison. Et vous, sauriez-vous situer ce qui est normal ?")
-      } else {
-        paste0(res$temp, "°C ", autour_de(res$ville), " : ", sprintf("%+.1f", ecart),
-               "°C ", sens, " de la normale de saison. Et vous, sauriez-vous situer ce qui est normal ?")
-      }
-      nom_fichier <- paste0("normal-ou-pas_", gsub("[^A-Za-z0-9]+", "_", res$ville), ".png")
-
-      showModal(modal_partage(data_uri, texte, nom_fichier))
+                         jsonlite::base64_enc(readBin(fpng, "raw", n = file.info(fpng)$size)))
+      texte <- sprintf("J'ai fait %d/%d au défi climatique « Normal ou pas ? ». Et vous, sauriez-vous situer ce qui est normal ?", sc, n)
+      nom_fichier <- sprintf("normal-ou-pas_serie_%dsur%d.png", sc, n)
+      showModal(modal_partage(data_uri, texte, nom_fichier, titre = "Partager mon score"))
     })
 
+    # Contrat avec server.R : cumul de session INCHANGÉ (analytics_visits) +
+    # événement de série terminée (persistance BDD, câblée dans server.R).
     return(list(
       successes = score_succes,
-      failures = score_echecs
+      failures = score_echecs,
+      serie_terminee = serie_terminee
     ))
-
   })
 }

@@ -1,0 +1,129 @@
+/* www/quiz_serie.css
+   Habillage du quiz « Série de 10 » : carte centrée, barre de progression à
+   pastilles, anneau de score, révélation des réponses. Pas de JS : l'anneau et
+   les transitions sont en CSS pur. */
+
+.quiz-module { padding: 0.5rem 0 2rem; }
+
+/* Carte centrée et lisible, commune aux 3 écrans. */
+.quiz-module .quiz-card {
+  max-width: 680px;
+  margin: 1rem auto;
+  border: none;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.08);
+}
+.quiz-titre { font-weight: 700; }
+
+/* --- Barre de progression (10 pastilles) --- */
+.quiz-progress {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 0.5rem;
+}
+.quiz-progress .pastille {
+  flex: 1 1 0;
+  height: 8px;
+  border-radius: 4px;
+  background: #e9ecef;
+  transition: background-color 0.25s ease;
+}
+.pastille-juste    { background: #2E8B57 !important; }
+.pastille-faux     { background: #C0392B !important; }
+.pastille-courante { background: #0d6efd !important; }
+.pastille-avenir   { background: #e9ecef !important; }
+
+/* --- Carte-question (énoncé) avec entrée en fondu --- */
+.carte-question {
+  background: #f8f9fa;
+  border-radius: 10px;
+  padding: 1.25rem 1rem;
+  margin-bottom: 1rem;
+  text-align: center;
+  animation: quiz-fade-in 0.35s ease;
+}
+.carte-question .enonce {
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: 1.5;
+}
+@keyframes quiz-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Boutons-réponses verticaux plus aérés. */
+.quiz-card .btn-group-vertical .btn { padding: 0.7rem 1rem; text-align: center; }
+
+/* --- Révélation des réponses --- */
+.options-reveal { display: flex; flex-direction: column; gap: 0.5rem; }
+.option-reveal {
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  color: #6c757d;
+  background: #fff;
+}
+.option-reveal span { margin-left: 0.4rem; }
+.option-correcte {
+  border-color: #2E8B57;
+  background: #e9f5ee;
+  color: #1e6e44;
+  font-weight: 600;
+}
+.option-incorrecte {
+  border-color: #C0392B;
+  background: #fbeceb;
+  color: #962a20;
+  font-weight: 600;
+}
+.feedback-explication { line-height: 1.6; }
+
+/* --- Anneau de score (écran bilan) --- */
+.anneau-score {
+  --pct: 0;
+  --accent: #2E8B57;
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  margin: 0.5rem auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: conic-gradient(var(--accent) calc(var(--pct) * 1%), #e9ecef 0);
+  transition: background 0.6s ease;
+}
+.anneau-score .anneau-chiffre {
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: #343a40;
+}
+
+/* --- Récapitulatif du bilan --- */
+.recap-ligne {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #f1f3f5;
+}
+.recap-icone { width: 1.2rem; text-align: center; }
+.recap-juste .recap-icone { color: #2E8B57; }
+.recap-faux  .recap-icone { color: #C0392B; }
+.recap-fait { font-weight: 500; }
+.recap-detail { font-size: 0.85rem; color: #6c757d; }
+
+/* --- Mobile --- */
+@media (max-width: 575px) {
+  .quiz-module .quiz-card { margin: 0.5rem 0.25rem; }
+  .carte-question .enonce { font-size: 1.1rem; }
+  .quiz-progress { gap: 4px; }
+  .anneau-score { width: 128px; height: 128px; }
+  .anneau-score .anneau-chiffre { width: 96px; height: 96px; font-size: 1.8rem; }
+}
