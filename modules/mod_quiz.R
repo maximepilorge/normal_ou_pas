@@ -166,16 +166,8 @@ calculer_feedback_manche <- function(db_pool, data, periode_ref) {
     n_fin <- Filter(function(x) startsWith(x$niveau, "2100"), projections$niveaux)
     n_fin <- if (length(n_fin) > 0) n_fin[[1]] else projections$niveaux[[length(projections$niveaux)]]
     annee_h <- sub("_.*", "", n_fin$niveau)
-    if (data$temp > n_fin$p90) {
-      projection_txt <- paste0("Même en ", annee_h, ", elle resterait au-dessus des normales")
-      projection_couleur <- "#E41A1C"
-    } else if (data$temp < n_fin$p10) {
-      projection_txt <- paste0("En ", annee_h, ", elle passerait en-dessous des normales")
-      projection_couleur <- "#1f77b4"
-    } else {
-      projection_txt <- paste0("En ", annee_h, ", une telle température sera dans les normales")
-      projection_couleur <- "#2E8B57"
-    }
+    ph <- phrase_projection_futur(data$temp, data$correct_answer, n_fin$p10, n_fin$p90, annee_h)
+    if (!is.null(ph)) { projection_txt <- ph$txt; projection_couleur <- ph$couleur }
   }
 
   list(explication = explication_text, seuils = seuils,

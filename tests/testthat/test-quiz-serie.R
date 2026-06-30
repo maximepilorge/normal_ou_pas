@@ -124,6 +124,25 @@ test_that("commentaire_manche : taquin escaladant, neutre si poli, repli stable"
   expect_true(nzchar(commentaire_manche(FALSE, 99, FALSE)))
 })
 
+test_that("phrase_projection_futur ne dit pas « passerait » d'une temp déjà en-dessous", {
+  # Zone normale projetée 2100 = [10, 20] °C.
+  # Déjà en-dessous aujourd'hui ET sous la zone future -> « encore plus en-dessous ».
+  r <- phrase_projection_futur(5, "En-dessous des normales", 10, 20, "2100")
+  expect_match(r$txt, "encore plus en-dessous")
+  expect_false(grepl("passerait", r$txt))
+  # Normale aujourd'hui mais sous la zone future (qui a monté) -> « passerait en-dessous ».
+  r2 <- phrase_projection_futur(9, "Dans les normales de saison", 10, 20, "2100")
+  expect_match(r2$txt, "passerait en-dessous")
+  # Au-dessus de la zone future -> « resterait au-dessus ».
+  expect_match(phrase_projection_futur(25, "Au-dessus des normales", 10, 20, "2100")$txt,
+               "resterait au-dessus")
+  # Dans la zone future -> « dans les normales ».
+  expect_match(phrase_projection_futur(15, "Au-dessus des normales", 10, 20, "2100")$txt,
+               "dans les normales")
+  # Bornes non finies -> NULL (projections indisponibles).
+  expect_null(phrase_projection_futur(5, "En-dessous des normales", NA, 20, "2100"))
+})
+
 test_that("couleur_score : bandes rouge (0-2) / ambre (3-6) / vert (7-8) / or (9-10)", {
   expect_equal(couleur_score(0, 10), "#C0392B")
   expect_equal(couleur_score(2, 10), "#C0392B")

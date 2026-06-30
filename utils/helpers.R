@@ -218,6 +218,29 @@ couleur_score <- function(score, n = 10) {
   else                "#B8860B"   # 9-10 : or
 }
 
+# Phrase « nouvelle normale du futur » pour la carte de partage d'une manche :
+# situe la température vs la zone normale PROJETÉE (p10_fin/p90_fin) à l'horizon
+# `annee`. La zone normale MONTE avec le réchauffement ; on tient donc compte de
+# la catégorie ACTUELLE pour ne pas annoncer « elle passerait en-dessous » d'une
+# température déjà en-dessous aujourd'hui (elle le serait alors « encore plus »).
+# Renvoie list(txt, couleur), ou NULL si les bornes projetées sont indisponibles.
+phrase_projection_futur <- function(temp, categorie_actuelle, p10_fin, p90_fin, annee) {
+  if (!is.finite(p10_fin) || !is.finite(p90_fin)) return(NULL)
+  if (temp > p90_fin) {
+    list(txt = paste0("Même en ", annee, ", elle resterait au-dessus des normales"),
+         couleur = "#E41A1C")
+  } else if (temp < p10_fin) {
+    txt <- if (identical(categorie_actuelle, "En-dessous des normales"))
+      paste0("En ", annee, ", elle serait encore plus en-dessous des normales")
+    else
+      paste0("En ", annee, ", elle passerait en-dessous des normales")
+    list(txt = txt, couleur = "#1f77b4")
+  } else {
+    list(txt = paste0("En ", annee, ", une telle température sera dans les normales"),
+         couleur = "#2E8B57")
+  }
+}
+
 # Construit le modal de partage d'une image (carte de résultat). Partagé par le
 # quiz et l'onglet « Une journée » : même UX, mêmes identifiants que www/partage.js
 # (#apercu-partage-img, #partage-zone[data-texte]) qui pilote copie / partage natif
