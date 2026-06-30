@@ -100,6 +100,10 @@ indicateurs_disponibles <- table_existe("indicateurs_annuels")
 projections_disponibles <- table_existe("stats_normales_projetees")
 # Période de référence sur laquelle les deltas de projection sont ancrés (présent).
 PERIODE_REF_PROJECTION <- "1991-2020"
+# Table RUNTIME des scores de série du quiz (créée à la main, hors pipeline ;
+# cf. utils/quiz_series_scores.sql). Absente -> l'app n'écrit pas les scores et
+# masque le « meilleur score » personnel (dégradation gracieuse, cf. analytics).
+quiz_scores_disponibles <- table_existe("quiz_series_scores")
 
 # Utilitaire : bornes (début, fin) d'un libellé de période "AAAA-AAAA".
 .periode_bornes <- function(p) as.numeric(strsplit(p, "-")[[1]])

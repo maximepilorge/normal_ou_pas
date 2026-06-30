@@ -176,7 +176,7 @@ mod_quiz_ui <- function(id) {
   div(class = "quiz-module", uiOutput(ns("quiz_zone")))
 }
 
-mod_quiz_server <- function(id, db_pool) {
+mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
 
     ns <- session$ns
@@ -448,6 +448,26 @@ mod_quiz_server <- function(id, db_pool) {
                yaxis = list(fixedrange = TRUE, range = yr),
                margin = list(t = 10)) %>%
         config(displayModeBar = FALSE, responsive = TRUE)
+    })
+
+    # Meilleur score personnel (lecture BDD sous garde) — affiché au bilan. On
+    # combine avec le score de la série courante (max) pour rester juste quelle
+    # que soit la fenêtre d'écriture en base (course avec server.R sans incidence).
+    output$record_perso <- renderUI({
+      req(etat() == "resultats")
+      if (!isTRUE(quiz_scores_disponibles)) return(NULL)
+      vid <- visitor_id()
+      if (is.null(vid) || !nzchar(vid)) return(NULL)
+      n <- length(serie()); sc <- score_serie()
+      meilleur_bdd <- tryCatch({
+        res <- tbl(db_pool, "quiz_series_scores") %>%
+          filter(visitor_id == !!vid) %>%
+          summarise(m = max(score, na.rm = TRUE)) %>% collect()
+        if (nrow(res) == 0 || is.na(res$m[1])) NA_integer_ else as.integer(res$m[1])
+      }, error = function(e) NA_integer_)
+      record <- max(c(sc, meilleur_bdd), na.rm = TRUE)
+      div(class = "record-perso text-muted small mt-1",
+          sprintf("Votre meilleur score : %d/%d", record, n))
     })
 
     # --- Transitions --------------------------------------------------------

@@ -41,13 +41,46 @@ server <- function(input, output, session) {
   }, once = TRUE)
   
   # On appelle les modules
-  quiz_scores <- mod_quiz_server("quiz_1", db_pool = db_pool)
-  
+  quiz_scores <- mod_quiz_server("quiz_1", db_pool = db_pool,
+                                 visitor_id = visitor_id_reactive)
+
   # Cet observe s'exécutera chaque fois que les scores changent
   observe({
     session_final_data$successes <- quiz_scores$successes()
     session_final_data$failures <- quiz_scores$failures()
   })
+
+  # Persistance d'un score par SÉRIE terminée (table runtime quiz_series_scores),
+  # distincte de l'écriture analytics_visits de fin de session. Dégrade proprement
+  # si la table n'existe pas encore (quiz_scores_disponibles), si l'ID visiteur
+  # n'est pas encore connu, ou si la BDD refuse (tryCatch).
+  observeEvent(quiz_scores$serie_terminee(), {
+    ev <- quiz_scores$serie_terminee()
+    req(ev)
+    if (!isTRUE(quiz_scores_disponibles)) return()
+    vid <- session_final_data$visitor_id
+    if (is.null(vid)) return()
+    dtype <- session_final_data$device_type
+    if (is.null(dtype)) dtype <- NA_character_
+    duree <- ev$duree_seconds
+    if (is.null(duree) || is.na(duree)) duree <- NA_integer_
+    ligne <- data.frame(
+      visitor_id    = vid,
+      played_ts     = ev$stamp,
+      score         = ev$score,
+      nb_questions  = ev$nb_questions,
+      periode_ref   = ev$periode_ref,
+      ville_filtre  = ev$ville_filtre,
+      saison_filtre = ev$saison_filtre,
+      device_type   = dtype,
+      duree_seconds = duree,
+      stringsAsFactors = FALSE
+    )
+    tryCatch(
+      pool::dbAppendTable(db_pool, "quiz_series_scores", ligne),
+      error = function(e) cat("Avis : écriture quiz_series_scores échouée :",
+                              conditionMessage(e), "\n"))
+  }, ignoreInit = TRUE)
   
   # Cette fonction s'exécutera automatiquement quand un utilisateur fermera son navigateur
   session$onSessionEnded(function() {
