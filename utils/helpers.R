@@ -148,45 +148,76 @@ echantillonner_serie <- function(candidats, n = 10) {
   lapply(.melanger(pris), function(i) materialiser_question(candidats[i, , drop = FALSE]))
 }
 
-# Commentaire de bilan d'une série, indexé sur le score /n et le ton : taquin par
-# défaut (sarcastique, cohérent avec les messages du quiz historique), neutre et
-# porteur du message climatique si l'utilisateur a coché « me répondre poliment ».
-# Fonction pure, testable par paliers.
+# Commentaire taquin AFFICHÉ APRÈS CHAQUE RÉPONSE (révélation d'une manche).
+# Taquin par défaut (messages escaladant selon le `rang` = n-ième bonne/mauvaise
+# réponse de la série, cohérent avec le quiz historique), neutre si l'utilisateur
+# a coché « me répondre poliment ». Au-delà du pool, repli sur un message stable.
+# Fonction pure, testable.
+commentaire_manche <- function(juste, rang, poli = FALSE) {
+  if (isTRUE(poli)) return(if (isTRUE(juste)) "Bonne réponse !" else "Mauvaise réponse.")
+  succes <- c(
+    "C'est la chance du débutant, j'imagine.",
+    "Tu es vraiment obligé de montrer que tu sais tout mieux que tout le monde.",
+    "Je pourrais presque commencer à t'apprécier, à force.",
+    "Là, tu commences à me faire douter : tu n'aurais pas un thermomètre caché ?",
+    "D'accord, tu sais lire les normales. Pas la peine d'en rajouter.")
+  echecs <- c(
+    "Tu feras mieux la prochaine fois. Enfin, j'espère pour toi.",
+    "Tu ne pouvais pas mieux te tromper, félicitations !",
+    "Ta détermination à échouer force l'admiration.",
+    "À ce stade, je commence à croire que tu le fais exprès.",
+    "Bon. On va dire que les normales, ce n'est pas tout à fait ton truc.")
+  pool <- if (isTRUE(juste)) succes else echecs
+  classique <- if (isTRUE(juste)) "Bien vu !" else "Raté !"
+  if (rang >= 1 && rang <= length(pool)) pool[[rang]] else classique
+}
+
+# Commentaire de BILAN d'une série, indexé sur le score /n et le ton. CALIBRÉ sur
+# le hasard réel d'un quiz à 3 choix : le pur hasard donne ~n/3 (≈ 3,3/10), pas
+# n/2. Les paliers : < 0,3 (sous le hasard), 0,3-0,5 (autour du hasard), 0,5-0,7
+# (au-dessus), 0,7-0,9 (bon), ≥ 0,9 (excellent). Taquin par défaut, neutre et
+# porteur du message climatique si « poliment ». Fonction pure, testable.
 commentaire_serie <- function(score, n = 10, poli = FALSE) {
   pct <- if (n > 0) score / n else 0
   if (isTRUE(poli)) {
-    if (pct < 0.4)
-      sprintf("Score : %d/%d. Les repères de température se faussent vite avec le réchauffement — réessayez, on apprend en jouant.", score, n)
+    if (pct < 0.3)
+      sprintf("Score : %d/%d. Sur trois réponses possibles à chaque question, situer le « normal » demande de l'habitude — les repères se faussent vite avec le réchauffement. Réessayez, on apprend en jouant.", score, n)
+    else if (pct < 0.5)
+      sprintf("Score : %d/%d. Autour du niveau du pur hasard (une chance sur trois) : pas si évident de dire ce qui est encore normal aujourd'hui.", score, n)
     else if (pct < 0.7)
-      sprintf("Score : %d/%d. Une bonne moitié de juste : pas évident de situer ce qui est normal aujourd'hui.", score, n)
+      sprintf("Score : %d/%d. Au-dessus du hasard : vos repères de température se précisent.", score, n)
     else if (pct < 0.9)
       sprintf("Score : %d/%d. Beau résultat, vos repères climatiques sont solides.", score, n)
     else
       sprintf("Score : %d/%d. Excellent — vous lisez le climat comme une carte.", score, n)
   } else {
     if (score == 0)
-      "Zéro pointé. À ce niveau, ce n'est plus de la malchance, c'est un don."
-    else if (pct < 0.4)
-      sprintf("%d sur %d. Le thermomètre te résiste encore un peu, on va dire.", score, n)
-    else if (pct < 0.6)
-      sprintf("%d sur %d. Pile poil le hasard : tu aurais fait aussi bien à pile ou face.", score, n)
-    else if (pct < 0.8)
-      sprintf("%d sur %d ! Pas mal du tout… j'ai presque envie de te féliciter. Presque.", score, n)
+      "Zéro pointé. Sur trois choix à chaque question, ne pas en placer une seule, il fallait presque le faire."
+    else if (pct < 0.3)
+      sprintf("%d sur %d. Tu as réussi à faire moins bien que le hasard. Statistiquement, c'est presque un exploit.", score, n)
+    else if (pct < 0.5)
+      sprintf("%d sur %d. Une chance sur trois par question, et te voilà à peine au-dessus du pur hasard. On progresse… doucement.", score, n)
+    else if (pct < 0.7)
+      sprintf("%d sur %d. Tu commences à sentir ce qui est normal — à moins que ce ne soit la chance, va savoir.", score, n)
+    else if (pct < 0.9)
+      sprintf("%d sur %d ! Joli. Tu as clairement l'œil pour les normales : j'ai presque envie de te féliciter. Presque.", score, n)
     else if (pct < 1)
-      sprintf("%d sur %d. Bon, tu commences sérieusement à m'agacer de tout savoir.", score, n)
+      sprintf("%d sur %d. À un cheveu du sans-faute. Insupportable de maîtrise.", score, n)
     else
       sprintf("%d sur %d. Sans faute. Soit tu es météorologue, soit tu as triché. Dans le doute, bravo.", score, n)
   }
 }
 
-# Palier qualitatif d'un score (couleur d'accent + libellé), partagé par l'anneau
-# de l'écran de bilan et la carte de partage de série. Pur et testable.
+# Palier qualitatif d'un score (couleur d'accent + libellé neutre, valable quel
+# que soit le ton), pour l'anneau et le titre du bilan. Calibré comme ci-dessus.
+# Pur et testable.
 palier_score <- function(score, n = 10) {
   pct <- if (n > 0) score / n else 0
-  if (pct < 0.4)      list(niveau = "faible",  libelle = "Des repères à recalibrer", couleur = "#C0392B")
-  else if (pct < 0.7) list(niveau = "moyen",   libelle = "Pas mal !",                couleur = "#E8A33D")
-  else if (pct < 0.9) list(niveau = "bon",     libelle = "Bon climatologue !",       couleur = "#2E8B57")
-  else                list(niveau = "parfait", libelle = "Maître des normales",      couleur = "#B8860B")
+  if (pct < 0.3)      list(niveau = "faible",  libelle = "Des repères à recalibrer",        couleur = "#C0392B")
+  else if (pct < 0.5) list(niveau = "hasard",  libelle = "Tout juste au-dessus du hasard",  couleur = "#E8A33D")
+  else if (pct < 0.7) list(niveau = "moyen",   libelle = "Sur la bonne voie",               couleur = "#E8A33D")
+  else if (pct < 0.9) list(niveau = "bon",     libelle = "Bon climatologue !",              couleur = "#2E8B57")
+  else                list(niveau = "parfait", libelle = "Maître des normales",             couleur = "#B8860B")
 }
 
 # Construit le modal de partage d'une image (carte de résultat). Partagé par le

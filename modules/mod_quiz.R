@@ -220,6 +220,7 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
     seuils_quiz     <- reactiveVal(NULL)
     projections_quiz<- reactiveVal(NULL)
     dernier_resultat<- reactiveVal(NULL)        # params de la carte de partage de la manche
+    taquin_manche   <- reactiveVal(NULL)        # commentaire taquin de la manche révélée
 
     # Score CUMULÉ sur la session (compat analytics_visits / server.R) — incrémenté
     # à chaque validation, exactement comme le quiz historique.
@@ -327,6 +328,8 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
         badge <- div(class = "text-center mb-2",
           span(class = paste("badge fs-6", if (juste) "bg-success" else "bg-danger"),
                if (juste) "BONNE RÉPONSE" else "RATÉ"))
+        taquin <- if (!is.null(taquin_manche()))
+          div(class = "taquin-manche text-center mb-3", strong(taquin_manche()))
         # Révélation : chaque option marquée correcte / mauvais choix.
         options <- lapply(CATEGORIES_QUIZ, function(o) {
           cls <- "option-reveal"; ic <- NULL
@@ -348,6 +351,7 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
         tagList(
           div(class = "carte-question carte-reveal", h3(enonce, class = "enonce")),
           badge,
+          taquin,
           div(class = "options-reveal", options),
           div(class = "feedback-explication mt-3", HTML(fb$explication)),
           distribution,
@@ -551,6 +555,13 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
       if (is_correct) score_succes(score_succes() + 1) else score_echecs(score_echecs() + 1)
 
       r <- reponses(); r[[idx()]] <- list(user_answer = ans, juste = is_correct); reponses(r)
+
+      # Commentaire taquin de la manche : escalade selon le n-ième succès/échec de
+      # la série (cohérent avec le quiz historique), bascule taquin/poli.
+      repondus <- Filter(Negate(is.null), r)
+      corrects <- sum(vapply(repondus, function(x) isTRUE(x$juste), logical(1)))
+      rang <- if (is_correct) corrects else (length(repondus) - corrects)
+      taquin_manche(commentaire_manche(is_correct, rang, isTRUE(filtres_serie()$poli)))
 
       quiz_data(q)
       fb <- calculer_feedback_manche(db_pool, q, filtres_serie()$periode)

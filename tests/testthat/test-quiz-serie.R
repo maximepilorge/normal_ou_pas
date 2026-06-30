@@ -100,6 +100,30 @@ test_that("commentaire_serie : un texte par palier, bascule taquin/poli", {
   expect_false(identical(commentaire_serie(10, 10), commentaire_serie(0, 10)))
 })
 
+test_that("commentaire_serie est calibré sur le hasard d'un quiz à 3 choix", {
+  # 4/10 ne doit plus évoquer « pile ou face » / « pile poil le hasard »
+  expect_false(grepl("pile", commentaire_serie(4, 10), ignore.case = TRUE))
+  # autour du niveau du hasard (3-4/10), on cadre explicitement sur « le hasard »
+  expect_match(commentaire_serie(3, 10), "hasard|chance", ignore.case = TRUE)
+  expect_match(commentaire_serie(4, 10), "hasard|chance", ignore.case = TRUE)
+  # paliers hauts : pas de référence au hasard
+  expect_false(grepl("hasard", commentaire_serie(10, 10), ignore.case = TRUE))
+})
+
+test_that("commentaire_manche : taquin escaladant, neutre si poli, repli stable", {
+  expect_type(commentaire_manche(TRUE, 1, FALSE), "character")
+  expect_type(commentaire_manche(FALSE, 1, FALSE), "character")
+  # poli -> messages neutres courts
+  expect_match(commentaire_manche(TRUE, 1, TRUE), "[Bb]onne")
+  expect_match(commentaire_manche(FALSE, 1, TRUE), "[Mm]auvaise")
+  # escalade : rangs successifs -> messages différents tant qu'on est dans le pool
+  expect_false(identical(commentaire_manche(TRUE, 1, FALSE), commentaire_manche(TRUE, 2, FALSE)))
+  expect_false(identical(commentaire_manche(FALSE, 1, FALSE), commentaire_manche(FALSE, 2, FALSE)))
+  # au-delà du pool -> repli sur un message stable et non vide
+  expect_true(nzchar(commentaire_manche(TRUE, 99, FALSE)))
+  expect_true(nzchar(commentaire_manche(FALSE, 99, FALSE)))
+})
+
 test_that("palier_score borne couleurs et libellés", {
   expect_equal(palier_score(2, 10)$niveau, "faible")
   expect_equal(palier_score(5, 10)$niveau, "moyen")

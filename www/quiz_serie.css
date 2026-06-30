@@ -112,6 +112,7 @@
   color: #962a20;
   font-weight: 600;
 }
+.taquin-manche { font-size: 1.1rem; color: #343a40; }
 .feedback-explication { line-height: 1.6; }
 
 /* --- Anneau de score (écran bilan) --- */
