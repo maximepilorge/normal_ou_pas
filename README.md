@@ -16,7 +16,7 @@ Quatre onglets, en montée pédagogique :
 
 | Onglet | Module | Idée |
 |---|---|---|
-| **Le Quiz** | `modules/mod_quiz.R` | On propose une température un jour donné dans une ville ; l'utilisateur devine si elle est sous / dans / au-dessus des normales. Boxplot de la distribution historique + bascule des repères présent / 2050 / 2100. Carte de résultat partageable (PNG). |
+| **Le Quiz** | `modules/mod_quiz.R` | **Séries de 10 questions** : on paramètre la série (période, ville, saison), on répond à 10 températures (sous / dans / au-dessus des normales) avec révélation immédiate + boxplot repliable (repères présent / 2050 / 2100), puis un bilan affiche le score /10, un commentaire variable, le meilleur score et une carte de série partageable (PNG). |
 | **Comparaison** | `modules/mod_comparer.R` | « Dans l'année » : courbe d'une année vs la normale. « Entre les villes » : carte Leaflet des écarts à une normale ancienne + trajectoire d'une ville, avec curseur d'année. |
 | **Une journée** | `modules/mod_jour.R` | Analyse d'un jour précis (ville + date) : valeur, écart à la normale, rang (« jour le plus chaud autour du… depuis 1950 ») et fréquence, distribution ±7 j, carte partageable. |
 | **Évolution** | `modules/mod_analyse.R` | Écart annuel à la normale (barres), analyse du réchauffement sur 30 ans, jours de forte chaleur vs jours de gel (observé + projeté TRACC). |
@@ -65,6 +65,7 @@ pour la base de production.
 | `stats_normales_projetees` | (ville, mois, jour_mois) | Deltas TRACC par niveau de réchauffement (quiz). *(optionnelle)* |
 | `extremes_projetes` | (ville, niveau) | Jours de forte chaleur / gel projetés. *(optionnelle)* |
 | `analytics_visits` | — | Sessions anonymes (durée, appareil, score quiz). |
+| `quiz_series_scores` | — | Un score par série de quiz jouée. Table **runtime** créée à la main (`utils/quiz_series_scores.sql`), hors pipeline, comme `analytics_visits`. |
 
 Les tables marquées *optionnelles* sont testées au démarrage (`table_existe()`) :
 en leur absence, les onglets concernés affichent un message d'indisponibilité au

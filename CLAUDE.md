@@ -11,7 +11,7 @@
 
 - Structure classique Shiny : `global.R` (init + utils), `ui.R` (interface), `server.R` (orchestration)
 - 4 modules Shiny dans `modules/` :
-  - `mod_quiz.R` — Quiz interactif + boxplot + horizons projetés + carte de partage
+  - `mod_quiz.R` — Quiz en **séries de 10** (machine à états accueil/jeu/résultats) : paramétrage, 10 manches avec révélation + boxplot repliable, bilan (score /10, commentaire variable, meilleur score, partage), rejouer
   - `mod_comparer.R` — Comparaison année vs normale + carte des villes (fusion des anciens Comparaison + Carte)
   - `mod_jour.R` — Analyse d'un jour précis (rang, fréquence, distribution, partage)
   - `mod_analyse.R` — Tendances long terme + forte chaleur vs gel (observé + projeté)
@@ -29,6 +29,7 @@
   - `stats_normales` — Normales climatiques pré-calculées par période de référence (PK: ville, mois, jour_mois, periode_ref)
   - `quiz_data_precalculee` — Questions quiz pré-calculées avec catégories (PK: ville, date, periode_ref)
   - `analytics_visits` — Analytics anonymes des sessions utilisateurs
+  - `quiz_series_scores` — Un score par série de quiz jouée (table **runtime**, créée à la main hors pipeline : `utils/quiz_series_scores.sql` ; cf. `analytics_visits`)
 - Requêtes lazy via `dbplyr`/`tbl()`, données pré-calculées pour la performance
 
 ## Conventions
@@ -64,7 +65,7 @@ Rscript utils/verifier_extraction_cds.R
 ## Ne pas faire
 
 - Ne jamais committer `.Renviron` (contient les secrets BDD et clé API CDS)
-- Ne pas modifier les tables BDD directement — utiliser le pipeline `utils/`
+- Ne pas modifier les tables **« données »** directement (temperatures_max, stats_normales, quiz_data_precalculee…) — utiliser le pipeline `utils/`. Exception : les tables **runtime** alimentées par l'app (`analytics_visits`, `quiz_series_scores`) sont créées à la main et écrites via `dbAppendTable` — ne pas les confier au pipeline (il les écraserait)
 - Ne pas ajouter de dépendances R sans vérifier la compatibilité Docker (Dockerfile)
 - Les fichiers RDS dans `data/` sont des caches locaux — la source de vérité est la BDD PostgreSQL
 
@@ -73,5 +74,7 @@ Rscript utils/verifier_extraction_cds.R
 - Fixer la barre d'onglets en haut de la page lors du scroll (`position = "fixed-top"`)
 - Ajouter la comparaison multi-années sur un même graphique (onglet « Comparer »)
 
-(Faits récemment : masquage de la courbe de tendance sur mobile ; titres dynamiques
-ville/année dans les en-têtes de carte ; fusion Comparaison + Carte.)
+(Faits récemment : refonte du quiz en **séries de 10** — paramétrage, révélation
+par manche, bilan /10 + commentaire variable + partage + meilleur score, table
+runtime `quiz_series_scores` ; masquage de la courbe de tendance sur mobile ;
+titres dynamiques ville/année dans les en-têtes de carte ; fusion Comparaison + Carte.)
