@@ -124,10 +124,13 @@ test_that("commentaire_manche : taquin escaladant, neutre si poli, repli stable"
   expect_true(nzchar(commentaire_manche(FALSE, 99, FALSE)))
 })
 
-test_that("palier_score borne couleurs et libellés", {
-  expect_equal(palier_score(2, 10)$niveau, "faible")
-  expect_equal(palier_score(5, 10)$niveau, "moyen")
-  expect_equal(palier_score(8, 10)$niveau, "bon")
-  expect_equal(palier_score(10, 10)$niveau, "parfait")
-  expect_match(palier_score(10, 10)$couleur, "^#")
+test_that("couleur_score : bandes rouge (0-2) / ambre (3-6) / vert (7-8) / or (9-10)", {
+  expect_equal(couleur_score(0, 10), "#C0392B")
+  expect_equal(couleur_score(2, 10), "#C0392B")
+  expect_equal(couleur_score(3, 10), "#E8A33D")
+  expect_equal(couleur_score(6, 10), "#E8A33D")
+  expect_equal(couleur_score(7, 10), "#2E8B57")
+  expect_equal(couleur_score(8, 10), "#2E8B57")
+  expect_equal(couleur_score(9, 10), "#B8860B")
+  expect_equal(couleur_score(10, 10), "#B8860B")
 })

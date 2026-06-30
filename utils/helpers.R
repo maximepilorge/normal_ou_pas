@@ -196,11 +196,11 @@ commentaire_serie <- function(score, n = 10, poli = FALSE) {
     else if (pct < 0.3)
       sprintf("%d sur %d. Tu as réussi à faire moins bien que le hasard. Statistiquement, c'est presque un exploit.", score, n)
     else if (pct < 0.5)
-      sprintf("%d sur %d. Une chance sur trois par question, et te voilà à peine au-dessus du pur hasard. On progresse… doucement.", score, n)
+      sprintf("%d sur %d. Félicitations, te voilà à peine au-dessus du pur hasard.", score, n)
     else if (pct < 0.7)
-      sprintf("%d sur %d. Tu commences à sentir ce qui est normal — à moins que ce ne soit la chance, va savoir.", score, n)
+      sprintf("%d sur %d. C'est que tu commencerais presque à être doué.", score, n)
     else if (pct < 0.9)
-      sprintf("%d sur %d ! Joli. Tu as clairement l'œil pour les normales : j'ai presque envie de te féliciter. Presque.", score, n)
+      sprintf("%d sur %d. Joli. Ne prends pas trop la confiance cependant.", score, n)
     else if (pct < 1)
       sprintf("%d sur %d. À un cheveu du sans-faute. Insupportable de maîtrise.", score, n)
     else
@@ -208,16 +208,14 @@ commentaire_serie <- function(score, n = 10, poli = FALSE) {
   }
 }
 
-# Palier qualitatif d'un score (couleur d'accent + libellé neutre, valable quel
-# que soit le ton), pour l'anneau et le titre du bilan. Calibré comme ci-dessus.
-# Pur et testable.
-palier_score <- function(score, n = 10) {
+# Couleur d'accent de l'anneau de score : rouge (0-2), ambre (3-6), vert (7-8),
+# or (9-10). Calibrée sur le hasard d'un quiz à 3 choix. Pure et testable.
+couleur_score <- function(score, n = 10) {
   pct <- if (n > 0) score / n else 0
-  if (pct < 0.3)      list(niveau = "faible",  libelle = "Des repères à recalibrer",        couleur = "#C0392B")
-  else if (pct < 0.5) list(niveau = "hasard",  libelle = "Tout juste au-dessus du hasard",  couleur = "#E8A33D")
-  else if (pct < 0.7) list(niveau = "moyen",   libelle = "Sur la bonne voie",               couleur = "#E8A33D")
-  else if (pct < 0.9) list(niveau = "bon",     libelle = "Bon climatologue !",              couleur = "#2E8B57")
-  else                list(niveau = "parfait", libelle = "Maître des normales",             couleur = "#B8860B")
+  if (pct < 0.3)      "#C0392B"   # 0-2  : rouge
+  else if (pct < 0.7) "#E8A33D"   # 3-6  : ambre
+  else if (pct < 0.9) "#2E8B57"   # 7-8  : vert
+  else                "#B8860B"   # 9-10 : or
 }
 
 # Construit le modal de partage d'une image (carte de résultat). Partagé par le

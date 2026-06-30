@@ -374,7 +374,7 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
     ecran_resultats <- function() {
       f <- filtres_serie(); req(f)
       n <- length(serie()); sc <- score_serie()
-      pal <- palier_score(sc, n)
+      couleur <- couleur_score(sc, n)
       comm <- commentaire_serie(sc, n, isTRUE(f$poli))
 
       lignes <- lapply(seq_len(n), function(i) {
@@ -391,10 +391,9 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
 
       div(class = "quiz-card card", div(class = "card-body text-center",
         div(class = "anneau-score",
-            style = sprintf("--accent:%s; --pct:%d;", pal$couleur, as.integer(round(100 * sc / n))),
+            style = sprintf("--accent:%s; --pct:%d;", couleur, as.integer(round(100 * sc / n))),
             span(class = "anneau-chiffre", sprintf("%d/%d", sc, n))),
-        h3(pal$libelle, class = "mt-2", style = sprintf("color:%s;", pal$couleur)),
-        p(comm, class = "lead"),
+        p(comm, class = "lead mt-3"),
         uiOutput(ns("record_perso")),
         hr(),
         h5("Le détail de votre série", class = "text-start"),
