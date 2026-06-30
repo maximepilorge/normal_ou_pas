@@ -1,0 +1,109 @@
+# Tests des fonctions pures du quiz « Série de 10 » (utils/helpers.R)
+source(here::here("utils", "helpers.R"))
+
+test_that("mois_saison mappe chaque saison (et NULL pour Toutes)", {
+  expect_equal(mois_saison("Hiver"), c(12L, 1L, 2L))
+  expect_equal(mois_saison("Été"), c(6L, 7L, 8L))
+  expect_equal(mois_saison("Automne"), c(9L, 10L, 11L))
+  expect_null(mois_saison("Toutes les saisons"))
+  expect_null(mois_saison("inconnu"))
+})
+
+test_that("repartition_cibles somme à n et reste ~équilibrée", {
+  cibles <- repartition_cibles(10, CATEGORIES_QUIZ)
+  expect_equal(sum(cibles), 10)
+  expect_equal(names(cibles), CATEGORIES_QUIZ)
+  # 10 sur 3 catégories -> deux à 3 et une à 4
+  expect_true(all(cibles >= 3) && max(cibles) == 4)
+  # n divisible : strictement équilibré
+  expect_equal(unname(repartition_cibles(9, CATEGORIES_QUIZ)), c(3L, 3L, 3L))
+})
+
+test_that("materialiser_question tire dans [min,max] et reconstruit la date", {
+  set.seed(1)
+  for (i in 1:50) {
+    q <- materialiser_question(data.frame(
+      ville = "Lyon", mois = 8L, jour_mois = 14L,
+      categorie = "Au-dessus des normales",
+      min_temp = 30.04, max_temp = 34.96, normale_moy = 28.97))
+    expect_gte(q$temp, 30.0)
+    expect_lte(q$temp, 35.0)
+  }
+  expect_equal(q$city, "Lyon")
+  expect_equal(q$correct_answer, "Au-dessus des normales")
+  expect_equal(format(q$date, "%m-%d"), "08-14")
+  expect_equal(q$normale_moy, 29.0)
+})
+
+test_that("materialiser_question : min == max renvoie cette valeur unique", {
+  q <- materialiser_question(data.frame(
+    ville = "Brest", mois = 1L, jour_mois = 1L,
+    categorie = "Dans les normales de saison",
+    min_temp = 8.0, max_temp = 8.0, normale_moy = 8.0))
+  expect_equal(q$temp, 8.0)
+})
+
+# Pool riche : 3 villes x 20 jours x 3 catégories
+faire_candidats <- function(villes = c("Lyon", "Paris", "Lille"), jours = 1:20) {
+  rows <- expand.grid(ville = villes, jour_mois = jours,
+                      categorie = CATEGORIES_QUIZ, stringsAsFactors = FALSE)
+  rows$mois <- 7L
+  rows$min_temp <- 20; rows$max_temp <- 30; rows$normale_moy <- 25
+  rows
+}
+
+test_that("echantillonner_serie respecte n, l'unicité (ville,jour) et les bornes", {
+  set.seed(42)
+  serie <- echantillonner_serie(faire_candidats(), n = 10)
+  expect_length(serie, 10)
+  # toutes les questions valides
+  cats <- vapply(serie, function(q) q$correct_answer, character(1))
+  expect_true(all(cats %in% CATEGORIES_QUIZ))
+  temps <- vapply(serie, function(q) q$temp, numeric(1))
+  expect_true(all(temps >= 20 & temps <= 30))
+  # pas deux fois le même couple (ville, jour)
+  cles <- vapply(serie, function(q) paste(q$city, format(q$date, "%m-%d")), character(1))
+  expect_equal(length(unique(cles)), 10)
+})
+
+test_that("echantillonner_serie équilibre les catégories quand le pool est riche", {
+  set.seed(7)
+  serie <- echantillonner_serie(faire_candidats(), n = 9)
+  cats <- vapply(serie, function(q) q$correct_answer, character(1))
+  # pool abondant -> exactement 3 par catégorie
+  comptes <- as.integer(table(factor(cats, levels = CATEGORIES_QUIZ)))
+  expect_equal(sort(comptes), c(3L, 3L, 3L))
+})
+
+test_that("echantillonner_serie plafonne au nombre de couples (ville,jour) distincts", {
+  # 1 ville x 4 jours x 3 catégories = 12 lignes mais 4 couples distincts
+  petit <- faire_candidats(villes = "Nice", jours = 1:4)
+  serie <- echantillonner_serie(petit, n = 10)
+  expect_length(serie, 4)
+  cles <- vapply(serie, function(q) paste(q$city, format(q$date, "%m-%d")), character(1))
+  expect_equal(length(unique(cles)), 4)
+})
+
+test_that("echantillonner_serie gère un pool vide", {
+  expect_equal(echantillonner_serie(NULL), list())
+  expect_equal(echantillonner_serie(faire_candidats()[0, ]), list())
+})
+
+test_that("commentaire_serie : un texte par palier, bascule taquin/poli", {
+  for (s in 0:10) {
+    expect_type(commentaire_serie(s, 10, poli = FALSE), "character")
+    expect_type(commentaire_serie(s, 10, poli = TRUE), "character")
+  }
+  # le ton poli porte le mot « Score » ; le taquin du 0 est distinct
+  expect_match(commentaire_serie(2, 10, poli = TRUE), "^Score :")
+  expect_match(commentaire_serie(0, 10, poli = FALSE), "Z[ée]ro", perl = TRUE)
+  expect_false(identical(commentaire_serie(10, 10), commentaire_serie(0, 10)))
+})
+
+test_that("palier_score borne couleurs et libellés", {
+  expect_equal(palier_score(2, 10)$niveau, "faible")
+  expect_equal(palier_score(5, 10)$niveau, "moyen")
+  expect_equal(palier_score(8, 10)$niveau, "bon")
+  expect_equal(palier_score(10, 10)$niveau, "parfait")
+  expect_match(palier_score(10, 10)$couleur, "^#")
+})
