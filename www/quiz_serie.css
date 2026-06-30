@@ -51,8 +51,44 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* Boutons-réponses verticaux plus aérés. */
-.quiz-card .btn-group-vertical .btn { padding: 0.7rem 1rem; text-align: center; }
+/* --- Réponses : radio stylé en boutons pleine largeur, toute la zone cliquable.
+   On masque le cercle natif (mais on le garde fonctionnel) et on stylise le
+   label associé ; clic sur le texte = sélection (comportement natif du label).
+   Couvre Bootstrap 5 (.form-check) et le repli Bootstrap 3 (.radio). */
+.quiz-reponses .control-label,
+.quiz-reponses .form-label { font-weight: 600; margin-bottom: 0.5rem; }
+.quiz-reponses .shiny-options-group { display: flex; flex-direction: column; gap: 0.5rem; }
+.quiz-reponses .form-check,
+.quiz-reponses .radio { padding: 0; margin: 0; min-height: 0; }
+.quiz-reponses .form-check-input,
+.quiz-reponses .radio input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  margin: 0;
+}
+.quiz-reponses .form-check-label,
+.quiz-reponses .radio label {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid #0d6efd;
+  border-radius: 8px;
+  color: #0d6efd;
+  text-align: center;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.quiz-reponses .form-check-label:hover,
+.quiz-reponses .radio label:hover { background: #e7f1ff; }
+.quiz-reponses .form-check-input:checked + .form-check-label,
+.quiz-reponses .radio label:has(input:checked) {
+  background: #0d6efd;
+  color: #fff;
+}
 
 /* --- Révélation des réponses --- */
 .options-reveal { display: flex; flex-direction: column; gap: 0.5rem; }

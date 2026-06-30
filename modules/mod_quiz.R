@@ -159,8 +159,28 @@ calculer_feedback_manche <- function(db_pool, data, periode_ref) {
       paste(phrases, collapse = " ; "), ".</span>")
   }
 
+  # Phrase « nouvelle normale » 2100 (et sa couleur) pour la carte de partage de
+  # la manche : où se situerait cette température à l'horizon 2100 (réf. TRACC).
+  projection_txt <- NULL; projection_couleur <- NULL
+  if (!is.null(projections) && length(projections$niveaux) > 0) {
+    n_fin <- Filter(function(x) startsWith(x$niveau, "2100"), projections$niveaux)
+    n_fin <- if (length(n_fin) > 0) n_fin[[1]] else projections$niveaux[[length(projections$niveaux)]]
+    annee_h <- sub("_.*", "", n_fin$niveau)
+    if (data$temp > n_fin$p90) {
+      projection_txt <- paste0("Même en ", annee_h, ", elle resterait au-dessus des normales")
+      projection_couleur <- "#E41A1C"
+    } else if (data$temp < n_fin$p10) {
+      projection_txt <- paste0("En ", annee_h, ", elle passerait en-dessous des normales")
+      projection_couleur <- "#1f77b4"
+    } else {
+      projection_txt <- paste0("En ", annee_h, ", une telle température sera dans les normales")
+      projection_couleur <- "#2E8B57"
+    }
+  }
+
   list(explication = explication_text, seuils = seuils,
-       projections = projections, boxplot_data = donnees_historiques_jour)
+       projections = projections, boxplot_data = donnees_historiques_jour,
+       projection_txt = projection_txt, projection_couleur = projection_couleur)
 }
 
 # Libellé court d'une catégorie (pour le récap du bilan).
@@ -199,6 +219,7 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
     boxplot_data    <- reactiveVal(NULL)
     seuils_quiz     <- reactiveVal(NULL)
     projections_quiz<- reactiveVal(NULL)
+    dernier_resultat<- reactiveVal(NULL)        # params de la carte de partage de la manche
 
     # Score CUMULÉ sur la session (compat analytics_visits / server.R) — incrémenté
     # à chaque validation, exactement comme le quiz historique.
@@ -291,11 +312,12 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
       corps <- if (phase_manche() == "question") {
         tagList(
           div(class = "carte-question", h3(enonce, class = "enonce")),
-          radioGroupButtons(ns(paste0("rep_", idx())),
-            label = "Cette température est :",
-            choices = CATEGORIES_QUIZ, selected = character(0),
-            direction = "vertical", width = "100%",
-            status = "outline-primary", size = "lg"),
+          # radioButtons (et non radioGroupButtons, mal rendu sous Bootstrap 5) :
+          # stylé en boutons pleine largeur, toute la zone est cliquable.
+          div(class = "quiz-reponses",
+              radioButtons(ns(paste0("rep_", idx())),
+                label = "Cette température est :",
+                choices = CATEGORIES_QUIZ, selected = character(0))),
           actionButton(ns("valider_btn"), "Valider", icon = icon("check"),
                        class = "btn-success btn-lg w-100")
         )
@@ -329,6 +351,11 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
           div(class = "options-reveal", options),
           div(class = "feedback-explication mt-3", HTML(fb$explication)),
           distribution,
+          div(class = "text-center mt-3",
+              p(class = "text-muted small mb-2",
+                "Partagez ce repère de température autour de vous :"),
+              actionButton(ns("partager_btn"), "Partager ce résultat",
+                           icon = icon("share-nodes"), class = "btn-outline-primary")),
           actionButton(ns("suivant_btn"),
                        if (idx() < n) "Question suivante" else "Voir mon bilan",
                        icon = icon(if (idx() < n) "arrow-right" else "flag-checkered"),
@@ -370,10 +397,8 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
         div(class = "recap text-start", lignes),
         p(class = "text-muted small mt-2", .contexte_serie(f$ville, f$saison, f$periode)),
         div(class = "mt-3",
-          actionButton(ns("partager_serie_btn"), "Partager mon score",
-                       icon = icon("share-nodes"), class = "btn-primary btn-lg me-2"),
-          actionButton(ns("rejouer_btn"), "Rejouer", icon = icon("rotate-right"),
-                       class = "btn-success btn-lg")),
+          actionButton(ns("rejouer_btn"), "Rejouer une série", icon = icon("rotate-right"),
+                       class = "btn-primary btn-lg")),
         div(class = "mt-2", actionLink(ns("reglages_btn"), "Changer les réglages"))
       ))
     }
@@ -533,6 +558,16 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
       boxplot_data(fb$boxplot_data)
       seuils_quiz(fb$seuils)
       projections_quiz(fb$projections)
+
+      # Paramètres de la carte de partage de la manche (situe la température vs
+      # les normales, comme dans le quiz historique).
+      dernier_resultat(list(
+        ville = q$city, date = q$date, temp = q$temp, normale_moy = q$normale_moy,
+        periode_ref = filtres_serie()$periode, categorie = q$correct_answer,
+        juste = is_correct, reponse_utilisateur = ans,
+        p10 = if (!is.null(fb$seuils)) fb$seuils$p10 else NA_real_,
+        p90 = if (!is.null(fb$seuils)) fb$seuils$p90 else NA_real_,
+        projection_txt = fb$projection_txt, projection_couleur = fb$projection_couleur))
       phase_manche("feedback")
     })
 
@@ -569,21 +604,27 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
 
     observeEvent(input$reglages_btn, { etat("accueil") })
 
-    # --- Partage de la carte de série (PNG 1200×630) ------------------------
-    observeEvent(input$partager_serie_btn, {
-      f <- filtres_serie(); req(f)
-      n <- length(serie()); sc <- score_serie()
-      pal <- palier_score(sc, n)
-      params <- list(score = sc, n = n, ville_filtre = f$ville, saison_filtre = f$saison,
-                     periode_ref = f$periode, couleur = pal$couleur, libelle = pal$libelle)
+    # --- Partage de la carte de résultat de la manche (PNG 1200×630) --------
+    # On situe la température de la question vs les normales (carte historique),
+    # générée à la volée et embarquée (base64) dans le modal de partage partagé.
+    observeEvent(input$partager_btn, {
+      res <- dernier_resultat()
+      req(res)
       fpng <- tempfile(fileext = ".png")
-      sauver_carte_serie(params, fpng)
+      sauver_carte_partage(res, fpng)
       on.exit(unlink(fpng), add = TRUE)
       data_uri <- paste0("data:image/png;base64,",
                          jsonlite::base64_enc(readBin(fpng, "raw", n = file.info(fpng)$size)))
-      texte <- sprintf("J'ai fait %d/%d au défi climatique « Normal ou pas ? ». Et vous, sauriez-vous situer ce qui est normal ?", sc, n)
-      nom_fichier <- sprintf("normal-ou-pas_serie_%dsur%d.png", sc, n)
-      showModal(modal_partage(data_uri, texte, nom_fichier, titre = "Partager mon score"))
+      ecart <- round(res$temp - res$normale_moy, 1)
+      sens <- if (ecart > 0) "au-dessus" else if (ecart < 0) "en-dessous" else "dans"
+      texte <- if (ecart == 0)
+        paste0(res$temp, "°C ", autour_de(res$ville),
+               " : exactement dans la normale de saison. Et vous, sauriez-vous situer ce qui est normal ?")
+      else
+        paste0(res$temp, "°C ", autour_de(res$ville), " : ", sprintf("%+.1f", ecart),
+               "°C ", sens, " de la normale de saison. Et vous, sauriez-vous situer ce qui est normal ?")
+      nom_fichier <- paste0("normal-ou-pas_", gsub("[^A-Za-z0-9]+", "_", res$ville), ".png")
+      showModal(modal_partage(data_uri, texte, nom_fichier))
     })
 
     # Contrat avec server.R : cumul de session INCHANGÉ (analytics_visits) +

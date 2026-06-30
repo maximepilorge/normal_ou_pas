@@ -235,51 +235,6 @@ dessiner_carte_jour <- function(params) {
   paste0("Série : ", paste(bits, collapse = " · "))
 }
 
-# Carte de partage d'une SÉRIE de quiz (score X/n) — même format Open Graph
-# 1200×630 et même charte que les autres cartes. La couleur d'accent et le
-# libellé qualitatif sont FOURNIS par l'appelant (palier_score, helpers.R), afin
-# de garder ce fichier autoportant (réutilisable par le sidecar plumber, sans BDD).
-# params : list(score, n = 10, ville_filtre, saison_filtre, periode_ref,
-#               couleur (accent), libelle (qualitatif))
-dessiner_carte_serie <- function(params) {
-  score <- as.integer(params$score)
-  n <- as.integer(params$n %||% 10)
-  accent <- params$couleur %||% "#2E8B57"
-  libelle <- params$libelle %||% ""
-  contexte <- .contexte_serie(params$ville_filtre, params$saison_filtre, params$periode_ref)
-
-  # Frise de n pastilles : remplies (accent) jusqu'au score, grises au-delà.
-  xg0 <- 6; xg1 <- 94; w <- (xg1 - xg0) / n
-  cellules <- data.frame(
-    xmin = xg0 + (0:(n - 1)) * w + 0.6,
-    xmax = xg0 + (1:n) * w - 0.6,
-    fill = ifelse(seq_len(n) <= score, accent, "#dee2e6"))
-
-  ggplot() +
-    annotate("rect", xmin = 0, xmax = 100, ymin = 0, ymax = 100, fill = "#f8f9fa") +
-    annotate("rect", xmin = 0, xmax = 2.2, ymin = 0, ymax = 100, fill = accent) +
-    annotate("text", x = 6, y = 94, hjust = 0, vjust = 1, size = 6.5,
-             color = "#6c757d", fontface = "bold", label = "DÉFI — CLIMAT : NORMAL OU PAS ?") +
-    annotate("text", x = 6, y = 82, hjust = 0, size = 6.5, color = "#343a40",
-             label = "Mon score au quiz climatique") +
-    annotate("text", x = 6, y = 64, hjust = 0, size = 26, fontface = "bold",
-             color = accent, label = paste0(score, "/", n)) +
-    annotate("text", x = 6, y = 52, hjust = 0, size = 7.5, fontface = "bold",
-             color = accent, label = libelle) +
-    geom_rect(data = cellules,
-              aes(xmin = xmin, xmax = xmax, ymin = 39, ymax = 45, fill = fill),
-              inherit.aes = FALSE) +
-    scale_fill_identity() +
-    annotate("text", x = 6, y = 30, hjust = 0, size = 4.4, color = "#6c757d", label = contexte) +
-    annotate("text", x = 6, y = 20, hjust = 0, size = 5.4, fontface = "bold",
-             color = "#343a40", label = "Et vous, sauriez-vous faire mieux ?") +
-    annotate("text", x = 6, y = 6, hjust = 0, size = 5.5, color = "#6c757d",
-             label = "Tentez le défi sur normal-ou-pas.com") +
-    scale_x_continuous(limits = c(0, 100), expand = c(0, 0)) +
-    scale_y_continuous(limits = c(0, 100), expand = c(0, 0)) +
-    theme_void()
-}
-
 # Sauvegarde un ggplot en PNG (1200×630 par défaut). Utilise ragg si disponible
 # (rendu plus net), sinon le device png de base.
 .sauver_png <- function(p, chemin, largeur = 1200, hauteur = 630) {
@@ -299,8 +254,4 @@ sauver_carte_partage <- function(params, chemin, largeur = 1200, hauteur = 630) 
 
 sauver_carte_jour <- function(params, chemin, largeur = 1200, hauteur = 630) {
   .sauver_png(dessiner_carte_jour(params), chemin, largeur, hauteur)
-}
-
-sauver_carte_serie <- function(params, chemin, largeur = 1200, hauteur = 630) {
-  .sauver_png(dessiner_carte_serie(params), chemin, largeur, hauteur)
 }

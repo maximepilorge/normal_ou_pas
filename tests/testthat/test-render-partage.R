@@ -61,28 +61,3 @@ test_that("sauver_carte_jour produit un PNG non vide", {
   expect_true(file.exists(f))
   expect_gt(file.info(f)$size, 1000)
 })
-
-test_that("dessiner_carte_serie retourne un ggplot pour tous les scores", {
-  for (s in c(0L, 5L, 7L, 10L)) {
-    p <- dessiner_carte_serie(list(
-      score = s, n = 10, ville_filtre = "Toutes les villes",
-      saison_filtre = "Été", periode_ref = "1991-2020",
-      couleur = "#2E8B57", libelle = "Bon climatologue !"))
-    expect_s3_class(p, "ggplot")
-  }
-})
-
-test_that("dessiner_carte_serie tolère les paramètres optionnels manquants", {
-  p <- dessiner_carte_serie(list(score = 3, n = 10))
-  expect_s3_class(p, "ggplot")
-})
-
-test_that("sauver_carte_serie produit un PNG non vide", {
-  f <- tempfile(fileext = ".png")
-  on.exit(unlink(f), add = TRUE)
-  sauver_carte_serie(list(
-    score = 8, n = 10, ville_filtre = "Lyon", saison_filtre = "Toutes les saisons",
-    periode_ref = "1991-2020", couleur = "#2E8B57", libelle = "Bon climatologue !"), f)
-  expect_true(file.exists(f))
-  expect_gt(file.info(f)$size, 1000)
-})
