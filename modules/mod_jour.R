@@ -270,32 +270,40 @@ mod_jour_server <- function(id, db_pool) {
       mob <- est_mobile()
       win <- res$win
 
-      p <- ggplot(win, aes(x = tmax, y = ""))
-      if (res$a_normale) {
-        p <- p +
-          annotate("rect", xmin = res$p10, xmax = res$p90, ymin = -Inf, ymax = Inf,
-                   fill = "#2E8B57", alpha = 0.13) +
-          geom_vline(xintercept = c(res$p10, res$p90), linetype = "dashed",
-                     color = "#2E8B57", linewidth = 0.7)
-      }
-      p <- p +
-        geom_jitter(aes(text = paste0("Année ", annee, " : ", round(tmax, 1), " °C")),
-                    height = 0.28, width = 0, alpha = 0.4, color = "#1f77b4") +
-        geom_point(data = data.frame(x = res$temp),
-                   aes(x = x, y = "",
-                       text = paste0(format(res$date, "%d/%m/%Y"), " : ",
-                                     format(round(res$temp, 1), nsmall = 1, decimal.mark = ","), " °C")),
-                   shape = 4, size = 6, stroke = 1.8, color = "#E41A1C") +
-        scale_x_continuous(labels = ~paste0(.x, " °C")) +
-        labs(x = NULL, y = NULL) +
-        theme_minimal(base_size = if (mob) 11 else 13) +
-        theme(axis.text.y = element_blank(),
-              panel.grid.major.y = element_blank(),
-              panel.grid.minor.y = element_blank())
+      # Distribution 1D horizontale en plot_ly NATIF (au lieu de ggplot + ggplotly,
+      # dont la conversion est le poste dominant du délai d'affichage). plot_ly ne
+      # jitte pas : on génère le décalage vertical des points ici.
+      jitter_y <- runif(nrow(win), -0.28, 0.28)
 
-      ggplotly(p, tooltip = "text") %>%
-        layout(xaxis = list(fixedrange = TRUE), yaxis = list(fixedrange = TRUE),
-               margin = list(t = 10)) %>%
+      # Zone normale (p10–p90) et bornes en shapes de layout (sous les points).
+      shapes <- if (res$a_normale) list(
+        list(type = "rect", xref = "x", yref = "paper", x0 = res$p10, x1 = res$p90,
+             y0 = 0, y1 = 1, fillcolor = "#2E8B57", opacity = 0.13,
+             line = list(width = 0), layer = "below"),
+        list(type = "line", xref = "x", yref = "paper", x0 = res$p10, x1 = res$p10,
+             y0 = 0, y1 = 1, line = list(color = "#2E8B57", dash = "dash", width = 1.4),
+             layer = "below"),
+        list(type = "line", xref = "x", yref = "paper", x0 = res$p90, x1 = res$p90,
+             y0 = 0, y1 = 1, line = list(color = "#2E8B57", dash = "dash", width = 1.4),
+             layer = "below")
+      ) else list()
+
+      plot_ly() %>%
+        add_markers(x = win$tmax, y = jitter_y,
+                    marker = list(color = "rgba(31,119,180,0.4)", size = 6),
+                    text = paste0("Année ", win$annee, " : ", round(win$tmax, 1), " °C"),
+                    hoverinfo = "text", showlegend = FALSE) %>%
+        add_markers(x = res$temp, y = 0,
+                    marker = list(symbol = "x", color = "#E41A1C", size = 13,
+                                  line = list(color = "#E41A1C", width = 1.8)),
+                    text = paste0(format(res$date, "%d/%m/%Y"), " : ",
+                                  format(round(res$temp, 1), nsmall = 1, decimal.mark = ","), " °C"),
+                    hoverinfo = "text", showlegend = FALSE) %>%
+        layout(shapes = shapes,
+               xaxis = list(fixedrange = TRUE, ticksuffix = " °C", title = "", zeroline = FALSE),
+               yaxis = list(fixedrange = TRUE, visible = FALSE, range = c(-0.5, 0.5)),
+               font = list(size = if (mob) 11 else 13),
+               margin = list(t = 10), showlegend = FALSE) %>%
         config(displayModeBar = FALSE, responsive = TRUE)
     }) %>% bindCache(input$ville_jour, input$date_jour, input$periode_jour, est_mobile())
 
