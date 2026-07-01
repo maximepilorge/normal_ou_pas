@@ -64,6 +64,10 @@
   margin-right: auto;
   align-self: center;
 }
+/* Shiny fixe .shiny-input-container à 300px par défaut : sans cet override, le
+   groupe radio reste en 300px calé à gauche DANS le conteneur centré. On le force
+   à remplir .quiz-reponses (460px). */
+.quiz-reponses .shiny-input-container { width: 100%; max-width: 100%; }
 .quiz-reponses .control-label,
 .quiz-reponses .form-label {
   display: block;
