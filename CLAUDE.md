@@ -1,5 +1,8 @@
 # CLAUDE.md
 
+Conventions R / Shiny transverses (nommage, modules, patterns réactifs) :
+@~/.claude/r-shiny.md
+
 ## Projet
 
 - **Nom** : "Climat : Normal ou pas ?"
@@ -35,12 +38,12 @@
 
 ## Conventions
 
-- **Langue** : code, commentaires et UI en français
-- **Modules** : fichiers `mod_<nom>.R` avec fonctions `mod_<nom>_ui()` et `mod_<nom>_server()`
-- **Indentation** : 2 espaces
-- **Commits** : format `(type): Description` en français (ex: `(fix): Correction quiz`, `(feat): Ajout fonctionnalité`)
-- **Patterns réactifs** : `reactiveVal` pour l'état mutable, `reactive()` avec `bindCache()` pour les calculs coûteux, `observeEvent` pour les actions utilisateur
-- **Performance** : `plotlyProxy` pour les mises à jour dynamiques sans re-render, données pré-calculées en BDD, index stratégiques
+> Style R, modules, patterns réactifs et format de commit : voir `~/.claude/r-shiny.md`
+> (importé en tête) et le `CLAUDE.md` global. Spécificités du projet ci-dessous.
+
+- **Langue** : code, commentaires et UI en français.
+- **Performance** : données pré-calculées en BDD + index stratégiques ;
+  `plotlyProxy` pour les mises à jour dynamiques sans re-render.
 
 ## Déploiement
 
