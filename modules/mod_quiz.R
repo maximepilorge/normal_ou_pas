@@ -525,8 +525,9 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
       yr <- range(all_y, na.rm = TRUE); yr <- yr + c(-1, 1) * 0.06 * diff(yr)
 
       p <- ggplot(donnees_historiques_jour_plot, aes(x = "", y = tmax_celsius)) +
-        # outlier.shape = NA : le geom_jitter affiche déjà TOUS les points ; sans
-        # ça, geom_boxplot redessine ses outliers en noir, faisant doublon.
+        # outlier.shape = NA masque les outliers au rendu ggplot statique. NB :
+        # ggplotly l'IGNORE et réaffiche les outliers du box trace ; ils sont donc
+        # masqués côté plotly plus bas (boxpoints = FALSE).
         geom_boxplot(width = 0.5, fill = "skyblue", alpha = 0.7, outlier.shape = NA) +
         geom_jitter(aes(text = paste("Date :", format(date, "%d %b %Y"),
                                      "<br>Température :", round(tmax_celsius, 1), "°C")),
@@ -550,11 +551,18 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
                      shape = 4, size = 4, color = "black")
       }
 
-      ggplotly(p, tooltip = "text") %>%
+      gp <- ggplotly(p, tooltip = "text") %>%
         layout(xaxis = list(fixedrange = TRUE),
                yaxis = list(fixedrange = TRUE, range = yr),
                margin = list(t = 10)) %>%
         config(displayModeBar = FALSE, responsive = TRUE)
+
+      # ggplotly réintroduit les outliers du box trace (points noirs) malgré
+      # outlier.shape = NA : on les coupe côté plotly (le jitter montre déjà tout).
+      for (i in seq_along(gp$x$data)) {
+        if (isTRUE(gp$x$data[[i]]$type == "box")) gp$x$data[[i]]$boxpoints <- FALSE
+      }
+      gp
     })
 
     # Meilleur score personnel (lecture BDD sous garde) — affiché au bilan. On
