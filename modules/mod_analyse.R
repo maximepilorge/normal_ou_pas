@@ -354,10 +354,20 @@ mod_analyse_server <- function(id, db_pool) {
         error = function(e) NULL)
     }) %>% bindCache(input$ville_analyse)
 
-    # Seuil de forte chaleur de la ville (90e pct de la tmax estivale 1973-2003),
-    # recalculé à la volée — même définition que le pipeline — pour l'afficher.
+    # Seuil de forte chaleur de la ville (90e pct de la tmax estivale 1973-2003).
+    # Chemin rapide : lu tel quel dans indicateurs_annuels (colonne seuil_forte_chaleur,
+    # constante par ville, alimentée par le pipeline) -> 1 valeur au lieu de rapatrier
+    # ~2760 lignes. Repli gracieux : recalcul à la volée (même définition) tant que la
+    # colonne n'existe pas (pipeline pas encore ré-exécuté).
     seuil_fc_ville <- reactive({
       req(input$ville_analyse)
+      stocke <- if (!isTRUE(indicateurs_disponibles)) NA_real_ else tryCatch({
+        res <- tbl(db_pool, "indicateurs_annuels") %>%
+          filter(ville == !!input$ville_analyse) %>%
+          summarise(s = max(seuil_forte_chaleur, na.rm = TRUE)) %>% collect()
+        if (nrow(res) == 0 || !is.finite(res$s[1])) NA_real_ else as.numeric(res$s[1])
+      }, error = function(e) NA_real_)
+      if (is.finite(stocke)) return(stocke)
       tryCatch({
         d <- tbl(db_pool, "temperatures_max") %>%
           filter(ville == !!input$ville_analyse, annee >= 1973L, annee <= 2003L,

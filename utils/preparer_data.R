@@ -185,7 +185,10 @@ tryCatch({
     dplyr::summarise(jours_forte_chaleur = sum(temperature_max >= seuil, na.rm = TRUE),
                      .groups = "drop")
   indicateurs_annuels <- indicateurs_annuels %>%
-    dplyr::left_join(jours_fc, by = c("ville", "annee"))
+    dplyr::left_join(jours_fc, by = c("ville", "annee")) %>%
+    # Seuil de forte chaleur (constante par ville) stocké tel quel pour être LU par
+    # l'app (onglet « Évolution ») au lieu d'être recalculé à la volée sur ~2760 lignes.
+    dplyr::left_join(dplyr::rename(seuil_fc, seuil_forte_chaleur = seuil), by = "ville")
 
   dbWriteTable(con, "indicateurs_annuels", as.data.frame(indicateurs_annuels), overwrite = TRUE)
 
