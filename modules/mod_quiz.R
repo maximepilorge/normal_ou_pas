@@ -558,9 +558,17 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
         config(displayModeBar = FALSE, responsive = TRUE)
 
       # ggplotly réintroduit les outliers du box trace (points noirs) malgré
-      # outlier.shape = NA : on les coupe côté plotly (le jitter montre déjà tout).
+      # outlier.shape = NA. On NE met PAS boxpoints=FALSE : côté plotly cela étire
+      # aussi les moustaches jusqu'au min/max au lieu de 1,5×IQR. On garde donc les
+      # outliers CALCULÉS (moustaches à 1,5×IQR) mais on rend leurs marqueurs
+      # invisibles (opacité + couleur transparentes) — le jitter montre déjà tout.
       for (i in seq_along(gp$x$data)) {
-        if (isTRUE(gp$x$data[[i]]$type == "box")) gp$x$data[[i]]$boxpoints <- FALSE
+        if (isTRUE(gp$x$data[[i]]$type == "box")) {
+          gp$x$data[[i]]$boxpoints <- "outliers"
+          gp$x$data[[i]]$marker$opacity <- 0
+          gp$x$data[[i]]$marker$outliercolor <- "rgba(0,0,0,0)"
+          gp$x$data[[i]]$marker$line$color <- "rgba(0,0,0,0)"
+        }
       }
       gp
     })
