@@ -86,6 +86,19 @@ an_max_data <- plage_annees$max
 # journée » (affinée par ville côté serveur).
 derniere_date_dispo <- as.Date(plage_annees$derniere_date)
 
+# Dernière date disponible PAR VILLE (l'onglet « Une journée » cale son calendrier
+# dessus). Pré-calculé en UNE requête (~30 lignes) pour éviter un max(date) à chaque
+# changement de ville. Vecteur nommé ville -> Date ; NULL si indisponible (repli sur
+# la requête ponctuelle côté module).
+derniere_date_par_ville <- tryCatch({
+  d <- tbl(db_pool, "temperatures_max") %>%
+    filter(!is.na(temperature_max)) %>%
+    group_by(ville) %>%
+    summarise(d = max(date, na.rm = TRUE), .groups = "drop") %>%
+    collect()
+  stats::setNames(as.Date(d$d), d$ville)
+}, error = function(e) NULL)
+
 # Tables optionnelles alimentées par la version mise à jour du pipeline
 # (tmin -> canicules + indicateurs annuels). On teste leur présence au démarrage
 # pour que l'app dégrade proprement tant que le pipeline n'a pas été ré-exécuté

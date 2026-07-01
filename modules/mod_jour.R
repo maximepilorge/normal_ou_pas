@@ -82,11 +82,18 @@ mod_jour_server <- function(id, db_pool) {
     # ce maximum que si la sélection courante le dépasse (donnée absente) — sinon on
     # respecte la date choisie (utile pour comparer une même date entre villes).
     observeEvent(input$ville_jour, {
-      dmax <- tryCatch(
-        tbl(db_pool, "temperatures_max") %>%
-          filter(ville == !!input$ville_jour) %>%
-          summarise(d = max(date, na.rm = TRUE)) %>% collect() %>% pull(d),
-        error = function(e) NA)
+      # Lecture du cache pré-calculé au démarrage (derniere_date_par_ville) ; repli
+      # sur une requête ponctuelle si le cache est indisponible ou la ville absente.
+      dmax <- if (!is.null(derniere_date_par_ville) &&
+                  input$ville_jour %in% names(derniere_date_par_ville)) {
+        derniere_date_par_ville[[input$ville_jour]]
+      } else {
+        tryCatch(
+          tbl(db_pool, "temperatures_max") %>%
+            filter(ville == !!input$ville_jour) %>%
+            summarise(d = max(date, na.rm = TRUE)) %>% collect() %>% pull(d),
+          error = function(e) NA)
+      }
       dmax <- suppressWarnings(as.Date(dmax))
       if (length(dmax) == 1 && !is.na(dmax)) {
         cur <- input$date_jour
