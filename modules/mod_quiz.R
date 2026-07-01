@@ -368,7 +368,14 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
         )
       }
 
-      div(class = "quiz-card card", div(class = "card-body", barre, corps))
+      div(class = "quiz-card card", div(class = "card-body",
+        barre,
+        corps,
+        # Abandon possible à tout moment : ramène au paramétrage (filtres conservés).
+        div(class = "text-center mt-3",
+            actionLink(ns("abandonner_btn"), "Abandonner la série",
+                       icon = icon("xmark"), class = "text-muted small"))
+      ))
     }
 
     # === ÉCRAN 2 : RÉSULTATS (bilan) ========================================
@@ -614,6 +621,28 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
     })
 
     observeEvent(input$reglages_btn, { etat("accueil") })
+
+    # Abandon d'une série en cours : confirmation (la progression est perdue) puis
+    # retour au paramétrage. On ne fige AUCUN score en base (seules les séries
+    # terminées sont enregistrées) ; les manches déjà validées restent comptées
+    # dans le cumul de session (analytics), comme lors d'une fermeture d'onglet.
+    observeEvent(input$abandonner_btn, {
+      showModal(modalDialog(
+        title = "Abandonner la série ?",
+        "Votre progression sur cette série sera perdue et vous reviendrez au paramétrage.",
+        easyClose = TRUE,
+        footer = tagList(
+          modalButton("Continuer la série"),
+          actionButton(ns("abandonner_confirme"), "Abandonner",
+                       icon = icon("xmark"), class = "btn-danger")
+        )
+      ))
+    })
+
+    observeEvent(input$abandonner_confirme, {
+      removeModal()
+      etat("accueil")
+    })
 
     # --- Partage de la carte de résultat de la manche (PNG 1200×630) --------
     # On situe la température de la question vs les normales (carte historique),
