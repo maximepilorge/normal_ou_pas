@@ -11,8 +11,12 @@
 
 library(ggplot2)
 
-# Opérateur de repli (évite une dépendance à rlang pour %||%).
-`%||%` <- function(a, b) if (is.null(a) || length(a) == 0 || is.na(a)) b else a
+# Opérateur de repli (évite une dépendance à rlang pour %||%). Le test is.na()
+# n'est appliqué qu'à un scalaire : sur un vecteur de longueur > 1 il renverrait un
+# vecteur et ferait planter le ||. Un tel vecteur est donc renvoyé tel quel.
+`%||%` <- function(a, b) {
+  if (is.null(a) || length(a) == 0 || (length(a) == 1 && is.na(a))) b else a
+}
 
 # « Autour de <ville> » avec élision française. On dit « autour de » (et non « à »)
 # car les températures viennent de la maille ERA5-Land (zone, périphérie incluse),

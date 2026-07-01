@@ -40,3 +40,33 @@ test_that("classer_jour_extreme ignore les NA et gère les ex æquo", {
   expect_equal(r$n, 4)            # NA exclu
   expect_equal(r$rang_haut, 1)    # aucune valeur strictement supérieure
 })
+
+test_that("fmt_temp arrondit, met une virgule décimale et gère les décimales", {
+  expect_equal(fmt_temp(23.44), "23,4")
+  expect_equal(fmt_temp(23), "23,0")            # nsmall force la décimale
+  expect_equal(fmt_temp(-1.25, 2), "-1,25")     # dec = 2
+  expect_equal(fmt_temp(c(1.04, 2.46)), c("1,0", "2,5"))  # vectorisé
+})
+
+test_that("classer_normale applique la règle p10/p90 et gère l'absence de bornes", {
+  expect_equal(classer_normale(30, 10, 20), "Au-dessus des normales")
+  expect_equal(classer_normale(5, 10, 20), "En-dessous des normales")
+  expect_equal(classer_normale(15, 10, 20), "Dans les normales de saison")
+  # bornes incluses -> « dans » (comparaisons strictes)
+  expect_equal(classer_normale(20, 10, 20), "Dans les normales de saison")
+  expect_equal(classer_normale(10, 10, 20), "Dans les normales de saison")
+  # bornes indisponibles -> « dans »
+  expect_equal(classer_normale(30, NA, NA), "Dans les normales de saison")
+  expect_equal(classer_normale(30, 10, NA), "Dans les normales de saison")
+})
+
+test_that("couleur_categorie mappe chaque catégorie à sa couleur", {
+  expect_equal(couleur_categorie("Au-dessus des normales"), "#E41A1C")
+  expect_equal(couleur_categorie("En-dessous des normales"), "#1f77b4")
+  expect_equal(couleur_categorie("Dans les normales de saison"), "#2E8B57")
+})
+
+test_that(".periode_bornes extrait les bornes d'un libellé AAAA-AAAA", {
+  expect_equal(.periode_bornes("1991-2020"), c(1991, 2020))
+  expect_equal(.periode_bornes("1951-1980")[1], 1951)
+})

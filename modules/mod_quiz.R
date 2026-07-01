@@ -495,14 +495,13 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
     output$boxplot_titre <- renderUI({
       data_quiz <- quiz_data()
       req(data_quiz)
-      fmt1 <- function(x) format(round(x, 1), nsmall = 1, decimal.mark = ",")
       main_title <- paste0("Distribution historique ", autour_de(data_quiz$city),
                            " (vers le ", paste(format(data_quiz$date, "%d"),
                            mois_fr[as.numeric(format(data_quiz$date, "%m"))]), ", ±7 j)")
       actif <- repere_actif()
       sous_titre <- if (!is.null(actif))
-        paste0(actif$titre, " : zone normale ", fmt1(actif$p10), "–", fmt1(actif$p90),
-               " °C · moyenne ", fmt1(actif$moy), " °C")
+        paste0(actif$titre, " : zone normale ", fmt_temp(actif$p10), "–", fmt_temp(actif$p90),
+               " °C · moyenne ", fmt_temp(actif$moy), " °C")
       else paste("Période", filtres_serie()$periode)
       tagList(
         tags$p(class = "fw-bold mb-1", main_title),
@@ -514,7 +513,6 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
       donnees_historiques_jour_plot <- boxplot_rows()
       req(nrow(donnees_historiques_jour_plot) > 0)
       data_quiz <- quiz_data()
-      fmt1 <- function(x) format(round(x, 1), nsmall = 1, decimal.mark = ",")
       seuils <- seuils_quiz()
       proj   <- projections_quiz()
       actif  <- repere_actif()
@@ -589,7 +587,7 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
       if (!is.null(actif))
         fig <- fig %>% add_markers(x = 1, y = actif$moy,
                     marker = list(symbol = "x", color = "black", size = 10),
-                    text = paste("Moyenne :", fmt1(actif$moy), "°C"),
+                    text = paste("Moyenne :", fmt_temp(actif$moy), "°C"),
                     hoverinfo = "text", showlegend = FALSE)
 
       fig %>%

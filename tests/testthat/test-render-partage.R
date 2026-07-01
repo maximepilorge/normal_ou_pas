@@ -13,6 +13,10 @@ test_that("%||% retombe sur la valeur de repli", {
   expect_equal(NULL %||% "x", "x")
   expect_equal(NA %||% "x", "x")
   expect_equal("y" %||% "x", "y")
+  expect_equal(character(0) %||% "x", "x")          # vecteur vide
+  # Un vecteur de longueur > 1 est renvoyé tel quel (pas de plantage du ||).
+  expect_equal(c("a", "b") %||% "x", c("a", "b"))
+  expect_equal(c(1, NA) %||% "x", c(1, NA))
 })
 
 test_that("dessiner_carte_partage retourne un objet ggplot", {

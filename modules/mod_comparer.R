@@ -445,7 +445,6 @@ mod_comparer_server <- function(id, db_pool) {
                  config(displayModeBar = FALSE))
 
       mob <- est_mobile_traj()
-      fmt2 <- function(x) format(round(x, 2), nsmall = 2, decimal.mark = ",")
 
       ensemble <- anomalies %>%
         group_by(annee) %>%
@@ -453,9 +452,9 @@ mod_comparer_server <- function(id, db_pool) {
                   bas = min(anomalie, na.rm = TRUE),
                   haut = max(anomalie, na.rm = TRUE), .groups = "drop") %>%
         mutate(text_moy = paste0("Année ", annee,
-                                 "<br>Moyenne des villes : ", fmt2(moy), " °C"))
+                                 "<br>Moyenne des villes : ", fmt_temp(moy, 2), " °C"))
       df_ville <- anomalies %>% filter(ville == v) %>% arrange(annee) %>%
-        mutate(text = paste0("Année ", annee, "<br>", v, " : ", fmt2(anomalie), " °C"))
+        mutate(text = paste0("Année ", annee, "<br>", v, " : ", fmt_temp(anomalie, 2), " °C"))
 
       p <- ggplot() +
         geom_ribbon(data = ensemble, aes(x = annee, ymin = bas, ymax = haut),

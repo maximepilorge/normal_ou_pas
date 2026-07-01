@@ -135,9 +135,9 @@ mod_jour_server <- function(id, db_pool) {
       p10   <- if (a_normale) norm$seuil_bas_p10[1] else NA_real_
       p90   <- if (a_normale) norm$seuil_haut_p90[1] else NA_real_
 
-      categorie <- if (a_normale && temp > p90) "Au-dessus des normales"
-                   else if (a_normale && temp < p10) "En-dessous des normales"
-                   else "Dans les normales de saison"
+      # p10/p90 sont NA si la normale est indisponible -> classer_normale renvoie
+      # « Dans les normales de saison » (comportement historique).
+      categorie <- classer_normale(temp, p10, p90)
 
       rang <- classer_jour_extreme(win$tmax, temp)
 
@@ -229,14 +229,12 @@ mod_jour_server <- function(id, db_pool) {
       req(res)
       if (!isTRUE(res$ok)) return(div(class = "alert alert-warning mb-0", res$msg))
 
-      fmt1 <- function(x) format(round(x, 1), nsmall = 1, decimal.mark = ",")
-      couleur <- if (grepl("Au-dessus", res$categorie)) "#E41A1C"
-                 else if (grepl("En-dessous", res$categorie)) "#1f77b4" else "#2E8B57"
+      couleur <- couleur_categorie(res$categorie)
       ligne_ecart <- if (res$a_normale) {
         ecart <- round(res$temp - res$t_moy, 1)
         sens <- if (ecart > 0) "au-dessus" else if (ecart < 0) "en-dessous" else "pile dans"
         HTML(paste0("<b>", sprintf("%+.1f", ecart), " °C</b> ", sens,
-                    " de la normale ", res$periode, " (", fmt1(res$t_moy), " °C)"))
+                    " de la normale ", res$periode, " (", fmt_temp(res$t_moy), " °C)"))
       } else "Normale indisponible pour cette date."
 
       # Bannière « record absolu » (tous mois confondus) mise en valeur si rang 1 ;
@@ -254,7 +252,7 @@ mod_jour_server <- function(id, db_pool) {
 
       tagList(
         tags$div(style = paste0("font-size:2.4rem; font-weight:800; line-height:1.1; color:", couleur, ";"),
-                 paste0(fmt1(res$temp), " °C")),
+                 paste0(fmt_temp(res$temp), " °C")),
         banniere,
         tags$div(class = "mb-2", ligne_ecart),
         tags$span(class = "badge",
@@ -297,7 +295,7 @@ mod_jour_server <- function(id, db_pool) {
                     marker = list(symbol = "x", color = "#E41A1C", size = 13,
                                   line = list(color = "#E41A1C", width = 1.8)),
                     text = paste0(format(res$date, "%d/%m/%Y"), " : ",
-                                  format(round(res$temp, 1), nsmall = 1, decimal.mark = ","), " °C"),
+                                  fmt_temp(res$temp), " °C"),
                     hoverinfo = "text", showlegend = FALSE) %>%
         layout(shapes = shapes,
                xaxis = list(fixedrange = TRUE, ticksuffix = " °C", title = "", zeroline = FALSE),
@@ -330,7 +328,7 @@ mod_jour_server <- function(id, db_pool) {
       data_uri <- paste0("data:image/png;base64,",
                          jsonlite::base64_enc(readBin(f, "raw", n = file.info(f)$size)))
 
-      texte <- paste0(format(round(res$temp, 1), nsmall = 1, decimal.mark = ","), "°C ",
+      texte <- paste0(fmt_temp(res$temp), "°C ",
                       autour_de(res$ville), " le ", format(res$date, "%d/%m/%Y"), " : ",
                       phrase_principale, ". Et vous, sauriez-vous situer ce qui est normal ?")
       nom_fichier <- paste0("normal-ou-pas_jour_",

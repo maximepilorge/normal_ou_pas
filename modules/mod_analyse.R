@@ -396,8 +396,7 @@ mod_analyse_server <- function(id, db_pool) {
       req(input$ville_analyse)
       seuil <- seuil_fc_ville()
       sous <- if (is.finite(seuil))
-        paste0("Seuil de forte chaleur : ",
-               format(round(seuil, 1), nsmall = 1, decimal.mark = ","),
+        paste0("Seuil de forte chaleur : ", fmt_temp(seuil),
                " °C (90ᵉ pct des étés 1973-2003)") else NULL
       tagList(
         HTML(paste0("Jours de forte chaleur vs jours de gel à <strong>",

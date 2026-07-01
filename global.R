@@ -109,8 +109,8 @@ quiz_scores_disponibles <- table_existe("quiz_series_scores")
 # la volée : correct mais lent sur grosse base (~24 s en prod).
 quiz_candidats_disponibles <- table_existe("quiz_candidats")
 
-# Utilitaire : bornes (début, fin) d'un libellé de période "AAAA-AAAA".
-.periode_bornes <- function(p) as.numeric(strsplit(p, "-")[[1]])
+# .periode_bornes (bornes d'un libellé « AAAA-AAAA ») vit dans utils/helpers.R
+# (sourcé plus haut), avec les autres utilitaires purs.
 
 # --- Données pour la carte comparée des villes (onglet « Comparer ») ---
 # Coordonnées WGS84 des villes, dérivées de la SOURCE DE VÉRITÉ unique

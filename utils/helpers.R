@@ -41,6 +41,16 @@ log_debug <- function(...) {
   if (actif) message(...)
 }
 
+# Formate une température en français : arrondi à `dec` décimales, virgule
+# décimale, SANS suffixe (le « °C » est ajouté par l'appelant). Centralise le
+# motif format(round(...), decimal.mark = ",") recopié dans chaque module.
+fmt_temp <- function(x, dec = 1) {
+  format(round(as.numeric(x), dec), nsmall = dec, decimal.mark = ",")
+}
+
+# Bornes (début, fin) d'un libellé de période « AAAA-AAAA ». Pure.
+.periode_bornes <- function(p) as.numeric(strsplit(p, "-")[[1]])
+
 # Rang d'une valeur dans une distribution (onglet « Une journée »). Sur le vecteur
 # des tmax de la fenêtre ±7 j (toutes années), renvoie :
 #   - rang_haut : 1 = valeur la plus CHAUDE (nb de valeurs strictement supérieures + 1)
@@ -66,6 +76,25 @@ classer_jour_extreme <- function(valeurs_fenetre, valeur_jour) {
 CATEGORIES_QUIZ <- c("En-dessous des normales",
                      "Dans les normales de saison",
                      "Au-dessus des normales")
+
+# Classe une température vs la zone normale (p10–p90) d'un jour : renvoie l'une des
+# CATEGORIES_QUIZ. Bornes indisponibles (NA/non finies) -> « Dans les normales de
+# saison » (comportement historique des onglets). Fonction pure, testable.
+classer_normale <- function(temp, p10, p90) {
+  if (!is.finite(p10) || !is.finite(p90)) return("Dans les normales de saison")
+  if (temp > p90) "Au-dessus des normales"
+  else if (temp < p10) "En-dessous des normales"
+  else "Dans les normales de saison"
+}
+
+# Couleur d'accent d'une catégorie : rouge (au-dessus) / bleu (en-dessous) / vert
+# (dans les normales). Miroir de .couleur_categorie de render_partage.R, qui reste
+# autonome (réutilisé par le sidecar plumber sans charger helpers.R).
+couleur_categorie <- function(categorie) {
+  if (grepl("Au-dessus", categorie)) "#E41A1C"
+  else if (grepl("En-dessous", categorie)) "#1f77b4"
+  else "#2E8B57"
+}
 
 # Mois (numéros) d'une saison à partir de son libellé d'interface. NULL pour
 # « Toutes les saisons » (aucun filtre) ou tout libellé inconnu. Sert au
