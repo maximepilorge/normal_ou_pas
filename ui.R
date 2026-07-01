@@ -184,7 +184,7 @@ ui <- fluidPage( # On utilise tagList comme conteneur principal
     tags$script(src = "partage.js"),
 
     # 5. Habillage du quiz « Série de 10 » (carte, progression, anneau, révélation)
-    tags$link(rel = "stylesheet", href = "quiz_serie.css?v=2")
+    tags$link(rel = "stylesheet", href = "quiz_serie.css?v=3")
   ),
   
   
