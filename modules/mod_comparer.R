@@ -99,6 +99,12 @@ mod_comparer_server <- function(id, db_pool) {
     # recentrera à la réouverture de l'onglet carte.
     centrage_en_attente <- reactiveVal(FALSE)
 
+    # Le curseur « Année » est fait pour être GLISSÉ (scrubber commun aux deux vues).
+    # Chaque cran émettait une valeur -> requêtes + reconstruction ggplotly par cran.
+    # On débounce : les données/graphes ne se rafraîchissent qu'à la fin du geste
+    # (250 ms sans mouvement). Le titre, lui, reste sur input$annee (retour immédiat).
+    annee_deb <- debounce(reactive(input$annee), 250)
+
     # --- État partagé : la ville focus est pilotée par le sélecteur ET par les
     #     clics sur la carte. Le sélecteur reste la source de vérité ; un clic
     #     écrit dedans via updatePickerInput. -------------------------------------
@@ -167,28 +173,29 @@ mod_comparer_server <- function(id, db_pool) {
     })
 
     plot_data_annee <- reactive({
-      req(input$ville_focus, input$annee)
-      start_date <- as.Date(paste0(input$annee, "-01-01"))
-      end_date   <- as.Date(paste0(input$annee + 1, "-01-01"))
+      req(input$ville_focus, annee_deb())
+      annee <- annee_deb()
+      start_date <- as.Date(paste0(annee, "-01-01"))
+      end_date   <- as.Date(paste0(annee + 1, "-01-01"))
       tbl(db_pool, "temperatures_max") %>%
         filter(ville == !!input$ville_focus, date >= !!start_date, date < !!end_date) %>%
         select(date, temperature_max) %>%
         collect() %>%
         rename(tmax_celsius = temperature_max)
-    }) %>% bindCache(input$ville_focus, input$annee)
+    }) %>% bindCache(input$ville_focus, annee_deb())
 
     plot_data_normale <- reactive({
-      req(input$ville_focus, input$periode, input$annee)
-      annee_origine <- paste0(input$annee, "-01-01")
+      req(input$ville_focus, input$periode, annee_deb())
+      annee_origine <- paste0(annee_deb(), "-01-01")
       tbl(db_pool, "stats_normales") %>%
         filter(ville == !!input$ville_focus, periode_ref == !!input$periode) %>%
         collect() %>%
         filter(!(mois == 2 & jour_mois == 29 & !leap_year(as.Date(annee_origine)))) %>%
         mutate(date = as.Date(paste(year(as.Date(annee_origine)), mois, jour_mois, sep = "-")))
-    }) %>% bindCache(input$ville_focus, input$periode, input$annee)
+    }) %>% bindCache(input$ville_focus, input$periode, annee_deb())
 
     output$climate_plot <- renderPlotly({
-      req(input$ville_focus, input$periode, input$annee)
+      req(input$ville_focus, input$periode, annee_deb())
       d_norm  <- plot_data_normale()
       d_annee <- plot_data_annee()
       req(nrow(d_norm) > 0, nrow(d_annee) > 0)
@@ -244,7 +251,7 @@ mod_comparer_server <- function(id, db_pool) {
         ) %>%
         config(displayModeBar = FALSE, responsive = TRUE)
     }) %>%
-      bindCache(input$ville_focus, input$periode, input$annee, est_mobile_courbe())
+      bindCache(input$ville_focus, input$periode, annee_deb(), est_mobile_courbe())
 
     # ================ VUE « ENTRE LES VILLES » : carte + trajectoire =============
 
@@ -459,7 +466,7 @@ mod_comparer_server <- function(id, db_pool) {
         geom_line(data = df_ville, aes(x = annee, y = anomalie, color = v), linewidth = 1) +
         geom_point(data = df_ville, aes(x = annee, y = anomalie, text = text), alpha = 0) +
         geom_hline(yintercept = 0, color = "#343a40", linewidth = 0.4) +
-        geom_vline(xintercept = input$annee, color = "#6c757d",
+        geom_vline(xintercept = annee_deb(), color = "#6c757d",
                    linetype = "dotted", linewidth = 0.5) +
         scale_color_manual(values = setNames(c("#E41A1C", "#6c757d"),
                                              c(v, "Moyenne des villes"))) +
