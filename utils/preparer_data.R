@@ -215,6 +215,18 @@ tryCatch({
   dbExecute(con, "CREATE INDEX idx_quiz_saison ON public.quiz_data_precalculee (periode_ref, categorie, mois);")
   dbExecute(con, "VACUUM ANALYZE public.quiz_data_precalculee;")
 
+  # -- Table: quiz_candidats (agrégat pré-calculé pour le démarrage de série) --
+  cat("\nTable 'quiz_candidats' (agrégat min/max par ville/jour/catégorie)...\n")
+  dbExecute(con, "DROP TABLE IF EXISTS public.quiz_candidats;")
+  dbExecute(con, paste(
+    "CREATE TABLE public.quiz_candidats AS",
+    "SELECT periode_ref, ville, mois, jour_mois, categorie,",
+    "MIN(tmax_celsius) AS min_temp, MAX(tmax_celsius) AS max_temp, MIN(t_moy) AS normale_moy",
+    "FROM public.quiz_data_precalculee",
+    "GROUP BY periode_ref, ville, mois, jour_mois, categorie;"))
+  dbExecute(con, "CREATE INDEX idx_quiz_candidats ON public.quiz_candidats (periode_ref, ville, mois);")
+  dbExecute(con, "VACUUM ANALYZE public.quiz_candidats;")
+
   # -- Table: indicateurs_annuels --
   cat("\nTable 'indicateurs_annuels'...\n")
   dbExecute(con, "ALTER TABLE public.indicateurs_annuels ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")

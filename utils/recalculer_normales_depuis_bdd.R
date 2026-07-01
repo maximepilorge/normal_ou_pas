@@ -133,7 +133,19 @@ tryCatch({
   dbExecute(con, "CREATE INDEX idx_quiz_saison ON public.quiz_data_precalculee (periode_ref, categorie, mois);")
   dbExecute(con, "VACUUM ANALYZE public.quiz_data_precalculee;")
 
-  cat("✅ stats_normales et quiz_data_precalculee régénérées (temperatures_max inchangée).\n")
+  # --- 6. quiz_candidats : agrégat pré-calculé (démarrage de série du quiz) ---
+  cat("Construction de quiz_candidats (agrégat min/max par ville/jour/catégorie)...\n")
+  dbExecute(con, "DROP TABLE IF EXISTS public.quiz_candidats;")
+  dbExecute(con, paste(
+    "CREATE TABLE public.quiz_candidats AS",
+    "SELECT periode_ref, ville, mois, jour_mois, categorie,",
+    "MIN(tmax_celsius) AS min_temp, MAX(tmax_celsius) AS max_temp, MIN(t_moy) AS normale_moy",
+    "FROM public.quiz_data_precalculee",
+    "GROUP BY periode_ref, ville, mois, jour_mois, categorie;"))
+  dbExecute(con, "CREATE INDEX idx_quiz_candidats ON public.quiz_candidats (periode_ref, ville, mois);")
+  dbExecute(con, "VACUUM ANALYZE public.quiz_candidats;")
+
+  cat("✅ stats_normales, quiz_data_precalculee et quiz_candidats régénérées (temperatures_max inchangée).\n")
 
 }, finally = {
   cat("Déconnexion de la base de données.\n")

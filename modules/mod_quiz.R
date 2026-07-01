@@ -12,15 +12,24 @@
 # supprime les allers-retours BDD et garantit qu'on sait d'emblée si le combo
 # fournit assez de questions.
 charger_candidats_quiz <- function(db_pool, periode, ville, saison) {
-  requete <- tbl(db_pool, "quiz_data_precalculee") %>%
-    filter(periode_ref == !!periode)
-  if (!identical(ville, "Toutes les villes")) {
-    requete <- requete %>% filter(ville == !!ville)
-  }
   mois_s <- mois_saison(saison)
-  if (!is.null(mois_s)) {
-    requete <- requete %>% filter(mois %in% !!mois_s)
+
+  # Chemin rapide : agrégat pré-calculé (quiz_candidats) — une simple lecture
+  # filtrée/indexée (~33k lignes max) au lieu d'agréger ~4 M lignes à chaque
+  # « Lancer la série » (24 s en prod). Repli sur l'agrégation à la volée si la
+  # table est absente (dégradation gracieuse, cf. utils/quiz_candidats.sql).
+  if (isTRUE(quiz_candidats_disponibles)) {
+    requete <- tbl(db_pool, "quiz_candidats") %>% filter(periode_ref == !!periode)
+    if (!identical(ville, "Toutes les villes")) requete <- requete %>% filter(ville == !!ville)
+    if (!is.null(mois_s)) requete <- requete %>% filter(mois %in% !!mois_s)
+    return(requete %>%
+      select(ville, mois, jour_mois, categorie, min_temp, max_temp, normale_moy) %>%
+      collect())
   }
+
+  requete <- tbl(db_pool, "quiz_data_precalculee") %>% filter(periode_ref == !!periode)
+  if (!identical(ville, "Toutes les villes")) requete <- requete %>% filter(ville == !!ville)
+  if (!is.null(mois_s)) requete <- requete %>% filter(mois %in% !!mois_s)
   requete %>%
     group_by(ville, mois, jour_mois, categorie) %>%
     summarise(

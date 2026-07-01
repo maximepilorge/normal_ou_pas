@@ -104,6 +104,10 @@ PERIODE_REF_PROJECTION <- "1991-2020"
 # cf. utils/quiz_series_scores.sql). Absente -> l'app n'écrit pas les scores et
 # masque le « meilleur score » personnel (dégradation gracieuse, cf. analytics).
 quiz_scores_disponibles <- table_existe("quiz_series_scores")
+# Agrégat pré-calculé des candidats du quiz (démarrage d'une série), dérivé de
+# quiz_data_precalculee (cf. utils/quiz_candidats.sql). Absent -> l'app agrège à
+# la volée : correct mais lent sur grosse base (~24 s en prod).
+quiz_candidats_disponibles <- table_existe("quiz_candidats")
 
 # Utilitaire : bornes (début, fin) d'un libellé de période "AAAA-AAAA".
 .periode_bornes <- function(p) as.numeric(strsplit(p, "-")[[1]])

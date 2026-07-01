@@ -28,6 +28,7 @@
   - `temperatures_max` — Températures journalières par ville (PK: ville, date)
   - `stats_normales` — Normales climatiques pré-calculées par période de référence (PK: ville, mois, jour_mois, periode_ref)
   - `quiz_data_precalculee` — Questions quiz pré-calculées avec catégories (PK: ville, date, periode_ref)
+  - `quiz_candidats` — Agrégat pré-calculé (min/max/normale par periode_ref, ville, jour, catégorie) pour le démarrage rapide d'une série de quiz ; dérivé de `quiz_data_precalculee` (cf. `utils/quiz_candidats.sql`). Sans lui, l'agrégation à la volée est lente en prod (~24 s).
   - `analytics_visits` — Analytics anonymes des sessions utilisateurs
   - `quiz_series_scores` — Un score par série de quiz jouée (table **runtime**, créée à la main hors pipeline : `utils/quiz_series_scores.sql` ; cf. `analytics_visits`)
 - Requêtes lazy via `dbplyr`/`tbl()`, données pré-calculées pour la performance

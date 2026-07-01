@@ -61,6 +61,7 @@ pour la base de production.
 | `temperatures_max` | (ville, date) | Tmax/tmin journalières par ville. |
 | `stats_normales` | (ville, mois, jour_mois, periode_ref) | Normales pré-calculées par période de référence (moy, quartiles, seuils p10/p90 lissés ±7 j). |
 | `quiz_data_precalculee` | (ville, date, periode_ref) | Questions du quiz avec catégorie (sous/dans/au-dessus). |
+| `quiz_candidats` | (periode_ref, ville, mois, jour_mois, categorie) | Agrégat pré-calculé (min/max/normale) dérivé de `quiz_data_precalculee`, pour le démarrage rapide d'une série (évite d'agréger ~4 M lignes à chaque « Lancer la série »). Reconstruit par le pipeline / `utils/quiz_candidats.sql`. |
 | `indicateurs_annuels` | (ville, annee) | Jours de gel, jours de forte chaleur, records, etc. *(table optionnelle)* |
 | `stats_normales_projetees` | (ville, mois, jour_mois) | Deltas TRACC par niveau de réchauffement (quiz). *(optionnelle)* |
 | `extremes_projetes` | (ville, niveau) | Jours de forte chaleur / gel projetés. *(optionnelle)* |

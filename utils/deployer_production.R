@@ -83,6 +83,26 @@ tryCatch({
 
   cat("\n✅ Déploiement terminé et transaction validée avec succès !\n")
 
+  # 4. Reconstruire quiz_candidats (agrégat pré-calculé du démarrage de série),
+  #    dérivé de la quiz_data_precalculee fraîchement promue. HORS transaction :
+  #    un échec ici ne compromet pas le déploiement (l'app dégrade en agrégation
+  #    à la volée). Cf. utils/quiz_candidats.sql.
+  cat("Reconstruction de quiz_candidats (agrégat pré-calculé du quiz)...\n")
+  tryCatch({
+    dbExecute(con_prod, "DROP TABLE IF EXISTS public.quiz_candidats;")
+    dbExecute(con_prod, paste(
+      "CREATE TABLE public.quiz_candidats AS",
+      "SELECT periode_ref, ville, mois, jour_mois, categorie,",
+      "MIN(tmax_celsius) AS min_temp, MAX(tmax_celsius) AS max_temp, MIN(t_moy) AS normale_moy",
+      "FROM public.quiz_data_precalculee",
+      "GROUP BY periode_ref, ville, mois, jour_mois, categorie;"))
+    dbExecute(con_prod, "CREATE INDEX idx_quiz_candidats ON public.quiz_candidats (periode_ref, ville, mois);")
+    dbExecute(con_prod, "VACUUM ANALYZE public.quiz_candidats;")
+    cat("  -> quiz_candidats reconstruite.\n")
+  }, error = function(e)
+    cat("  Avis : quiz_candidats non reconstruite (l'app agrégera à la volée) :",
+        conditionMessage(e), "\n"))
+
 }, error = function(e) {
   cat("\nERREUR : Le déploiement a échoué. Annulation de la transaction (ROLLBACK).\n")
   print(e$message)
