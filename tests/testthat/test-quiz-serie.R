@@ -143,6 +143,38 @@ test_that("phrase_projection_futur ne dit pas « passerait » d'une temp déjà 
   expect_null(phrase_projection_futur(5, "En-dessous des normales", NA, 20, "2100"))
 })
 
+test_that("construire_projections assemble présent + niveaux (normale + deltas)", {
+  base <- data.frame(t_moy = 20, seuil_bas_p10 = 15, seuil_haut_p90 = 25)
+  deltas <- data.frame(
+    niveau_rechauffement = c("2050_+2.7", "2100_+4.0"),
+    delta_moy = c(1, 2), delta_p10 = c(0.5, 1), delta_p90 = c(1.5, 3),
+    delta_moy_bas = c(0.8, 1.6), delta_moy_haut = c(1.2, 2.4))
+  proj <- construire_projections(base, deltas)
+  # Présent = bornes 1991-2020 telles quelles.
+  expect_equal(proj$present, list(p10 = 15, p90 = 25, moy = 20))
+  expect_length(proj$niveaux, 2)
+  # Niveau 2100 = normale + delta correspondant.
+  n2100 <- Filter(function(x) x$niveau == "2100_+4.0", proj$niveaux)[[1]]
+  expect_equal(n2100$moy, 22); expect_equal(n2100$p10, 16); expect_equal(n2100$p90, 28)
+  expect_equal(n2100$label, "2100 (+4 °C)")
+})
+
+test_that("construire_projections : entrées vides / niveau manquant -> repli", {
+  base <- data.frame(t_moy = 20, seuil_bas_p10 = 15, seuil_haut_p90 = 25)
+  # Aucune ligne de delta -> NULL.
+  expect_null(construire_projections(base, base[0, , drop = FALSE]))
+  expect_null(construire_projections(base, NULL))
+  expect_null(construire_projections(NULL, data.frame(niveau_rechauffement = "2050_+2.7")))
+  # Un seul niveau présent -> une seule entrée dans niveaux.
+  deltas1 <- data.frame(
+    niveau_rechauffement = "2050_+2.7",
+    delta_moy = 1, delta_p10 = 0.5, delta_p90 = 1.5,
+    delta_moy_bas = 0.8, delta_moy_haut = 1.2)
+  proj <- construire_projections(base, deltas1)
+  expect_length(proj$niveaux, 1)
+  expect_equal(proj$niveaux[[1]]$niveau, "2050_+2.7")
+})
+
 test_that("couleur_score : bandes rouge (0-2) / ambre (3-6) / vert (7-8) / or (9-10)", {
   expect_equal(couleur_score(0, 10), "#C0392B")
   expect_equal(couleur_score(2, 10), "#C0392B")

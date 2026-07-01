@@ -241,6 +241,35 @@ phrase_projection_futur <- function(temp, categorie_actuelle, p10_fin, p90_fin, 
   }
 }
 
+# Construit l'objet `projections` (normale « présente » + niveaux TRACC) d'une
+# manche de quiz, à partir de la normale 1991-2020 `base_9120` (data.frame à 1
+# ligne : t_moy, seuil_bas_p10, seuil_haut_p90) et des deltas DRIAS par niveau
+# `deltas_proj` (data.frame : niveau_rechauffement + delta_moy/p10/p90/moy_bas/
+# moy_haut). Renvoie list(present, niveaux) ou NULL si l'une des entrées est vide.
+# Fonction PURE (aucune BDD) — extraite de calculer_feedback_manche pour être
+# testable et pour permettre le pré-calcul groupé des projections d'une série.
+construire_projections <- function(base_9120, deltas_proj) {
+  if (is.null(base_9120) || nrow(base_9120) == 0 ||
+      is.null(deltas_proj) || nrow(deltas_proj) == 0) return(NULL)
+  labels_niv <- c("2050_+2.7" = "2050 (+2,7 °C)", "2100_+4.0" = "2100 (+4 °C)")
+  niveaux <- lapply(names(labels_niv), function(niv) {
+    d <- deltas_proj[deltas_proj$niveau_rechauffement == niv, ]
+    if (nrow(d) == 0) return(NULL)
+    list(niveau = niv, label = unname(labels_niv[niv]),
+         moy      = base_9120$t_moy[1]          + d$delta_moy[1],
+         p10      = base_9120$seuil_bas_p10[1]  + d$delta_p10[1],
+         p90      = base_9120$seuil_haut_p90[1] + d$delta_p90[1],
+         moy_bas  = base_9120$t_moy[1]          + d$delta_moy_bas[1],
+         moy_haut = base_9120$t_moy[1]          + d$delta_moy_haut[1])
+  })
+  niveaux <- Filter(Negate(is.null), niveaux)
+  if (length(niveaux) == 0) return(NULL)
+  list(
+    present = list(p10 = base_9120$seuil_bas_p10[1],
+                   p90 = base_9120$seuil_haut_p90[1], moy = base_9120$t_moy[1]),
+    niveaux = niveaux)
+}
+
 # Construit le modal de partage d'une image (carte de résultat). Partagé par le
 # quiz et l'onglet « Une journée » : même UX, mêmes identifiants que www/partage.js
 # (#apercu-partage-img, #partage-zone[data-texte]) qui pilote copie / partage natif

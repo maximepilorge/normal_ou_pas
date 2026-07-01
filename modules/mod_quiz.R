@@ -41,12 +41,83 @@ charger_candidats_quiz <- function(db_pool, periode, ville, saison) {
     collect()
 }
 
+# --- Pré-calcul groupé des données STATIQUES d'une série --------------------
+# Au lancement d'une série, on récupère EN 2-3 REQUÊTES GROUPÉES (par ville) les
+# seuils p10/p90 (période choisie) et les normales projetées (base 1991-2020 +
+# deltas TRACC) de toutes les manches, au lieu d'une requête par manche à chaque
+# révélation. Renvoie une liste alignée sur `questions` : list(seuils, projections)
+# par manche (NULL si absent). Toute erreur -> repli sur les requêtes à la volée
+# dans calculer_feedback_manche (statique = NULL).
+precalculer_feedback_serie <- function(db_pool, questions, periode_ref) {
+  if (length(questions) == 0) return(list())
+  villes <- unique(vapply(questions, function(q) q$city, character(1)))
+
+  seuils_tbl <- tbl(db_pool, "stats_normales") %>%
+    filter(periode_ref == !!periode_ref, ville %in% !!villes) %>%
+    select(ville, mois, jour_mois, seuil_bas_p10, seuil_haut_p90) %>%
+    collect()
+
+  # Projections (facultatives) : normale 1991-2020 + deltas par niveau, par ville.
+  base_tbl <- NULL; deltas_tbl <- NULL
+  if (isTRUE(projections_disponibles)) {
+    base_tbl <- tbl(db_pool, "stats_normales") %>%
+      filter(periode_ref == !!PERIODE_REF_PROJECTION, ville %in% !!villes) %>%
+      select(ville, mois, jour_mois, t_moy, seuil_bas_p10, seuil_haut_p90) %>%
+      collect()
+    deltas_tbl <- tbl(db_pool, "stats_normales_projetees") %>%
+      filter(ville %in% !!villes) %>%
+      collect()
+  }
+
+  lapply(questions, function(q) {
+    m <- lubridate::month(q$date); j <- lubridate::day(q$date)
+    sr <- seuils_tbl[seuils_tbl$ville == q$city &
+                       seuils_tbl$mois == m & seuils_tbl$jour_mois == j, ]
+    seuils <- if (nrow(sr) > 0)
+      list(p10 = sr$seuil_bas_p10[1], p90 = sr$seuil_haut_p90[1]) else NULL
+    projections <- NULL
+    if (!is.null(base_tbl) && !is.null(deltas_tbl)) {
+      br <- base_tbl[base_tbl$ville == q$city &
+                       base_tbl$mois == m & base_tbl$jour_mois == j, ]
+      dr <- deltas_tbl[deltas_tbl$ville == q$city &
+                         deltas_tbl$mois == m & deltas_tbl$jour_mois == j, ]
+      projections <- construire_projections(br, dr)
+    }
+    list(seuils = seuils, projections = projections)
+  })
+}
+
+# Comptage SQL SCALAIRE : nombre de jours d'une `ville` dont la tmax atteint
+# l'intensité `temp` dans le sens `direction` ("supérieure" -> >=, sinon <=), sur
+# les années `annees`. Restreint soit à une fenêtre ±7 j (cles_fenetre = clés
+# mois*100+jour_mois), soit à des mois de saison (mois_saison). Le COUNT est fait
+# côté PostgreSQL : on ne rapatrie qu'un entier (au lieu de centaines/milliers de
+# lignes juste pour un sum() en R).
+.compter_depassements <- function(db_pool, ville, annees, temp, direction,
+                                  cles_fenetre = NULL, mois_saison = NULL) {
+  requete <- tbl(db_pool, "temperatures_max") %>%
+    filter(ville == !!ville, annee %in% !!annees)
+  if (!is.null(cles_fenetre))
+    requete <- requete %>% filter((mois * 100L + jour_mois) %in% !!cles_fenetre)
+  if (!is.null(mois_saison))
+    requete <- requete %>% filter(mois %in% !!mois_saison)
+  requete <- if (direction == "supérieure")
+    requete %>% filter(temperature_max >= !!temp)
+  else
+    requete %>% filter(temperature_max <= !!temp)
+  as.numeric(requete %>% summarise(n = n()) %>% pull(n))
+}
+
 # --- Calcul du feedback d'une manche ----------------------------------------
-# Reprend la logique historique (seuils p10/p90, projections TRACC, fenêtre ±7 j,
-# explication écart/fréquence) MAIS sous forme de fonction pilotée par les données
+# Reprend la logique historique (seuils p10/p90, projections TRACC, comptages de
+# fréquence, explication écart) MAIS sous forme de fonction pilotée par les données
 # de la manche : aucune déclaration d'output ici (celles-ci vivent, une seule fois,
-# dans le serveur). Renvoie list(explication, seuils, projections, boxplot_data).
-calculer_feedback_manche <- function(db_pool, data, periode_ref) {
+# dans le serveur). Les seuils/projections viennent du préchargement `statique`
+# (repli requête à la volée) ; les comptages sont des agrégats SQL scalaires ; les
+# lignes du boxplot sont chargées à part (paresseusement, à l'ouverture de
+# l'accordéon). Renvoie list(explication, seuils, projections, projection_txt,
+# projection_couleur).
+calculer_feedback_manche <- function(db_pool, data, periode_ref, statique = NULL) {
   annees_periode <- as.numeric(unlist(strsplit(periode_ref, "-")))
   annee_debut <- annees_periode[1]
   annee_fin   <- annees_periode[2]
@@ -54,55 +125,34 @@ calculer_feedback_manche <- function(db_pool, data, periode_ref) {
   jour_quiz <- lubridate::day(data$date)
   mois_quiz <- lubridate::month(data$date)
 
-  # Seuils p10/p90 du jour (période sélectionnée), pour la zone normale du boxplot.
-  seuils_normaux <- tbl(db_pool, "stats_normales") %>%
-    filter(ville == !!data$city, mois == !!mois_quiz, jour_mois == !!jour_quiz,
-           periode_ref == !!periode_ref) %>%
-    select(seuil_bas_p10, seuil_haut_p90) %>%
-    collect()
-  seuils <- if (nrow(seuils_normaux) > 0)
-    list(p10 = seuils_normaux$seuil_bas_p10[1], p90 = seuils_normaux$seuil_haut_p90[1])
-  else NULL
-
-  # Normales projetées (TRACC) : normale 1991-2020 + delta DRIAS par niveau.
-  projections <- NULL
-  if (projections_disponibles) {
-    base_9120 <- tbl(db_pool, "stats_normales") %>%
+  # Seuils p10/p90 du jour (zone normale du boxplot) : préchargés au lancement de
+  # la série (`statique`) si disponibles, sinon requête ponctuelle (repli gracieux).
+  seuils <- if (!is.null(statique)) statique$seuils else {
+    seuils_normaux <- tbl(db_pool, "stats_normales") %>%
       filter(ville == !!data$city, mois == !!mois_quiz, jour_mois == !!jour_quiz,
-             periode_ref == !!PERIODE_REF_PROJECTION) %>%
-      select(t_moy, seuil_bas_p10, seuil_haut_p90) %>% collect()
-    deltas_proj <- tbl(db_pool, "stats_normales_projetees") %>%
-      filter(ville == !!data$city, mois == !!mois_quiz, jour_mois == !!jour_quiz) %>%
+             periode_ref == !!periode_ref) %>%
+      select(seuil_bas_p10, seuil_haut_p90) %>%
       collect()
-    if (nrow(base_9120) > 0 && nrow(deltas_proj) > 0) {
-      labels_niv <- c("2050_+2.7" = "2050 (+2,7 °C)", "2100_+4.0" = "2100 (+4 °C)")
-      niveaux <- lapply(names(labels_niv), function(niv) {
-        d <- deltas_proj[deltas_proj$niveau_rechauffement == niv, ]
-        if (nrow(d) == 0) return(NULL)
-        list(niveau = niv, label = unname(labels_niv[niv]),
-             moy      = base_9120$t_moy[1]          + d$delta_moy[1],
-             p10      = base_9120$seuil_bas_p10[1]  + d$delta_p10[1],
-             p90      = base_9120$seuil_haut_p90[1] + d$delta_p90[1],
-             moy_bas  = base_9120$t_moy[1]          + d$delta_moy_bas[1],
-             moy_haut = base_9120$t_moy[1]          + d$delta_moy_haut[1])
-      })
-      niveaux <- Filter(Negate(is.null), niveaux)
-      if (length(niveaux) > 0) projections <- list(
-        present = list(p10 = base_9120$seuil_bas_p10[1],
-                       p90 = base_9120$seuil_haut_p90[1], moy = base_9120$t_moy[1]),
-        niveaux = niveaux)
-    }
+    if (nrow(seuils_normaux) > 0)
+      list(p10 = seuils_normaux$seuil_bas_p10[1], p90 = seuils_normaux$seuil_haut_p90[1])
+    else NULL
   }
 
-  # Fenêtre ±7 jours (cohérente avec la classification) pour le boxplot.
-  jours_fenetre <- data$date + (-7:7)
-  cles_fenetre <- unique(lubridate::month(jours_fenetre) * 100 + lubridate::day(jours_fenetre))
-  donnees_historiques_jour <- tbl(db_pool, "temperatures_max") %>%
-    filter(ville == !!data$city, annee %in% !!annees_a_filtrer,
-           (mois * 100L + jour_mois) %in% !!cles_fenetre) %>%
-    select(date, temperature_max) %>%
-    collect() %>%
-    rename(tmax_celsius = temperature_max)
+  # Normales projetées (TRACC) : normale 1991-2020 + delta DRIAS par niveau.
+  # Préchargées au lancement de la série (`statique`) si disponibles ; sinon on
+  # récupère base + deltas à la volée et on assemble via construire_projections().
+  projections <- if (!is.null(statique)) statique$projections else {
+    if (isTRUE(projections_disponibles)) {
+      base_9120 <- tbl(db_pool, "stats_normales") %>%
+        filter(ville == !!data$city, mois == !!mois_quiz, jour_mois == !!jour_quiz,
+               periode_ref == !!PERIODE_REF_PROJECTION) %>%
+        select(t_moy, seuil_bas_p10, seuil_haut_p90) %>% collect()
+      deltas_proj <- tbl(db_pool, "stats_normales_projetees") %>%
+        filter(ville == !!data$city, mois == !!mois_quiz, jour_mois == !!jour_quiz) %>%
+        collect()
+      construire_projections(base_9120, deltas_proj)
+    } else NULL
+  }
 
   moyenne_reelle <- data$normale_moy
   diff <- round(abs(data$temp - moyenne_reelle), 1)
@@ -117,22 +167,20 @@ calculer_feedback_manche <- function(db_pool, data, periode_ref) {
     explication_principale <- paste0("Cette température est <b>", diff, "°C</b> ", direction,
       " à la moyenne de saison (", round(moyenne_reelle, 1), "°C) pour la période ", periode_ref, ".")
 
-    nombre_occurrences_jour <- if (direction == "supérieure")
-      sum(donnees_historiques_jour$tmax_celsius >= data$temp, na.rm = TRUE)
-    else sum(donnees_historiques_jour$tmax_celsius <= data$temp, na.rm = TRUE)
+    # Comptages d'occurrence en agrégats SQL scalaires (COUNT côté PostgreSQL) :
+    # plus de rapatriement de ~450 (fenêtre) / ~2700 (saison) lignes pour un sum().
+    jours_fenetre <- data$date + (-7:7)
+    cles_fenetre <- unique(lubridate::month(jours_fenetre) * 100 + lubridate::day(jours_fenetre))
+    nombre_occurrences_jour <- .compter_depassements(
+      db_pool, data$city, annees_a_filtrer, data$temp, direction, cles_fenetre = cles_fenetre)
     frequence_jour_text <- if (nombre_occurrences_jour == 0)
       paste0("Autour de cette date (fenêtre de ±7 jours), un événement de cette intensité ne s'est <b>jamais produit</b> entre ", annee_debut, " et ", annee_fin, ".")
     else paste0("Autour de cette date (fenêtre de ±7 jours), une température égale ou ", direction,
                 " est arrivée <b>", nombre_occurrences_jour, " fois</b> entre ", annee_debut, " et ", annee_fin, ".")
 
     saison <- get_season_info(data$date)
-    donnees_historiques_saison <- tbl(db_pool, "temperatures_max") %>%
-      filter(ville == !!data$city, annee %in% !!annees_a_filtrer, mois %in% !!saison$mois) %>%
-      select(date, temperature_max) %>% collect() %>%
-      rename(tmax_celsius = temperature_max)
-    nombre_occurrences_saison <- if (direction == "supérieure")
-      sum(donnees_historiques_saison$tmax_celsius >= data$temp, na.rm = TRUE)
-    else sum(donnees_historiques_saison$tmax_celsius <= data$temp, na.rm = TRUE)
+    nombre_occurrences_saison <- .compter_depassements(
+      db_pool, data$city, annees_a_filtrer, data$temp, direction, mois_saison = saison$mois)
     message_occurrence_saison <- if (round(nombre_occurrences_saison / (annee_fin - annee_debut + 1) >= 1)) {
       paste0(round(nombre_occurrences_saison / (annee_fin - annee_debut + 1), 0))
     } else if (round(nombre_occurrences_saison / (annee_fin - annee_debut + 1) > 0)) {
@@ -179,8 +227,7 @@ calculer_feedback_manche <- function(db_pool, data, periode_ref) {
     if (!is.null(ph)) { projection_txt <- ph$txt; projection_couleur <- ph$couleur }
   }
 
-  list(explication = explication_text, seuils = seuils,
-       projections = projections, boxplot_data = donnees_historiques_jour,
+  list(explication = explication_text, seuils = seuils, projections = projections,
        projection_txt = projection_txt, projection_couleur = projection_couleur)
 }
 
@@ -217,11 +264,14 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
     # Données de la manche courante (alimentent les outputs du boxplot, déclarés
     # une seule fois plus bas).
     quiz_data       <- reactiveVal(NULL)
-    boxplot_data    <- reactiveVal(NULL)
     seuils_quiz     <- reactiveVal(NULL)
     projections_quiz<- reactiveVal(NULL)
     dernier_resultat<- reactiveVal(NULL)        # params de la carte de partage de la manche
     taquin_manche   <- reactiveVal(NULL)        # commentaire taquin de la manche révélée
+    # Données STATIQUES (seuils + projections) des 10 manches, préchargées en bloc
+    # au lancement de la série (cf. precalculer_feedback_serie) ; NULL -> repli sur
+    # les requêtes à la volée dans calculer_feedback_manche.
+    feedback_statique <- reactiveVal(NULL)
 
     # Score CUMULÉ sur la session (compat analytics_visits / server.R) — incrémenté
     # à chaque validation, exactement comme le quiz historique.
@@ -423,9 +473,28 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
     })
 
     # --- Outputs du boxplot (déclarés UNE seule fois) -----------------------
+    # Lignes ±7 j de la manche pour le boxplot, chargées PARESSEUSEMENT : le graphe
+    # vit dans un accordéon fermé (« Voir la distribution »), donc suspendu tant
+    # qu'il n'est pas déplié — la requête (~450 lignes) ne part QUE si l'utilisateur
+    # ouvre la distribution, et sort ainsi du chemin de révélation d'une manche.
+    boxplot_rows <- reactive({
+      dq <- quiz_data()
+      req(dq, phase_manche() == "feedback")
+      annees <- as.numeric(strsplit(filtres_serie()$periode, "-")[[1]])
+      annees_a_filtrer <- seq(annees[1], annees[2])
+      jours_fenetre <- dq$date + (-7:7)
+      cles <- unique(lubridate::month(jours_fenetre) * 100 + lubridate::day(jours_fenetre))
+      tbl(db_pool, "temperatures_max") %>%
+        filter(ville == !!dq$city, annee %in% !!annees_a_filtrer,
+               (mois * 100L + jour_mois) %in% !!cles) %>%
+        select(date, temperature_max) %>%
+        collect() %>%
+        rename(tmax_celsius = temperature_max)
+    })
+
     output$boxplot_titre <- renderUI({
       data_quiz <- quiz_data()
-      req(data_quiz, boxplot_data())
+      req(data_quiz)
       fmt1 <- function(x) format(round(x, 1), nsmall = 1, decimal.mark = ",")
       main_title <- paste0("Distribution historique ", autour_de(data_quiz$city),
                            " (vers le ", paste(format(data_quiz$date, "%d"),
@@ -442,9 +511,9 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
     })
 
     output$feedback_boxplot <- renderPlotly({
-      req(boxplot_data())
+      donnees_historiques_jour_plot <- boxplot_rows()
+      req(nrow(donnees_historiques_jour_plot) > 0)
       data_quiz <- quiz_data()
-      donnees_historiques_jour_plot <- boxplot_data()
       fmt1 <- function(x) format(round(x, 1), nsmall = 1, decimal.mark = ",")
       seuils <- seuils_quiz()
       proj   <- projections_quiz()
@@ -520,8 +589,15 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
       reponses(vector("list", length(nouvelle)))
       phase_manche("question")
       feedback_courant(NULL)
-      boxplot_data(NULL)
       quiz_data(nouvelle[[1]])
+      # Préchargement groupé des données statiques (seuils + projections) des 10
+      # manches : chaque révélation lira ces valeurs en mémoire au lieu d'émettre
+      # 2-3 requêtes. Repli gracieux (NULL) -> requêtes à la volée si échec.
+      periode <- filtres_serie()$periode
+      feedback_statique(tryCatch(
+        precalculer_feedback_serie(db_pool, nouvelle, periode),
+        error = function(e) {
+          log_debug("precalculer_feedback_serie : ", conditionMessage(e)); NULL }))
       debut_serie(Sys.time())
       etat("jeu")
     }
@@ -571,9 +647,10 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
       taquin_manche(commentaire_manche(is_correct, rang, isTRUE(filtres_serie()$poli)))
 
       quiz_data(q)
-      fb <- calculer_feedback_manche(db_pool, q, filtres_serie()$periode)
+      statique <- feedback_statique()
+      stat_manche <- if (!is.null(statique) && length(statique) >= idx()) statique[[idx()]] else NULL
+      fb <- calculer_feedback_manche(db_pool, q, filtres_serie()$periode, statique = stat_manche)
       feedback_courant(fb)
-      boxplot_data(fb$boxplot_data)
       seuils_quiz(fb$seuils)
       projections_quiz(fb$projections)
 
@@ -595,7 +672,6 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
         idx(idx() + 1L)
         quiz_data(serie()[[idx()]])
         feedback_courant(NULL)
-        boxplot_data(NULL)
         phase_manche("question")
       } else {
         # Fin de série : on fige le bilan et on remonte l'événement à server.R.
