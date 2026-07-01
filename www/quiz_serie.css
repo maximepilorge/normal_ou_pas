@@ -63,16 +63,19 @@
   font-weight: 600;
   margin-bottom: 0.5rem;
 }
-/* Réponses centrées horizontalement, largeur de lecture plafonnée (ne s'étirent
-   pas sur toute la largeur du bureau). */
+/* Réponses centrées : le groupe est plafonné en largeur et centré par marges
+   auto (robuste quel que soit le markup interne — radioButtons rend .radio, pas
+   .form-check, sous Bootstrap 5). */
 .quiz-reponses .shiny-options-group {
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 0.5rem;
+  max-width: 460px;
+  margin-left: auto;
+  margin-right: auto;
 }
 .quiz-reponses .form-check,
-.quiz-reponses .radio { width: 100%; max-width: 460px; padding: 0; margin: 0; min-height: 0; }
+.quiz-reponses .radio { width: 100%; padding: 0; margin: 0; min-height: 0; }
 .quiz-reponses .form-check-input,
 .quiz-reponses .radio input[type="radio"] {
   position: absolute;
@@ -104,10 +107,16 @@
 }
 
 /* --- Révélation des réponses (mêmes centrage/largeur que les réponses) --- */
-.options-reveal { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+.options-reveal {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 460px;
+  margin-left: auto;
+  margin-right: auto;
+}
 .option-reveal {
   width: 100%;
-  max-width: 460px;
   border: 1px solid #dee2e6;
   border-radius: 8px;
   padding: 0.6rem 0.9rem;
