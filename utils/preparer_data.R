@@ -198,6 +198,10 @@ tryCatch({
   dbExecute(con, "ALTER TABLE public.temperatures_max ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
   dbExecute(con, "ALTER TABLE public.temperatures_max ADD CONSTRAINT uc_temperatures_max_ville_date UNIQUE (ville, date);")
   dbExecute(con, "CREATE INDEX idx_temp_recherche_jour ON public.temperatures_max (ville, mois, jour_mois, annee);")
+  # Rang absolu (onglet « Une journée ») : COUNT(temperature_max >/< seuil) par
+  # ville sur toute la série -> index (ville, temperature_max) pour un comptage
+  # index-only plutôt qu'un scan des lignes de la ville.
+  dbExecute(con, "CREATE INDEX idx_temp_ville_tmax ON public.temperatures_max (ville, temperature_max);")
   dbExecute(con, "VACUUM ANALYZE public.temperatures_max;")
   
   # -- Table: stats_normales --

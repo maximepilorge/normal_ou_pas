@@ -106,23 +106,24 @@ mod_jour_server <- function(id, db_pool) {
       d <- as.Date(input$date_jour)
       ville <- input$ville_jour
 
-      obs <- tbl(db_pool, "temperatures_max") %>%
-        filter(ville == !!ville, date == !!d) %>%
-        select(temperature_max) %>% collect()
-      if (nrow(obs) == 0 || !is.finite(obs$temperature_max[1])) {
-        return(list(ok = FALSE, msg = paste0(
-          "Pas de donnée ", autour_de(ville), " le ", format(d, "%d/%m/%Y"),
-          " (couverture : ", an_min_data, "–", an_max_data, ").")))
-      }
-      temp <- round(obs$temperature_max[1], 1)
-
-      # Fenêtre ±7 jours, toutes années (clé mois*100 + jour, comme le quiz).
+      # Fenêtre ±7 jours, toutes années (clé mois*100 + jour, comme le quiz). La
+      # journée demandée (date == d, offset 0) est COMPRISE dans cette fenêtre : on
+      # en extrait l'observation du jour plutôt qu'une requête `obs` séparée (une
+      # requête de moins sur le chemin critique du verdict).
       jours_fenetre <- d + (-7:7)
       cles <- unique(lubridate::month(jours_fenetre) * 100 + lubridate::day(jours_fenetre))
       win <- tbl(db_pool, "temperatures_max") %>%
         filter(ville == !!ville, (mois * 100L + jour_mois) %in% !!cles) %>%
-        select(annee, temperature_max) %>% collect() %>%
+        select(date, annee, temperature_max) %>% collect() %>%
         rename(tmax = temperature_max)
+
+      obs_jour <- win$tmax[win$date == d]
+      if (length(obs_jour) == 0 || !is.finite(obs_jour[1])) {
+        return(list(ok = FALSE, msg = paste0(
+          "Pas de donnée ", autour_de(ville), " le ", format(d, "%d/%m/%Y"),
+          " (couverture : ", an_min_data, "–", an_max_data, ").")))
+      }
+      temp <- round(obs_jour[1], 1)
 
       # Normale + bornes p10/p90 du jour calendaire pour la période choisie.
       norm <- tbl(db_pool, "stats_normales") %>%
