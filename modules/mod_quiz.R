@@ -519,58 +519,68 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
       proj   <- projections_quiz()
       actif  <- repere_actif()
 
-      all_y <- c(donnees_historiques_jour_plot$tmax_celsius, data_quiz$temp)
+      yv <- donnees_historiques_jour_plot$tmax_celsius
+      all_y <- c(yv, data_quiz$temp)
       if (!is.null(seuils)) all_y <- c(all_y, seuils$p10, seuils$p90)
       if (!is.null(proj)) for (n in proj$niveaux) all_y <- c(all_y, n$p10, n$p90)
       yr <- range(all_y, na.rm = TRUE); yr <- yr + c(-1, 1) * 0.06 * diff(yr)
 
-      p <- ggplot(donnees_historiques_jour_plot, aes(x = "", y = tmax_celsius)) +
-        # outlier.shape = NA masque les outliers au rendu ggplot statique. NB :
-        # ggplotly l'IGNORE et réaffiche les outliers du box trace ; ils sont donc
-        # masqués côté plotly plus bas (boxpoints = FALSE).
-        geom_boxplot(width = 0.5, fill = "skyblue", alpha = 0.7, outlier.shape = NA) +
-        geom_jitter(aes(text = paste("Date :", format(date, "%d %b %Y"),
-                                     "<br>Température :", round(tmax_celsius, 1), "°C")),
-                    width = 0.18, alpha = 0.4, color = "darkblue") +
-        geom_point(data = data.frame(temp_quiz = data_quiz$temp),
-                   aes(x = "", y = temp_quiz,
-                       text = paste("Température du quiz :", data_quiz$temp, "°C")),
-                   color = "red", size = 4, shape = 4, stroke = 1.5, alpha = 0.85) +
-        scale_y_continuous(labels = ~paste(.x, "°C")) +
-        labs(x = "", y = "Température Maximale") +
-        theme_minimal(base_size = 12)
+      # Boxplot en plot_ly NATIF (au lieu de ggplot + ggplotly) : évite la
+      # conversion — poste dominant du délai — ET le contournement des outliers.
+      # On fournit des stats de box PRÉ-CALCULÉES : moustaches exactement à 1,5×IQR
+      # (bornes explicites) et aucun point du box. Le jitter affiche tous les points
+      # (jitté à la main, plot_ly ne jitte pas).
+      vf <- yv[is.finite(yv)]
+      qs <- as.numeric(stats::quantile(vf, c(.25, .5, .75), type = 7))
+      iqr <- qs[3] - qs[1]
+      lf <- min(vf[vf >= qs[1] - 1.5 * iqr]); uf <- max(vf[vf <= qs[3] + 1.5 * iqr])
+      jitter_x <- 1 + runif(length(yv), -0.18, 0.18)
 
-      if (!is.null(actif)) {
-        p <- p +
-          annotate("rect", xmin = 0.5, xmax = 1.5, ymin = actif$p10, ymax = actif$p90,
-                   fill = actif$couleur, alpha = 0.15) +
-          geom_hline(yintercept = c(actif$p10, actif$p90),
-                     linetype = "dashed", color = actif$couleur, linewidth = 0.8) +
-          geom_point(data = data.frame(y = actif$moy),
-                     aes(x = "", y = y, text = paste("Moyenne :", fmt1(actif$moy), "°C")),
-                     shape = 4, size = 4, color = "black")
-      }
+      # Repère « normale » actif (présent/projeté) : zone p10–p90 + bornes, sous les
+      # points (shapes de layout, pleine largeur).
+      shapes <- if (!is.null(actif)) list(
+        list(type = "rect", xref = "paper", yref = "y", x0 = 0, x1 = 1,
+             y0 = actif$p10, y1 = actif$p90, fillcolor = actif$couleur,
+             opacity = 0.15, line = list(width = 0), layer = "below"),
+        list(type = "line", xref = "paper", yref = "y", x0 = 0, x1 = 1,
+             y0 = actif$p10, y1 = actif$p10,
+             line = list(color = actif$couleur, dash = "dash", width = 1.6), layer = "below"),
+        list(type = "line", xref = "paper", yref = "y", x0 = 0, x1 = 1,
+             y0 = actif$p90, y1 = actif$p90,
+             line = list(color = actif$couleur, dash = "dash", width = 1.6), layer = "below")
+      ) else list()
 
-      gp <- ggplotly(p, tooltip = "text") %>%
-        layout(xaxis = list(fixedrange = TRUE),
-               yaxis = list(fixedrange = TRUE, range = yr),
-               margin = list(t = 10)) %>%
+      fig <- plot_ly() %>%
+        add_trace(type = "box", x = c(1), lowerfence = c(lf), q1 = c(qs[1]),
+                  median = c(qs[2]), q3 = c(qs[3]), upperfence = c(uf),
+                  boxpoints = FALSE, width = 0.5, fillcolor = "rgba(135,206,235,0.7)",
+                  line = list(color = "rgba(51,51,51,1)", width = 1.5),
+                  hoverinfo = "skip", showlegend = FALSE, name = "") %>%
+        add_markers(x = jitter_x, y = yv,
+                    marker = list(color = "rgba(0,0,139,0.4)", size = 5),
+                    text = paste("Date :", format(donnees_historiques_jour_plot$date, "%d %b %Y"),
+                                 "<br>Température :", round(yv, 1), "°C"),
+                    hoverinfo = "text", showlegend = FALSE) %>%
+        add_markers(x = 1, y = data_quiz$temp,
+                    marker = list(symbol = "x", color = "rgba(255,0,0,0.85)", size = 12,
+                                  line = list(color = "rgba(255,0,0,0.85)", width = 1.5)),
+                    text = paste("Température du quiz :", data_quiz$temp, "°C"),
+                    hoverinfo = "text", showlegend = FALSE)
+
+      if (!is.null(actif))
+        fig <- fig %>% add_markers(x = 1, y = actif$moy,
+                    marker = list(symbol = "x", color = "black", size = 10),
+                    text = paste("Moyenne :", fmt1(actif$moy), "°C"),
+                    hoverinfo = "text", showlegend = FALSE)
+
+      fig %>%
+        layout(shapes = shapes,
+               xaxis = list(type = "linear", fixedrange = TRUE, visible = FALSE,
+                            range = c(0.4, 1.6)),
+               yaxis = list(fixedrange = TRUE, range = yr, title = "Température Maximale",
+                            ticksuffix = " °C"),
+               font = list(size = 12), margin = list(t = 10), showlegend = FALSE) %>%
         config(displayModeBar = FALSE, responsive = TRUE)
-
-      # ggplotly réintroduit les outliers du box trace (points noirs) malgré
-      # outlier.shape = NA. On NE met PAS boxpoints=FALSE : côté plotly cela étire
-      # aussi les moustaches jusqu'au min/max au lieu de 1,5×IQR. On garde donc les
-      # outliers CALCULÉS (moustaches à 1,5×IQR) mais on rend leurs marqueurs
-      # invisibles (opacité + couleur transparentes) — le jitter montre déjà tout.
-      for (i in seq_along(gp$x$data)) {
-        if (isTRUE(gp$x$data[[i]]$type == "box")) {
-          gp$x$data[[i]]$boxpoints <- "outliers"
-          gp$x$data[[i]]$marker$opacity <- 0
-          gp$x$data[[i]]$marker$outliercolor <- "rgba(0,0,0,0)"
-          gp$x$data[[i]]$marker$line$color <- "rgba(0,0,0,0)"
-        }
-      }
-      gp
     })
 
     # Meilleur score personnel (lecture BDD sous garde) — affiché au bilan. On
