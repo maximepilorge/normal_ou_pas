@@ -1,9 +1,9 @@
 # Titre: Script de vérification de la couverture des données de température
 
 # --- 1. CHARGEMENT DES LIBRAIRIES ---
-# Assurez-vous que ces packages sont installés : install.packages(c("DBI", "RSQLite", "dplyr"))
+# Assurez-vous que ces packages sont installés : install.packages(c("DBI", "RPostgres", "dplyr"))
 library(DBI)
-library(RSQLite)
+library(RPostgres)
 library(dplyr)
 library(here)
 library(dotenv)
@@ -25,7 +25,7 @@ con <- dbConnect(
 
 # --- 3. PRÉPARATION ET EXÉCUTION DE LA REQUÊTE ---
 # On utilise dplyr pour construire la requête qui sera envoyée à la BDD
-# Cette première étape est très rapide car elle est exécutée par SQLite.
+# (traduite en SQL et exécutée côté PostgreSQL).
 summary_db <- tbl(con, nom_table) %>%
   group_by(ville) %>%
   summarise(

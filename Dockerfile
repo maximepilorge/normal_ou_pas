@@ -10,12 +10,14 @@ RUN R -e 'install.packages(c(\
               "shiny", \
               "shinyjs", \
               "shinyWidgets", \
+              "bslib", \
               "ggplot2", \
               "plotly", \
               "lubridate", \
               "dplyr", \
               "here", \
               "tidyr", \
+              "glue", \
               "DBI", \
               "RPostgres", \
               "pool", \

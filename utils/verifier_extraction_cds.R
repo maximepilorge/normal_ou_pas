@@ -1,4 +1,4 @@
-# utils/verifier_donnees_completes.R
+# utils/verifier_extraction_cds.R
 #
 # Ce script analyse le fichier de données (era5_temperatures_france.rds)
 # pour produire un rapport sur la complétude des données pour chaque ville.
