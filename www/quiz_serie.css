@@ -56,10 +56,23 @@
    label associé ; clic sur le texte = sélection (comportement natif du label).
    Couvre Bootstrap 5 (.form-check) et le repli Bootstrap 3 (.radio). */
 .quiz-reponses .control-label,
-.quiz-reponses .form-label { font-weight: 600; margin-bottom: 0.5rem; }
-.quiz-reponses .shiny-options-group { display: flex; flex-direction: column; gap: 0.5rem; }
+.quiz-reponses .form-label {
+  display: block;
+  width: 100%;
+  text-align: center;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+/* Réponses centrées horizontalement, largeur de lecture plafonnée (ne s'étirent
+   pas sur toute la largeur du bureau). */
+.quiz-reponses .shiny-options-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
 .quiz-reponses .form-check,
-.quiz-reponses .radio { padding: 0; margin: 0; min-height: 0; }
+.quiz-reponses .radio { width: 100%; max-width: 460px; padding: 0; margin: 0; min-height: 0; }
 .quiz-reponses .form-check-input,
 .quiz-reponses .radio input[type="radio"] {
   position: absolute;
@@ -90,14 +103,17 @@
   color: #fff;
 }
 
-/* --- Révélation des réponses --- */
-.options-reveal { display: flex; flex-direction: column; gap: 0.5rem; }
+/* --- Révélation des réponses (mêmes centrage/largeur que les réponses) --- */
+.options-reveal { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
 .option-reveal {
+  width: 100%;
+  max-width: 460px;
   border: 1px solid #dee2e6;
   border-radius: 8px;
   padding: 0.6rem 0.9rem;
   color: #6c757d;
   background: #fff;
+  text-align: center;
 }
 .option-reveal span { margin-left: 0.4rem; }
 .option-correcte {
