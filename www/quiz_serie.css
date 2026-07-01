@@ -56,8 +56,14 @@
    label associé ; clic sur le texte = sélection (comportement natif du label).
    Couvre Bootstrap 5 (.form-check) et le repli Bootstrap 3 (.radio). */
 /* Tout le bloc de réponses (intitulé + boutons) est plafonné et centré au niveau
-   de NOTRE conteneur — indépendant du markup interne de Shiny. */
-.quiz-reponses { max-width: 460px; margin-left: auto; margin-right: auto; }
+   de NOTRE conteneur — indépendant du markup interne de Shiny. align-self couvre
+   le cas où .card-body est un conteneur flex (bslib), margin auto le cas bloc. */
+.quiz-reponses {
+  max-width: 460px;
+  margin-left: auto;
+  margin-right: auto;
+  align-self: center;
+}
 .quiz-reponses .control-label,
 .quiz-reponses .form-label {
   display: block;
@@ -117,6 +123,7 @@
   max-width: 460px;
   margin-left: auto;
   margin-right: auto;
+  align-self: center;
 }
 .option-reveal {
   width: 100%;
