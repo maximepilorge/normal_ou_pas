@@ -525,7 +525,9 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
       yr <- range(all_y, na.rm = TRUE); yr <- yr + c(-1, 1) * 0.06 * diff(yr)
 
       p <- ggplot(donnees_historiques_jour_plot, aes(x = "", y = tmax_celsius)) +
-        geom_boxplot(width = 0.5, fill = "skyblue", alpha = 0.7) +
+        # outlier.shape = NA : le geom_jitter affiche déjà TOUS les points ; sans
+        # ça, geom_boxplot redessine ses outliers en noir, faisant doublon.
+        geom_boxplot(width = 0.5, fill = "skyblue", alpha = 0.7, outlier.shape = NA) +
         geom_jitter(aes(text = paste("Date :", format(date, "%d %b %Y"),
                                      "<br>Température :", round(tmax_celsius, 1), "°C")),
                     width = 0.18, alpha = 0.4, color = "darkblue") +
