@@ -131,29 +131,40 @@ villes_coords <- villes_insee %>%
 periode_ref_carte <- periodes_disponibles[which.min(
   vapply(periodes_disponibles, function(p) .periode_bornes(p)[1], numeric(1)))]
 
-# Anomalies pré-calculées par VILLE et par ANNÉE (une seule requête au démarrage,
-# jointure faite en base -> ~30 villes × ~76 ans). L'anomalie compare chaque jour
-# observé à la normale du même jour calendaire (robuste aux années partielles).
-# Sert à la fois à colorer la carte (filtre par année, sans requête par cran de
-# curseur) et à tracer la trajectoire d'une ville vs l'ensemble. Gardé contre
-# toute erreur pour ne pas bloquer le lancement.
-anomalies_villes_annee <- tryCatch(
-  tbl(db_pool, "temperatures_max") %>%
-    inner_join(
-      tbl(db_pool, "stats_normales") %>%
-        filter(periode_ref == !!periode_ref_carte) %>%
-        select(ville, mois, jour_mois, t_moy),
-      by = c("ville", "mois", "jour_mois")
-    ) %>%
-    group_by(ville, annee) %>%
-    summarise(
-      anomalie = mean(temperature_max - t_moy, na.rm = TRUE),
-      moy_annuelle = mean(temperature_max, na.rm = TRUE),
-      n_jours = n(),
-      .groups = "drop"
-    ) %>%
-    collect(),
-  error = function(e) {
-    warning("Anomalies villes/année (carte) indisponibles : ", conditionMessage(e))
-    NULL
-  })
+# Anomalies pré-calculées par VILLE et par ANNÉE (jointure faite en base -> ~30
+# villes × ~76 ans). L'anomalie compare chaque jour observé à la normale du même
+# jour calendaire (robuste aux années partielles). Sert UNIQUEMENT à la trajectoire
+# de l'onglet « Comparer » (ville vs ensemble).
+#
+# Calcul PARESSEUX (au premier accès, mémoïsé pour le process) plutôt qu'au
+# démarrage : cette jointure sur ~4 M lignes est le poste le plus lourd du boot ;
+# la sortir du chemin de lancement accélère le time-to-first-paint après un
+# démarrage à froid. Le résultat (y compris un NULL en cas d'erreur) est mis en
+# cache pour ne pas être recalculé à chaque ouverture de l'onglet.
+.anomalies_villes_annee_cache <- NULL
+.anomalies_villes_annee_calcule <- FALSE
+obtenir_anomalies_villes_annee <- function() {
+  if (.anomalies_villes_annee_calcule) return(.anomalies_villes_annee_cache)
+  .anomalies_villes_annee_cache <<- tryCatch(
+    tbl(db_pool, "temperatures_max") %>%
+      inner_join(
+        tbl(db_pool, "stats_normales") %>%
+          filter(periode_ref == !!periode_ref_carte) %>%
+          select(ville, mois, jour_mois, t_moy),
+        by = c("ville", "mois", "jour_mois")
+      ) %>%
+      group_by(ville, annee) %>%
+      summarise(
+        anomalie = mean(temperature_max - t_moy, na.rm = TRUE),
+        moy_annuelle = mean(temperature_max, na.rm = TRUE),
+        n_jours = n(),
+        .groups = "drop"
+      ) %>%
+      collect(),
+    error = function(e) {
+      warning("Anomalies villes/année (carte) indisponibles : ", conditionMessage(e))
+      NULL
+    })
+  .anomalies_villes_annee_calcule <<- TRUE
+  .anomalies_villes_annee_cache
+}

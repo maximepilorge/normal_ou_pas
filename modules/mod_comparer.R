@@ -427,7 +427,10 @@ mod_comparer_server <- function(id, db_pool) {
     output$graphe_ville <- renderPlotly({
       v <- input$ville_focus
       req(v)
-      if (is.null(anomalies_villes_annee))
+      # Agrégat chargé PARESSEUSEMENT au premier affichage de cette trajectoire
+      # (cf. global.R : obtenir_anomalies_villes_annee), plus au démarrage de l'app.
+      anomalies <- obtenir_anomalies_villes_annee()
+      if (is.null(anomalies))
         return(plotly_empty(type = "scatter", mode = "lines") %>%
                  layout(annotations = list(list(
                    text = "Trajectoire indisponible.",
@@ -437,14 +440,14 @@ mod_comparer_server <- function(id, db_pool) {
       mob <- est_mobile_traj()
       fmt2 <- function(x) format(round(x, 2), nsmall = 2, decimal.mark = ",")
 
-      ensemble <- anomalies_villes_annee %>%
+      ensemble <- anomalies %>%
         group_by(annee) %>%
         summarise(moy = mean(anomalie, na.rm = TRUE),
                   bas = min(anomalie, na.rm = TRUE),
                   haut = max(anomalie, na.rm = TRUE), .groups = "drop") %>%
         mutate(text_moy = paste0("Année ", annee,
                                  "<br>Moyenne des villes : ", fmt2(moy), " °C"))
-      df_ville <- anomalies_villes_annee %>% filter(ville == v) %>% arrange(annee) %>%
+      df_ville <- anomalies %>% filter(ville == v) %>% arrange(annee) %>%
         mutate(text = paste0("Année ", annee, "<br>", v, " : ", fmt2(anomalie), " °C"))
 
       p <- ggplot() +
