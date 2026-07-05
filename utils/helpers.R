@@ -158,6 +158,25 @@ deserialiser_defi <- function(chaine, villes_valides, periodes_valides) {
   list(periode = periode, score = score, serie = manches)
 }
 
+# Réchauffement (°C) « depuis une année d'origine » à partir des anomalies
+# annuelles d'une ville : moyenne des anomalies des `fenetre` dernières années
+# disponibles MOINS moyenne sur la fenêtre de même taille centrée sur l'année
+# d'origine. Chaque moyenne exige au moins `min_annees` valeurs (séries
+# trouées) ; NA_real_ sinon. `anomalies` : data.frame(annee, anomalie).
+# Sert à l'accroche « jour de ma naissance » et aux rayures climatiques. Pure.
+rechauffement_depuis <- function(anomalies, annee_origine, fenetre = 15, min_annees = 8) {
+  if (is.null(anomalies) || nrow(anomalies) == 0 || !is.finite(annee_origine))
+    return(NA_real_)
+  a <- anomalies[is.finite(anomalies$annee) & is.finite(anomalies$anomalie), ]
+  a <- a[order(a$annee), ]
+  if (nrow(a) == 0) return(NA_real_)
+  demi <- (fenetre - 1) %/% 2
+  origine <- a$anomalie[a$annee >= annee_origine - demi & a$annee <= annee_origine + demi]
+  recentes <- utils::tail(a$anomalie, fenetre)
+  if (length(origine) < min_annees || length(recentes) < min_annees) return(NA_real_)
+  mean(recentes) - mean(origine)
+}
+
 # Rang d'une valeur dans une distribution (onglet « Une journée »). Sur le vecteur
 # des tmax de la fenêtre ±7 j (toutes années), renvoie :
 #   - rang_haut : 1 = valeur la plus CHAUDE (nb de valeurs strictement supérieures + 1)

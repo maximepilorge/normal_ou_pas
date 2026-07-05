@@ -152,3 +152,17 @@ test_that("libelles_periodes vieillit avec l'année et gère les cas limites", {
                              "Le climat actuel (1991-2020)"))
   expect_length(libelles_periodes(character(0)), 0)
 })
+
+test_that("rechauffement_depuis compare l'époque d'origine aux années récentes", {
+  # Réchauffement linéaire de 0,03 °C/an sur 1950-2025.
+  annees <- 1950:2025
+  anoms <- data.frame(annee = annees, anomalie = (annees - 1950) * 0.03)
+  # Né en 1990 : fenêtre 1983-1997 (centre 1990) vs 2011-2025 (centre 2018).
+  expect_equal(rechauffement_depuis(anoms, 1990), 28 * 0.03, tolerance = 1e-9)
+  # Trop peu de valeurs autour de l'origine (série commençant en 1988) -> NA.
+  expect_true(is.na(rechauffement_depuis(anoms[anoms$annee >= 1988, ], 1950)))
+  expect_true(is.na(rechauffement_depuis(NULL, 1990)))
+  expect_true(is.na(rechauffement_depuis(anoms, NA)))
+  # Naissance récente : fenêtres qui se chevauchent, écart proche de zéro.
+  expect_lt(abs(rechauffement_depuis(anoms, 2020)), 0.25)
+})

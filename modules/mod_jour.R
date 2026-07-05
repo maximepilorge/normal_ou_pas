@@ -46,6 +46,12 @@ mod_jour_ui <- function(id) {
         )
       ),
 
+      # Accroche « anniversaire » : le point d'entrée émotionnel de l'onglet.
+      div(class = "text-center mb-2",
+          actionLink(ns("naissance_btn"),
+                     label = tagList(icon("cake-candles"),
+                                     " Quel temps faisait-il le jour de votre naissance ?"))),
+
       card(
         full_screen = TRUE,
         card_header(uiOutput(ns("titre_jour"))),
@@ -120,6 +126,56 @@ mod_jour_server <- function(id, db_pool, prefill = reactive(NULL), naviguer = NU
     # Date sans l'année (« 23 juin ») pour les phrases de rang.
     date_sans_annee <- function(d) paste(lubridate::day(d),
                                           tolower(mois_fr[lubridate::month(d)]))
+
+    # --- « Jour de ma naissance » -------------------------------------------
+    # Date de naissance active (NULL sinon) : tant que la date affichée reste
+    # celle-ci, le verdict ajoute la phrase « depuis votre naissance… ».
+    date_naissance <- reactiveVal(NULL)
+
+    observeEvent(input$naissance_btn, {
+      showModal(modalDialog(
+        title = "Le jour de votre naissance",
+        p("Choisissez votre date de naissance : l'application retrouve la ",
+          "température de ce jour-là et le réchauffement survenu depuis."),
+        dateInput(ns("date_naissance_saisie"), "Date de naissance :",
+                  value = "1990-06-15",
+                  min = as.Date(paste0(an_min_data, "-01-01")),
+                  max = derniere_date_dispo, format = "dd/mm/yyyy",
+                  language = "fr", weekstart = 1, startview = "decade"),
+        p(class = "text-muted small",
+          paste0("Historique disponible : ", an_min_data, "–", an_max_data, ".")),
+        footer = tagList(modalButton("Annuler"),
+                         actionButton(ns("naissance_ok"), "Voir ce jour-là",
+                                      class = "btn-primary")),
+        easyClose = TRUE))
+    })
+
+    observeEvent(input$naissance_ok, {
+      d <- suppressWarnings(as.Date(input$date_naissance_saisie))
+      req(length(d) == 1, !is.na(d))
+      removeModal()
+      date_naissance(d)
+      updateDateInput(session, "date_jour", value = d)
+    })
+
+    # La saisie manuelle d'une AUTRE date sort du mode anniversaire.
+    observeEvent(input$date_jour, {
+      dn <- date_naissance()
+      if (!is.null(dn) && !identical(as.Date(input$date_jour), dn)) date_naissance(NULL)
+    })
+
+    # Réchauffement vécu depuis la naissance : 15 dernières années vs 15 années
+    # centrées sur la naissance, sur les anomalies annuelles pré-agrégées
+    # (obtenir_anomalies_villes_annee, paresseux et mémoïsé — cf. global.R).
+    rechauffement_naissance <- reactive({
+      dn <- date_naissance()
+      req(dn, input$ville_jour)
+      anoms <- obtenir_anomalies_villes_annee()
+      if (is.null(anoms)) return(NA_real_)
+      av <- anoms[anoms$ville == input$ville_jour & anoms$n_jours >= 300,
+                  c("annee", "anomalie")]
+      rechauffement_depuis(av, lubridate::year(dn))
+    })
 
     # --- Calcul central : tout ce dont les sorties ont besoin pour (ville, date,
     #     période). Renvoie ok = FALSE + message si la date n'est pas couverte. ---
@@ -272,6 +328,25 @@ mod_jour_server <- function(id, db_pool, prefill = reactive(NULL), naviguer = NU
           tags$div(class = "mb-2 fw-semibold", style = paste0("color:", couleur, ";"), rec)
       }
 
+      # Mode « anniversaire » : phrase du réchauffement vécu depuis la naissance.
+      bloc_naissance <- NULL
+      dn <- date_naissance()
+      if (!is.null(dn) && identical(dn, res$date)) {
+        rech <- rechauffement_naissance()
+        msg <- if (!is.finite(rech)) NULL
+        else if (rech >= 0.15)
+          paste0("Depuis votre naissance, le climat ", autour_de(res$ville),
+                 " s'est déjà réchauffé d'environ ",
+                 if (rech > 0) "+" else "", fmt_temp(rech),
+                 " °C (comparaison de moyennes sur 15 ans).")
+        else
+          paste0("Vous êtes né(e) trop récemment pour que le réchauffement se ",
+                 "mesure déjà sur votre vie (les moyennes se comparent sur 15 ans).")
+        if (!is.null(msg))
+          bloc_naissance <- tags$div(class = "alert alert-warning mt-2 mb-0 py-2",
+                                     icon("cake-candles"), " ", msg)
+      }
+
       tagList(
         tags$div(style = paste0("font-size:2.4rem; font-weight:800; line-height:1.1; color:", couleur, ";"),
                  paste0(fmt_temp(res$temp), " °C")),
@@ -280,7 +355,8 @@ mod_jour_server <- function(id, db_pool, prefill = reactive(NULL), naviguer = NU
         tags$span(class = "badge",
                   style = paste0("background:", couleur, "; color:#fff; font-size:0.95rem; white-space:normal;"),
                   phrase_rang(res)),
-        tags$div(class = "text-muted mt-2", phrase_frequence(res))
+        tags$div(class = "text-muted mt-2", phrase_frequence(res)),
+        bloc_naissance
       )
     })
 
@@ -360,9 +436,19 @@ mod_jour_server <- function(id, db_pool, prefill = reactive(NULL), naviguer = NU
       data_uri <- paste0("data:image/png;base64,",
                          jsonlite::base64_enc(readBin(f, "raw", n = file.info(f)$size)))
 
-      texte <- paste0(fmt_temp(res$temp), "°C ",
-                      autour_de(res$ville), " le ", format(res$date, "%d/%m/%Y"), " : ",
-                      phrase_principale, ". Et vous, sauriez-vous situer ce qui est normal ?")
+      # En mode « anniversaire », le texte porte le fait personnel + le
+      # réchauffement vécu (la carte image, elle, reste la même).
+      est_naissance <- !is.null(date_naissance()) && identical(date_naissance(), res$date)
+      rech <- if (est_naissance) rechauffement_naissance() else NA_real_
+      texte <- paste0(
+        if (est_naissance) "Le jour de ma naissance : " else "",
+        fmt_temp(res$temp), "°C ",
+        autour_de(res$ville), " le ", format(res$date, "%d/%m/%Y"), " : ",
+        phrase_principale, ".",
+        if (est_naissance && is.finite(rech) && rech >= 0.15)
+          paste0(" Depuis, le climat s'y est réchauffé d'environ +", fmt_temp(rech), " °C.")
+        else "",
+        " Et vous, sauriez-vous situer ce qui est normal ?")
       nom_fichier <- paste0("normal-ou-pas_jour_",
                             gsub("[^A-Za-z0-9]+", "_", res$ville), ".png")
 
