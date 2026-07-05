@@ -39,7 +39,53 @@ server <- function(input, output, session) {
     req(input$device_type)
     session_final_data$device_type <- input$device_type
   }, once = TRUE)
-  
+
+  # --- Permaliens & navigation inter-onglets --------------------------------
+  # Pré-remplissages à destination des modules (URL entrante ou lien interne).
+  # Chaque demande porte un champ `stamp` : deux demandes successives identiques
+  # (même ville) déclenchent quand même les observateurs des modules.
+  prefill <- reactiveValues(quiz = NULL, jour = NULL, comparer = NULL,
+                            analyse = NULL, quiz_defi = NULL)
+
+  # Navigation programmée d'un module vers un onglet, avec pré-remplissage de la
+  # ville cible (boucle de circulation : bilan du quiz -> Évolution, Une journée
+  # -> Quiz…). Passée aux modules émetteurs.
+  naviguer_vers <- function(onglet, ville = NULL) {
+    if (!is.null(ville)) {
+      cible <- switch(onglet, evolution = "analyse", quiz = "quiz",
+                      jour = "jour", comparer = "comparer")
+      if (!is.null(cible)) prefill[[cible]] <- list(ville = ville, stamp = Sys.time())
+    }
+    bslib::nav_select("nav_principal", onglet, session = session)
+  }
+
+  # URL entrante : applique UNE FOIS, au démarrage, l'état demandé par le
+  # permalien (?onglet=...&ville=...&date=...&annee=...). Les valeurs sont
+  # validées contre les données (ville connue, bornes d'années) sinon ignorées.
+  observeEvent(session$clientData$url_search, {
+    params <- parseQueryString(session$clientData$url_search)
+
+    ville <- params$ville
+    if (!is.null(ville) && !ville %in% villes_triees) ville <- NULL
+    date_p <- if (!is.null(params$date))
+      suppressWarnings(as.Date(params$date)) else NULL
+    if (!is.null(date_p) && (length(date_p) != 1 || is.na(date_p))) date_p <- NULL
+    annee_p <- if (!is.null(params$annee))
+      suppressWarnings(as.integer(params$annee)) else NULL
+    if (!is.null(annee_p) &&
+        (is.na(annee_p) || annee_p < an_min_data || annee_p > an_max_data)) annee_p <- NULL
+
+    onglet <- params$onglet
+    if (is.null(onglet) || !onglet %in% ONGLETS_APP) return()
+    if (onglet == "jour")
+      prefill$jour <- list(ville = ville, date = date_p, stamp = Sys.time())
+    if (onglet == "comparer")
+      prefill$comparer <- list(ville = ville, annee = annee_p, stamp = Sys.time())
+    if (onglet == "evolution")
+      prefill$analyse <- list(ville = ville, stamp = Sys.time())
+    bslib::nav_select("nav_principal", onglet, session = session)
+  }, once = TRUE)
+
   # On appelle les modules
   quiz_scores <- mod_quiz_server("quiz_1", db_pool = db_pool,
                                  visitor_id = visitor_id_reactive)
@@ -121,13 +167,31 @@ server <- function(input, output, session) {
   
   # --- APPELS AUX SERVEURS DES MODULES (HORS QUIZ) ---
   # Module Comparer (fusion Comparaison + Carte) : sidebar et contrôles internes.
-  mod_comparer_server("comparer_1", db_pool = db_pool)
+  comparer_mod <- mod_comparer_server("comparer_1", db_pool = db_pool,
+                                      prefill = reactive(prefill$comparer))
 
   # Module « Une journée » : analyse d'un jour précis + partage.
-  mod_jour_server("jour_1", db_pool = db_pool)
+  jour_mod <- mod_jour_server("jour_1", db_pool = db_pool,
+                              prefill = reactive(prefill$jour))
 
   # Module Analyse
-  mod_analyse_server("analyse_1",
-                     db_pool = db_pool)
+  analyse_mod <- mod_analyse_server("analyse_1",
+                                    db_pool = db_pool,
+                                    prefill = reactive(prefill$analyse))
+
+  # Permalien continu : l'URL reflète l'onglet actif et l'état du module affiché
+  # (ville/date/année) — copiable-partageable à tout moment, sans historique
+  # parasite (mode replace).
+  observe({
+    onglet <- input$nav_principal
+    req(onglet)
+    etat <- switch(onglet,
+                   jour = jour_mod$etat_url(),
+                   comparer = comparer_mod$etat_url(),
+                   evolution = analyse_mod$etat_url(),
+                   NULL)
+    updateQueryString(construire_query_string(onglet, etat),
+                      mode = "replace", session = session)
+  })
 
 }

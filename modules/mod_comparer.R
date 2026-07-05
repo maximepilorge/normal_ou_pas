@@ -91,13 +91,22 @@ mod_comparer_ui <- function(id) {
   )
 }
 
-mod_comparer_server <- function(id, db_pool) {
+mod_comparer_server <- function(id, db_pool, prefill = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
     # Drapeau : une ville a été choisie pendant que la carte était masquée -> on
     # recentrera à la réouverture de l'onglet carte.
     centrage_en_attente <- reactiveVal(FALSE)
+
+    # Pré-remplissage (permalien ?onglet=comparer&ville=...&annee=...) : le
+    # recentrage carte est déjà géré par l'observeEvent(ville_focus) existant.
+    observeEvent(prefill(), {
+      pf <- prefill()
+      req(pf)
+      if (!is.null(pf$ville)) updatePickerInput(session, "ville_focus", selected = pf$ville)
+      if (!is.null(pf$annee)) updateSliderInput(session, "annee", value = pf$annee)
+    })
 
     # Le curseur « Année » est fait pour être GLISSÉ (scrubber commun aux deux vues).
     # Chaque cran émettait une valeur -> requêtes + reconstruction ggplotly par cran.
@@ -487,6 +496,11 @@ mod_comparer_server <- function(id, db_pool) {
     # L'AFFICHAGE de son onglet — donc à taille correcte — plutôt qu'au démarrage,
     # masquée et à taille nulle (ce qui la laissait grise). Les mises à jour
     # passent ensuite par l'observe ci-dessus, gardé visible-only.
+
+    # État exposé à server.R pour le permalien (?onglet=comparer&ville=...&annee=...).
+    return(list(
+      etat_url = reactive(list(ville = input$ville_focus, annee = input$annee))
+    ))
 
   })
 }

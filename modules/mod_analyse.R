@@ -92,10 +92,18 @@ mod_analyse_ui <- function(id) {
 # --- SERVER MIS À JOUR ---
 # Remplacez l'intégralité de l'ancienne fonction mod_analyse_server par celle-ci
 
-mod_analyse_server <- function(id, db_pool) {
+mod_analyse_server <- function(id, db_pool, prefill = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
-    
+
     ns <- session$ns
+
+    # Pré-remplissage de la ville (permalien ?onglet=evolution&ville=... ou lien
+    # interne depuis le bilan du quiz).
+    observeEvent(prefill(), {
+      pf <- prefill()
+      req(pf, pf$ville)
+      updatePickerInput(session, "ville_analyse", selected = pf$ville)
+    })
 
     # Largeur réelle (px) du graphe d'évolution, transmise par le client.
     # Booléen (et non largeur brute) pour ne ré-invalider le rendu qu'au
@@ -487,6 +495,11 @@ mod_analyse_server <- function(id, db_pool) {
         p <- p + geom_vline(xintercept = nrow(obs) + 0.5, linetype = "dashed", color = "grey55")
       p
     })
+
+    # État exposé à server.R pour le permalien (?onglet=evolution&ville=...).
+    return(list(
+      etat_url = reactive(list(ville = input$ville_analyse))
+    ))
 
   })
 }

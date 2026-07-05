@@ -71,11 +71,21 @@ mod_jour_ui <- function(id) {
   )
 }
 
-mod_jour_server <- function(id, db_pool) {
+mod_jour_server <- function(id, db_pool, prefill = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
     est_mobile <- reactive({ largeur_sous_seuil(session, ns("dist_plot")) })
+
+    # Pré-remplissage (permalien ?onglet=jour&ville=...&date=... ou lien interne) :
+    # applique ville et date demandées ; le recalage sur la dernière date dispo de
+    # la ville (observeEvent ville_jour ci-dessous) reste le garde-fou.
+    observeEvent(prefill(), {
+      pf <- prefill()
+      req(pf)
+      if (!is.null(pf$ville)) updatePickerInput(session, "ville_jour", selected = pf$ville)
+      if (!is.null(pf$date))  updateDateInput(session, "date_jour", value = pf$date)
+    })
 
     # À chaque changement de ville (et au démarrage) : on cale le calendrier sur la
     # dernière date RÉELLEMENT disponible pour cette ville. La date n'est ramenée à
@@ -353,6 +363,11 @@ mod_jour_server <- function(id, db_pool) {
 
       showModal(modal_partage(data_uri, texte, nom_fichier, titre = "Partager cette journée"))
     })
+
+    # État exposé à server.R pour le permalien (?onglet=jour&ville=...&date=...).
+    return(list(
+      etat_url = reactive(list(ville = input$ville_jour, date = input$date_jour))
+    ))
 
   })
 }

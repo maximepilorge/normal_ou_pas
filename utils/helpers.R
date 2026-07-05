@@ -51,6 +51,39 @@ fmt_temp <- function(x, dec = 1) {
 # Bornes (début, fin) d'un libellé de période « AAAA-AAAA ». Pure.
 .periode_bornes <- function(p) as.numeric(strsplit(p, "-")[[1]])
 
+# --- Permaliens & navigation inter-onglets ------------------------------------
+# Slugs des onglets dans l'URL (?onglet=...). Source de vérité des `value` des
+# nav_panel de ui.R et des cibles de nav_select (server.R).
+ONGLETS_APP <- c("quiz", "comparer", "jour", "evolution", "methodo")
+
+# Construit la query string d'un permalien (?onglet=...&ville=...&date=...&annee=...)
+# à partir de l'onglet actif et de l'état du module affiché (liste avec, au choix,
+# ville / date / annee ; les champs NULL sont omis). Encodage URL complet des
+# valeurs (accents, espaces). Pure, testable.
+construire_query_string <- function(onglet, etat = NULL) {
+  params <- c(onglet = onglet)
+  if (!is.null(etat)) {
+    if (!is.null(etat$ville) && nzchar(etat$ville))
+      params <- c(params, ville = as.character(etat$ville))
+    if (!is.null(etat$date))
+      params <- c(params, date = format(as.Date(etat$date), "%Y-%m-%d"))
+    if (!is.null(etat$annee))
+      params <- c(params, annee = as.character(etat$annee))
+  }
+  valeurs <- vapply(params, utils::URLencode, character(1), reserved = TRUE)
+  paste0("?", paste0(names(params), "=", valeurs, collapse = "&"))
+}
+
+# URL de base de l'app (protocole, hôte, port non standard, chemin) reconstituée
+# depuis le clientData d'une session Shiny. Sert aux liens absolus (défi de série).
+url_base_app <- function(session) {
+  cd <- session$clientData
+  port <- cd$url_port
+  suffixe_port <- if (!is.null(port) && nzchar(port) && !port %in% c("80", "443"))
+    paste0(":", port) else ""
+  paste0(cd$url_protocol, "//", cd$url_hostname, suffixe_port, cd$url_pathname)
+}
+
 # Rang d'une valeur dans une distribution (onglet « Une journée »). Sur le vecteur
 # des tmax de la fenêtre ±7 j (toutes années), renvoie :
 #   - rang_haut : 1 = valeur la plus CHAUDE (nb de valeurs strictement supérieures + 1)

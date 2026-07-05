@@ -70,3 +70,20 @@ test_that(".periode_bornes extrait les bornes d'un libellé AAAA-AAAA", {
   expect_equal(.periode_bornes("1991-2020"), c(1991, 2020))
   expect_equal(.periode_bornes("1951-1980")[1], 1951)
 })
+
+test_that("construire_query_string encode onglet et état du module", {
+  expect_equal(construire_query_string("quiz"), "?onglet=quiz")
+  expect_equal(construire_query_string("methodo", NULL), "?onglet=methodo")
+  # ville + date (Une journée), accents et espaces encodés
+  qs <- construire_query_string("jour", list(ville = "Orléans", date = as.Date("2024-08-15")))
+  expect_equal(qs, "?onglet=jour&ville=Orl%C3%A9ans&date=2024-08-15")
+  qs2 <- construire_query_string("comparer", list(ville = "Le Havre", annee = 2003L))
+  expect_equal(qs2, "?onglet=comparer&ville=Le%20Havre&annee=2003")
+  # champs NULL ou vides omis
+  expect_equal(construire_query_string("evolution", list(ville = NULL)), "?onglet=evolution")
+  expect_equal(construire_query_string("evolution", list(ville = "")), "?onglet=evolution")
+})
+
+test_that("ONGLETS_APP couvre les cinq onglets de l'app", {
+  expect_setequal(ONGLETS_APP, c("quiz", "comparer", "jour", "evolution", "methodo"))
+})
