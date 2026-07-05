@@ -143,6 +143,14 @@ telecharger_drias.R → calculer_projections.R → deployer_projections.R
 
 Scripts de vérification / QA : `utils/verifier_*.R`, `utils/inspecter_donnees.R`.
 
+**Inspecteur de pondération** (`Rscript utils/inspecter_ponderation.R`, port 5001) :
+mini-app Shiny de contrôle qualité. Pour une ville et un jour, elle montre sur
+carte les mailles ERA5-Land recouvrant la commune (température, surface
+intersectée, poids), le détail horaire (UTC), et confronte la moyenne pondérée
+recalculée indépendamment à la fonction du pipeline, au RDS de staging et à la
+BDD. Le jour inspecté est re-téléchargé via le CDS (bbox de la commune) puis mis
+en cache dans `data/verif_mailles/`.
+
 ---
 
 ## Tests
