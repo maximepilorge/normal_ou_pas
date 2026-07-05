@@ -49,14 +49,26 @@ assoc_pipeline <- readRDS(CHEMIN_ASSOC)
 # RDS de staging (facultatif : comparaison seulement).
 staging <- if (file.exists(CHEMIN_RDS)) readRDS(CHEMIN_RDS) else NULL
 
-# Connexion BDD facultative (comparaison au chiffre servi par l'app).
-con_bdd <- tryCatch(
-  DBI::dbConnect(RPostgres::Postgres(),
-                 host = Sys.getenv("DB_HOST"), port = Sys.getenv("DB_PORT"),
-                 dbname = Sys.getenv("DB_NAME"), user = Sys.getenv("DB_USER"),
-                 password = Sys.getenv("DB_PASS")),
-  error = function(e) NULL)
-shiny::onStop(function() if (!is.null(con_bdd)) try(DBI::dbDisconnect(con_bdd), silent = TRUE))
+# Connexion BDD facultative (comparaison au chiffre servi par l'app),
+# PARESSEUSE et auto-réparante : (re)tentée à chaque vérification si absente ou
+# invalide — la base peut être démarrée APRÈS l'outil (conteneur Docker) ou
+# redémarrer en cours de session, sans qu'il faille relancer l'inspecteur.
+.env_bdd <- new.env()
+connexion_bdd <- function() {
+  con <- .env_bdd$con
+  if (!is.null(con) &&
+      isTRUE(tryCatch(DBI::dbIsValid(con), error = function(e) FALSE)))
+    return(con)
+  .env_bdd$con <- tryCatch(
+    DBI::dbConnect(RPostgres::Postgres(),
+                   host = Sys.getenv("DB_HOST"), port = Sys.getenv("DB_PORT"),
+                   dbname = Sys.getenv("DB_NAME"), user = Sys.getenv("DB_USER"),
+                   password = Sys.getenv("DB_PASS")),
+    error = function(e) NULL)
+  .env_bdd$con
+}
+shiny::onStop(function()
+  if (!is.null(.env_bdd$con)) try(DBI::dbDisconnect(.env_bdd$con), silent = TRUE))
 
 # Clé CDS (facultative tant qu'on reste sur des jours déjà en cache).
 cds_ok <- tryCatch({
@@ -331,17 +343,26 @@ server <- function(input, output, session) {
            tmin = if (nrow(s)) s$temperature_min[1] else NA_real_)
     } else list(tmax = NA_real_, tmin = NA_real_)
 
-    bdd <- if (!is.null(con_bdd)) tryCatch({
-      b <- DBI::dbGetQuery(con_bdd, paste0(
+    con <- connexion_bdd()
+    bdd_statut <- if (is.null(con)) "hors_ligne" else "ok"
+    bdd <- if (!is.null(con)) tryCatch({
+      b <- DBI::dbGetQuery(con, paste0(
         "SELECT temperature_max, temperature_min FROM temperatures_max ",
         "WHERE ville = $1 AND date = $2"), params = list(input$ville, input$date))
+      if (nrow(b) == 0) bdd_statut <- "jour_absent"
       list(tmax = if (nrow(b)) b$temperature_max[1] else NA_real_,
            tmin = if (nrow(b)) b$temperature_min[1] else NA_real_)
-    }, error = function(e) list(tmax = NA_real_, tmin = NA_real_))
+    }, error = function(e) {
+      # Connexion périmée (base redémarrée) : on la jette, le prochain passage
+      # retentera une connexion fraîche.
+      .env_bdd$con <- NULL
+      bdd_statut <<- "hors_ligne"
+      list(tmax = NA_real_, tmin = NA_real_)
+    })
     else list(tmax = NA_real_, tmin = NA_real_)
 
     list(recalc = list(tmax = recalc_tmax, tmin = recalc_tmin),
-         pipe = pipe, stag = stag, bdd = bdd)
+         pipe = pipe, stag = stag, bdd = bdd, bdd_statut = bdd_statut)
   })
 
   output$panneau_verif <- renderUI({
@@ -371,12 +392,21 @@ server <- function(input, output, session) {
           ligne("BDD (app)", v$bdd[[champ]], ref)
         ))
     }
+    note_bdd <- switch(v$bdd_statut,
+      hors_ligne = tags$p(class = "small mb-0", style = "color:#C0392B;",
+        icon("database"),
+        sprintf(" BDD injoignable (hôte %s) — démarrez la base puis recliquez « Charger ».",
+                Sys.getenv("DB_HOST"))),
+      jour_absent = p(class = "text-muted small mb-0", icon("database"),
+                      " BDD connectée, mais ce jour n'y figure pas."),
+      NULL)
     wellPanel(
       h4("Vérification des moyennes pondérées"),
       bloc("Tmax pondérée", "tmax"),
       bloc("Tmin pondérée", "tmin"),
-      p(class = "text-muted small mb-0",
-        "Écarts vs le recalcul indépendant ; ✔ si < 0,05 °C. RDS/BDD absents : « — »."))
+      p(class = "text-muted small mb-1",
+        "Écarts vs le recalcul indépendant ; ✔ si < 0,05 °C. Source absente : « — »."),
+      note_bdd)
   })
 
   # --- Carte -------------------------------------------------------------------
