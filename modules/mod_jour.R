@@ -35,8 +35,8 @@ mod_jour_ui <- function(id) {
             dateInput(ns("date_jour"), "Date :", value = val_def,
                       min = date_min, max = derniere_date_dispo,
                       format = "dd/mm/yyyy", language = "fr", weekstart = 1),
-            pickerInput(ns("periode_jour"), "Normale de référence :",
-                        choices = periodes_disponibles,
+            pickerInput(ns("periode_jour"), "Comparer au climat de :",
+                        choices = libelles_periodes(periodes_disponibles),
                         selected = periodes_disponibles[length(periodes_disponibles)],
                         options = list(container = "body", `live-search` = FALSE))
           ),

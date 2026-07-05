@@ -37,26 +37,35 @@ mod_comparer_ui <- function(id) {
         class = "mb-2",
         card_body(
           class = "py-2",
-          # Ville · période · année dans une même rangée de 3 colonnes (cohérent
-          # avec les autres onglets). L'année est le scrubber COMMUN aux deux vues
-          # (on le fait glisser pour animer la carte).
+          # Ville · année dans une même rangée (l'année est le scrubber COMMUN aux
+          # deux vues : on le fait glisser pour animer la carte). L'époque de
+          # référence, réglage d'expert, est repliée dans « Réglages avancés ».
           layout_columns(
-            col_widths = breakpoints(sm = c(4, 4, 4)),
+            col_widths = breakpoints(sm = c(6, 6)),
             pickerInput(ns("ville_focus"), "Ville :",
                         choices = villes_triees, selected = villes_triees[1],
                         options = list(container = "body", `live-search` = TRUE, size = 8)),
-            pickerInput(ns("periode"), "Période de référence (normale) :",
-                        choices = periodes_disponibles,
-                        options = list(container = "body", `live-search` = FALSE)),
             sliderInput(ns("annee"), "Année :",
                         min = an_min_data, max = an_max_data,
                         value = an_max_data, step = 1, sep = "", width = "100%")
           ),
-          helpText(HTML(paste0(
-            "La <b>période de référence</b> s'applique à la courbe « Dans l'année » ",
-            "et à la carte « Entre les villes » (réchauffement entre cette période et ",
-            "la plus récente). La trajectoire, elle, compare à une normale ancienne ",
-            "figée (", periode_ref_carte, ").")))
+          # Le défaut (l'époque la plus ancienne) maximise le contraste de
+          # réchauffement affiché — c'est le bon réglage pour presque tout le monde.
+          tags$details(
+            class = "small mt-1",
+            tags$summary(class = "text-muted", style = "cursor: pointer;",
+                         icon("sliders"), " Réglages avancés"),
+            div(class = "mt-2", style = "max-width: 420px;",
+                pickerInput(ns("periode"), "Époque de référence (normale) :",
+                            choices = libelles_periodes(periodes_disponibles),
+                            width = "100%",
+                            options = list(container = "body", `live-search` = FALSE)),
+                helpText(HTML(paste0(
+                  "L'époque de référence s'applique à la courbe « Dans l'année » et à ",
+                  "la carte « Entre les villes » (réchauffement entre cette époque et ",
+                  "la plus récente). La trajectoire du bas, elle, compare toujours à ",
+                  "la normale la plus ancienne (", periode_ref_carte, ")."))))
+          )
         )
       ),
 

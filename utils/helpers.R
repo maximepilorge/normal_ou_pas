@@ -51,6 +51,29 @@ fmt_temp <- function(x, dec = 1) {
 # Bornes (début, fin) d'un libellé de période « AAAA-AAAA ». Pure.
 .periode_bornes <- function(p) as.numeric(strsplit(p, "-")[[1]])
 
+# Libellés « grand public » des périodes de référence : traduit chaque période
+# OMM (« 1951-1980 ») en repère d'époque parlant (« L'époque de vos
+# grands-parents (1951-1980) »), la plus récente devenant « Le climat actuel ».
+# Renvoie un vecteur nommé libellé -> période, prêt pour les `choices` d'un
+# pickerInput : la VALEUR reste la période, rien ne change côté serveur.
+# Les paliers suivent l'ancienneté du centre de la période (paramètre `annee`
+# exposé pour la testabilité) : les libellés vieillissent avec les données.
+libelles_periodes <- function(periodes, annee = as.integer(format(Sys.Date(), "%Y"))) {
+  if (length(periodes) == 0) return(stats::setNames(character(0), character(0)))
+  debuts <- vapply(periodes, function(p) .periode_bornes(p)[1], numeric(1))
+  recente <- periodes[which.max(debuts)]
+  libelle_un <- function(p) {
+    if (identical(p, recente)) return(paste0("Le climat actuel (", p, ")"))
+    age <- annee - mean(.periode_bornes(p))
+    epoque <- if (age >= 55) "L'époque de vos grands-parents"
+      else if (age >= 45) "Il y a un demi-siècle"
+      else if (age >= 35) "L'époque de vos parents"
+      else "La fin du XXe siècle"
+    paste0(epoque, " (", p, ")")
+  }
+  stats::setNames(periodes, vapply(periodes, libelle_un, character(1)))
+}
+
 # --- Permaliens & navigation inter-onglets ------------------------------------
 # Slugs des onglets dans l'URL (?onglet=...). Source de vérité des `value` des
 # nav_panel de ui.R et des cibles de nav_select (server.R).
