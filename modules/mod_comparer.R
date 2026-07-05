@@ -16,6 +16,8 @@ mod_comparer_ui <- function(id) {
       tags$style(HTML("
         .comparer-courbe-wrap { height: 560px; }
         @media (max-width: 575.98px) { .comparer-courbe-wrap { height: 430px; } }
+        /* La courbe de l'année est cliquable (bascule vers « Une journée »). */
+        .comparer-courbe-wrap .nsewdrag { cursor: pointer !important; }
         /* Légende Leaflet compactée en portrait (cf. ancien onglet Carte). */
         @media (max-width: 575.98px) {
           .leaflet-control.legend {
@@ -76,7 +78,9 @@ mod_comparer_ui <- function(id) {
           "Dans l'année", value = "courbe",
           uiOutput(ns("titre_courbe")),
           div(class = "comparer-courbe-wrap",
-              plotlyOutput(ns("climate_plot"), height = "100%"))
+              plotlyOutput(ns("climate_plot"), height = "100%")),
+          # Boucle de circulation : zoom sur le jour le plus marquant de l'année.
+          div(class = "text-center mt-2 mb-1", uiOutput(ns("lien_jour_chaud")))
         ),
         nav_panel(
           "Entre les villes", value = "carte",
@@ -94,14 +98,16 @@ mod_comparer_ui <- function(id) {
           leafletOutput(ns("carte"), height = "500px"),
           hr(),
           uiOutput(ns("titre_trajectoire")),
-          plotlyOutput(ns("graphe_ville"), height = "320px")
+          plotlyOutput(ns("graphe_ville"), height = "320px"),
+          # Boucle de circulation : de la trajectoire vers l'analyse complète.
+          div(class = "text-center mt-2 mb-1", uiOutput(ns("lien_evolution")))
         )
       )
     )
   )
 }
 
-mod_comparer_server <- function(id, db_pool, prefill = reactive(NULL)) {
+mod_comparer_server <- function(id, db_pool, prefill = reactive(NULL), naviguer = NULL) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -197,7 +203,8 @@ mod_comparer_server <- function(id, db_pool, prefill = reactive(NULL)) {
         HTML(paste0("Températures maximales à <strong>", input$ville_focus,
                     "</strong> en <strong>", input$annee, "</strong>")),
         tags$div(class = "small text-muted fw-normal",
-                 paste("Comparaison à la normale climatique", input$periode))
+                 paste0("Comparaison à la normale climatique ", input$periode,
+                        " · cliquez un jour pour l'analyser"))
       )
     })
 
@@ -268,7 +275,7 @@ mod_comparer_server <- function(id, db_pool, prefill = reactive(NULL)) {
 
       dtick_mois <- if (mob) "M2" else "M1"
 
-      ggplotly(p, tooltip = "text") %>%
+      gp <- ggplotly(p, tooltip = "text", source = ns("courbe_clic")) %>%
         layout(
           xaxis = list(fixedrange = TRUE, title = NULL, dtick = dtick_mois,
                        tickformat = "%b", tickangle = if (mob) -45 else 0),
@@ -279,9 +286,45 @@ mod_comparer_server <- function(id, db_pool, prefill = reactive(NULL)) {
           margin = list(b = if (mob) 70 else 80, t = 10)
         ) %>%
         config(displayModeBar = FALSE, responsive = TRUE)
+      # Clic sur un jour -> « Une journée » (cf. observeEvent plus bas).
+      plotly::event_register(gp, "plotly_click")
     }) %>%
       bindCache(input$ville_focus, input$periode, annee_deb(), est_mobile_courbe(),
                 dims_courbe_ok())
+
+    # Clic sur un jour de la courbe -> onglet « Une journée » sur (ville, date).
+    # Le x du clic arrive dans un format qui dépend de la conversion ggplotly
+    # (chaîne ISO ou nombre) : date_click_plotly le normalise. On ne navigue que
+    # si la date tombe dans l'année affichée. suppressWarnings : avant le premier
+    # rendu, event_data avertit que la source n'est pas encore enregistrée.
+    observeEvent(suppressWarnings(
+      plotly::event_data("plotly_click", source = ns("courbe_clic"),
+                         priority = "event")), {
+      d <- suppressWarnings(
+        plotly::event_data("plotly_click", source = ns("courbe_clic")))
+      dt <- date_click_plotly(d$x)
+      req(length(dt) == 1, !is.na(dt),
+          lubridate::year(dt) == annee_deb(), input$ville_focus)
+      if (is.function(naviguer)) naviguer("jour", ville = input$ville_focus, date = dt)
+    })
+
+    # Lien « jour le plus chaud de l'année » : la date du max vient des données
+    # déjà chargées pour la courbe (aucune requête supplémentaire).
+    output$lien_jour_chaud <- renderUI({
+      d <- tryCatch(plot_data_annee(), error = function(e) NULL)
+      req(!is.null(d), nrow(d) > 0)
+      actionLink(ns("jour_chaud_btn"),
+                 label = tagList(icon("temperature-high"),
+                                 sprintf(" Analyser le jour le plus chaud de %d",
+                                         annee_deb())))
+    })
+
+    observeEvent(input$jour_chaud_btn, {
+      d <- tryCatch(plot_data_annee(), error = function(e) NULL)
+      req(!is.null(d), nrow(d) > 0, input$ville_focus)
+      date_max <- as.Date(d$date[which.max(d$tmax_celsius)])
+      if (is.function(naviguer)) naviguer("jour", ville = input$ville_focus, date = date_max)
+    })
 
     # ================ VUE « ENTRE LES VILLES » : carte + trajectoire =============
 
@@ -513,6 +556,20 @@ mod_comparer_server <- function(id, db_pool, prefill = reactive(NULL)) {
                         font = list(size = if (mob) 10 else 12))
         ) %>%
         config(displayModeBar = FALSE, responsive = TRUE)
+    })
+
+    # Lien de la trajectoire vers l'analyse longue durée de la ville focus.
+    output$lien_evolution <- renderUI({
+      req(input$ville_focus)
+      actionLink(ns("evolution_btn"),
+                 label = tagList(icon("chart-line"),
+                                 paste0(" Voir ", an_max_data - an_min_data,
+                                        " ans d'évolution ", autour_de(input$ville_focus))))
+    })
+
+    observeEvent(input$evolution_btn, {
+      req(input$ville_focus)
+      if (is.function(naviguer)) naviguer("evolution", ville = input$ville_focus)
     })
 
     # On laisse suspendWhenHidden au défaut (TRUE) : la carte se rend ainsi À

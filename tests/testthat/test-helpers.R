@@ -169,3 +169,15 @@ test_that("rechauffement_depuis couvre une fenêtre pleine même pour un pas pai
   expect_equal(rechauffement_depuis(anoms, 1964, fenetre = 30), 46 * 0.03,
                tolerance = 1e-9)
 })
+
+test_that("date_click_plotly normalise les formats de clic d'un axe temporel", {
+  attendu <- as.Date("2003-08-12")
+  expect_equal(date_click_plotly("2003-08-12"), attendu)              # chaîne ISO
+  expect_equal(date_click_plotly("2003-08-12 00:00:00"), attendu)     # date-heure
+  expect_equal(date_click_plotly(1060646400000), attendu)             # ms epoch
+  expect_equal(date_click_plotly(1060646400), attendu)                # s epoch
+  expect_equal(date_click_plotly(12276), attendu)                     # jours epoch
+  expect_true(is.na(date_click_plotly("n'importe quoi")))
+  expect_true(is.na(date_click_plotly(NULL)))
+  expect_true(is.na(date_click_plotly(NaN)))
+})

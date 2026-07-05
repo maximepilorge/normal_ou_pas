@@ -23,10 +23,13 @@ Quatre onglets, en montée pédagogique :
 | **Méthodo** | `ui.R` (inline) | Sources, définition des normales (percentiles, fenêtre ±7 j), méthode des projections, limites. |
 
 Transverse : l'état de l'app vit dans l'URL (**permaliens** `?onglet=…&ville=…&date=…`,
-copiables à tout moment) ; les onglets se renvoient l'un à l'autre (bilan du quiz →
-Évolution, Une journée → Quiz, **année cliquée** dans le graphe d'Évolution →
-Comparaison « Dans l'année ») ; les périodes de référence portent un sous-titre
-d'ancienneté dans les menus (« 1951-1980 — il y a environ 60 ans »).
+copiables à tout moment) ; les onglets forment un **cycle** en se renvoyant l'un à
+l'autre avec l'état courant — révélation du quiz → jour réel le plus proche (Une
+journée), jour → son année (Comparaison), courbe de l'année **cliquable** jour par
+jour et lien « jour le plus chaud » → Une journée, carte des villes → Évolution,
+graphe d'Évolution **cliquable** année par année → Comparaison, bilan du quiz →
+Évolution, et Évolution / Une journée → Quiz ; les périodes de référence portent
+un sous-titre d'ancienneté dans les menus (« 1951-1980 — il y a environ 60 ans »).
 
 ---
 

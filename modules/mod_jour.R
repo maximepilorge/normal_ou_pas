@@ -66,8 +66,10 @@ mod_jour_ui <- function(id) {
               "Partagez cette journée autour de vous :"),
             actionButton(ns("partager_btn"), "Partager cette journée",
                          icon = icon("share-nodes"), class = "btn-primary")),
-        # Boucle de circulation : rebond vers le quiz, pré-réglé sur cette ville.
-        div(class = "text-center mt-2 mb-2",
+        # Boucle de circulation : replacer le jour dans son année (Comparaison),
+        # ou rebondir vers le quiz pré-réglé sur cette ville.
+        div(class = "text-center mt-2", uiOutput(ns("lien_annee"))),
+        div(class = "text-center mt-1 mb-2",
             actionLink(ns("quiz_ville_btn"),
                        label = tagList(icon("dice"),
                                        " Testez vos repères sur cette ville avec le quiz"))),
@@ -454,6 +456,23 @@ mod_jour_server <- function(id, db_pool, prefill = reactive(NULL), naviguer = NU
                             gsub("[^A-Za-z0-9]+", "_", res$ville), ".png")
 
       showModal(modal_partage(data_uri, texte, nom_fichier, titre = "Partager cette journée"))
+    })
+
+    # Rebond vers Comparaison « Dans l'année » : le jour affiché, replacé dans la
+    # courbe de son année (libellé dynamique, d'où le renderUI).
+    output$lien_annee <- renderUI({
+      req(input$date_jour)
+      actionLink(ns("annee_btn"),
+                 label = tagList(icon("chart-bar"),
+                                 sprintf(" Replacer ce jour dans son année %d",
+                                         lubridate::year(as.Date(input$date_jour)))))
+    })
+
+    observeEvent(input$annee_btn, {
+      req(input$ville_jour, input$date_jour)
+      if (is.function(naviguer))
+        naviguer("comparer", ville = input$ville_jour,
+                 annee = lubridate::year(as.Date(input$date_jour)), vue = "courbe")
     })
 
     # Rebond vers le quiz, pré-réglé sur la ville affichée.

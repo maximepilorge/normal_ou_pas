@@ -91,7 +91,14 @@ mod_analyse_ui <- function(id) {
             "régionales</b>."
           )))
         )
-      )
+      ),
+
+      # Boucle de circulation : l'analyse débouche sur le jeu (cycle complet
+      # quiz -> journée -> comparaison -> évolution -> quiz).
+      div(class = "text-center mt-1 mb-2",
+          actionLink(ns("quiz_ville_btn"),
+                     label = tagList(icon("dice"),
+                                     " Testez vos repères sur cette ville avec le quiz")))
     )
   )
 }
@@ -576,6 +583,12 @@ mod_analyse_server <- function(id, db_pool, prefill = reactive(NULL), naviguer =
       nom_fichier <- paste0("normal-ou-pas_rayures_", gsub("[^A-Za-z0-9]+", "_", v), ".png")
       showModal(modal_partage(data_uri, texte, nom_fichier,
                               titre = "Partager les rayures climatiques"))
+    })
+
+    # Rebond vers le quiz, pré-réglé sur la ville analysée (referme le cycle).
+    observeEvent(input$quiz_ville_btn, {
+      req(input$ville_analyse)
+      if (is.function(naviguer)) naviguer("quiz", ville = input$ville_analyse)
     })
 
     # État exposé à server.R pour le permalien (?onglet=evolution&ville=...).

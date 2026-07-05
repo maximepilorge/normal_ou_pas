@@ -186,7 +186,8 @@ server <- function(input, output, session) {
   # --- APPELS AUX SERVEURS DES MODULES (HORS QUIZ) ---
   # Module Comparer (fusion Comparaison + Carte) : sidebar et contrôles internes.
   comparer_mod <- mod_comparer_server("comparer_1", db_pool = db_pool,
-                                      prefill = reactive(prefill$comparer))
+                                      prefill = reactive(prefill$comparer),
+                                      naviguer = naviguer_vers)
 
   # Module « Une journée » : analyse d'un jour précis + partage.
   jour_mod <- mod_jour_server("jour_1", db_pool = db_pool,

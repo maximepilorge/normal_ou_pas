@@ -435,6 +435,12 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
                 "Partagez ce repère de température autour de vous :"),
               actionButton(ns("partager_btn"), "Partager ce résultat",
                            icon = icon("share-nodes"), class = "btn-outline-primary")),
+          # Boucle de circulation : de la question (température plausible) vers un
+          # jour OBSERVÉ de cette intensité, dans l'onglet « Une journée ».
+          div(class = "text-center mt-2",
+              actionLink(ns("voir_jour_btn"),
+                         label = tagList(icon("calendar-day"),
+                                         " Voir un jour réel de cette intensité"))),
           actionButton(ns("suivant_btn"),
                        if (idx() < n) "Question suivante" else "Voir mon bilan",
                        icon = icon(if (idx() < n) "arrow-right" else "flag-checkered"),
@@ -844,6 +850,30 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
       f$ville <- pf$ville
       filtres_serie(f)
       etat("accueil")
+    })
+
+    # Rebond de la révélation vers « Une journée » : la température de la manche
+    # est plausible mais pas forcément observée telle quelle — on retrouve LE
+    # jour observé le plus proche (fenêtre ±7 j, toutes années, le plus récent à
+    # écart égal) et on ouvre l'onglet dessus. La série en cours reste intacte
+    # (on y revient par l'onglet Quiz). Repli : navigation sur la ville seule.
+    observeEvent(input$voir_jour_btn, {
+      q <- quiz_data()
+      req(q, phase_manche() == "feedback")
+      jours_fenetre <- q$date + (-7:7)
+      cles <- unique(lubridate::month(jours_fenetre) * 100 + lubridate::day(jours_fenetre))
+      date_reelle <- tryCatch({
+        res <- tbl(db_pool, "temperatures_max") %>%
+          filter(ville == !!q$city, (mois * 100L + jour_mois) %in% !!cles) %>%
+          mutate(ecart = abs(temperature_max - !!q$temp)) %>%
+          arrange(ecart, desc(date)) %>%
+          head(1) %>%
+          select(date) %>%
+          collect()
+        if (nrow(res) == 1) as.Date(res$date[1]) else NULL
+      }, error = function(e) {
+        log_debug("voir_jour_btn : ", conditionMessage(e)); NULL })
+      if (is.function(naviguer)) naviguer("jour", ville = q$city, date = date_reelle)
     })
 
     # Rebond du bilan vers « Évolution » : ville pré-remplie seulement si la

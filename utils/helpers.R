@@ -82,6 +82,25 @@ soustitres_periodes <- function(periodes, annee = as.integer(format(Sys.Date(), 
   }, character(1)))
 }
 
+# Date d'un clic plotly sur un axe temporel. Selon la conversion ggplotly et le
+# navigateur, le x d'event_data arrive en chaîne ISO (« 2003-08-12 »), en
+# date-heure (« 2003-08-12 00:00:00 »), en millisecondes/secondes depuis epoch,
+# ou en jours depuis 1970 — on discrimine les formes numériques par leur ordre
+# de grandeur. Renvoie une Date (NA si illisible). Pure, testable.
+date_click_plotly <- function(x) {
+  if (is.null(x) || length(x) == 0) return(as.Date(NA))
+  x <- x[1]
+  if (is.numeric(x)) {
+    if (!is.finite(x)) return(as.Date(NA))
+    d <- if (x > 1e11) as.POSIXct(x / 1000, origin = "1970-01-01", tz = "UTC")
+         else if (x > 1e8) as.POSIXct(x, origin = "1970-01-01", tz = "UTC")
+         else return(as.Date(round(x), origin = "1970-01-01"))
+    return(as.Date(d, tz = "UTC"))
+  }
+  # as.Date.character LÈVE une erreur (pas un NA) sur une chaîne non reconnue.
+  tryCatch(as.Date(substr(as.character(x), 1, 10)), error = function(e) as.Date(NA))
+}
+
 # --- Permaliens & navigation inter-onglets ------------------------------------
 # Slugs des onglets dans l'URL (?onglet=...). Source de vérité des `value` des
 # nav_panel de ui.R et des cibles de nav_select (server.R).
