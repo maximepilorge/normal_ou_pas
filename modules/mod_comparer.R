@@ -57,8 +57,9 @@ mod_comparer_ui <- function(id) {
                          icon("sliders"), " Réglages avancés"),
             div(class = "mt-2", style = "max-width: 420px;",
                 pickerInput(ns("periode"), "Époque de référence (normale) :",
-                            choices = libelles_periodes(periodes_disponibles),
+                            choices = periodes_disponibles,
                             width = "100%",
+                            choicesOpt = list(subtext = soustitres_periodes(periodes_disponibles)),
                             options = list(container = "body", `live-search` = FALSE)),
                 helpText(HTML(paste0(
                   "L'époque de référence s'applique à la courbe « Dans l'année » et à ",

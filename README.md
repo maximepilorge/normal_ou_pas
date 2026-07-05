@@ -24,8 +24,8 @@ Quatre onglets, en montée pédagogique :
 
 Transverse : l'état de l'app vit dans l'URL (**permaliens** `?onglet=…&ville=…&date=…`,
 copiables à tout moment) ; les onglets se renvoient l'un à l'autre (bilan du quiz →
-Évolution, Une journée → Quiz) ; les périodes de référence sont présentées en repères
-générationnels (« L'époque de vos grands-parents (1951-1980) »).
+Évolution, Une journée → Quiz) ; les périodes de référence portent un sous-titre
+d'ancienneté dans les menus (« 1951-1980 — il y a environ 60 ans »).
 
 ---
 
@@ -49,8 +49,8 @@ docs/               Notes de conception (plan projections TRACC).
 ### Utilitaires partagés (`utils/`, sans effet de bord, sourçables)
 - `helpers.R` — `get_season_info()`, `largeur_sous_seuil()` (détection petit écran),
   `log_debug()` (logs de debug conditionnels), permaliens (`construire_query_string`),
-  défi de série (`serialiser_defi`/`deserialiser_defi`), `libelles_periodes()`
-  (repères générationnels) et `rechauffement_depuis()` (naissance, rayures).
+  défi de série (`serialiser_defi`/`deserialiser_defi`), `soustitres_periodes()`
+  (ancienneté des normales) et `rechauffement_depuis()` (naissance, rayures).
   Sourcé par `global.R`.
 - `villes_reference.R` — **source de vérité unique** des 30 villes (nom, lat/lon, INSEE).
 - `fenetre_glissante.R` — machinerie de fenêtre ±N jours, partagée entre la
@@ -151,8 +151,8 @@ Rscript tests/run_tests.R
 
 Couvrent : saison d'une date, fenêtre glissante, seuil de forte chaleur,
 indicateurs annuels, les cartes de partage (quiz, journée, rayures), les
-permaliens, la (dé)sérialisation du défi de série, les libellés d'époques et le
-réchauffement depuis une année. Pas de dépendance à la BDD.
+permaliens, la (dé)sérialisation du défi de série, les sous-titres d'époques et
+le réchauffement depuis une année. Pas de dépendance à la BDD.
 
 ---
 

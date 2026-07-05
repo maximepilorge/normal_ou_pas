@@ -42,8 +42,9 @@ mod_analyse_ui <- function(id) {
                         min = an_min_data, max = an_max_data,
                         value = c(an_min_data, an_max_data), sep = ""),
             pickerInput(ns("periode_ref_analyse"), "Époque de référence :",
-                        choices = libelles_periodes(periodes_disponibles),
+                        choices = periodes_disponibles,
                         selected = periodes_disponibles[1],
+                        choicesOpt = list(subtext = soustitres_periodes(periodes_disponibles)),
                         options = list(container = "body", `live-search` = FALSE))
           ),
           helpText("Chaque barre indique l'écart de la moyenne annuelle des températures maximales par rapport à la normale de la période de référence choisie.")

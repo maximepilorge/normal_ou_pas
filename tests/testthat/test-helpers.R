@@ -133,24 +133,19 @@ test_that("deserialiser_defi rejette tout payload douteux", {
   expect_length(louche$serie, 1)
 })
 
-test_that("libelles_periodes traduit les périodes en repères d'époque", {
+test_that("soustitres_periodes donne une ancienneté neutre, arrondie aux 5 ans", {
   periodes <- c("1951-1980", "1961-1990", "1971-2000", "1981-2010", "1991-2020")
-  lib <- libelles_periodes(periodes, annee = 2026)
-  expect_equal(unname(lib), periodes)          # les valeurs restent les périodes
-  expect_equal(names(lib), c(
-    "L'époque de vos grands-parents (1951-1980)",
-    "Il y a un demi-siècle (1961-1990)",
-    "L'époque de vos parents (1971-2000)",
-    "La fin du XXe siècle (1981-2010)",
-    "Le climat actuel (1991-2020)"))
+  st <- soustitres_periodes(periodes, annee = 2026)
+  expect_equal(st, c("il y a environ 60 ans", "il y a environ 50 ans",
+                     "il y a environ 40 ans", "il y a environ 30 ans",
+                     "la normale actuelle"))
 })
 
-test_that("libelles_periodes vieillit avec l'année et gère les cas limites", {
-  # Dans 20 ans, 1971-2000 devient l'époque des grands-parents.
-  lib <- libelles_periodes(c("1971-2000", "1991-2020"), annee = 2046)
-  expect_equal(names(lib), c("L'époque de vos grands-parents (1971-2000)",
-                             "Le climat actuel (1991-2020)"))
-  expect_length(libelles_periodes(character(0)), 0)
+test_that("soustitres_periodes vieillit avec l'année et gère les cas limites", {
+  # Dans 20 ans, 1971-2000 aura ~60 ans d'ancienneté.
+  st <- soustitres_periodes(c("1971-2000", "1991-2020"), annee = 2046)
+  expect_equal(st, c("il y a environ 60 ans", "la normale actuelle"))
+  expect_length(soustitres_periodes(character(0)), 0)
 })
 
 test_that("rechauffement_depuis compare l'époque d'origine aux années récentes", {

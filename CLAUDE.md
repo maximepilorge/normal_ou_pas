@@ -84,6 +84,6 @@ runtime `quiz_series_scores` ; masquage de la courbe de tendance sur mobile ;
 titres dynamiques ville/année dans les en-têtes de carte ; fusion Comparaison + Carte.
 Branche `feat/parcours-grand-public` : permaliens URL (`?onglet=…&ville=…`),
 boucle inter-onglets (bilan quiz → Évolution, journée → quiz), **défi de série**
-par lien (`?defi=…`, sérialisation validée), libellés générationnels des époques
-de référence, entrée « jour de ma naissance », carte de partage « rayures
-climatiques ».)
+par lien (`?defi=…`, sérialisation validée), sous-titres d'ancienneté des époques
+de référence dans les menus, entrée « jour de ma naissance », carte de partage
+« rayures climatiques ».)
