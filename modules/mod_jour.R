@@ -293,11 +293,21 @@ mod_jour_server <- function(id, db_pool) {
              layer = "below")
       ) else list()
 
-      plot_ly() %>%
+      fig <- plot_ly() %>%
         add_markers(x = win$tmax, y = jitter_y,
                     marker = list(color = "rgba(31,119,180,0.4)", size = 6),
-                    text = paste0("Année ", win$annee, " : ", round(win$tmax, 1), " °C"),
-                    hoverinfo = "text", showlegend = FALSE) %>%
+                    text = paste0(format(win$date, "%d/%m/%Y"), " : ", round(win$tmax, 1), " °C"),
+                    hoverinfo = "text", showlegend = FALSE)
+
+      # Moyenne (normale) en croix noire, comme le boxplot du quiz. Ajoutée avant le
+      # point du jour pour que ce dernier reste au-dessus quand les deux se touchent.
+      if (res$a_normale)
+        fig <- fig %>% add_markers(x = res$t_moy, y = 0,
+                    marker = list(symbol = "x", color = "black", size = 10),
+                    text = paste0("Moyenne : ", fmt_temp(res$t_moy), " °C"),
+                    hoverinfo = "text", showlegend = FALSE)
+
+      fig %>%
         add_markers(x = res$temp, y = 0,
                     marker = list(symbol = "x", color = "#E41A1C", size = 13,
                                   line = list(color = "#E41A1C", width = 1.8)),
