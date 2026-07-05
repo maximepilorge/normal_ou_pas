@@ -84,6 +84,57 @@ url_base_app <- function(session) {
   paste0(cd$url_protocol, "//", cd$url_hostname, suffixe_port, cd$url_pathname)
 }
 
+# --- Défi de série : (dé)sérialisation d'une série dans un lien ----------------
+# Une série jouée peut être envoyée à un ami sous forme de lien (?defi=<payload>) :
+# il rejoue EXACTEMENT les mêmes questions. Format texte compact (URL-encodé par
+# l'appelant) :
+#   "v1;periode;score;manche;manche;..."
+#   manche = "ville~AAAA-MM-JJ~temp~c~normale"  (c = index dans CATEGORIES_QUIZ)
+# Fonctions pures, testables.
+serialiser_defi <- function(serie, periode, score = NA_integer_) {
+  manches <- vapply(serie, function(q) paste(
+    q$city,
+    format(as.Date(q$date), "%Y-%m-%d"),
+    sprintf("%.1f", q$temp),
+    match(q$correct_answer, CATEGORIES_QUIZ),
+    sprintf("%.1f", q$normale_moy),
+    sep = "~"), character(1))
+  paste(c("v1", periode,
+          if (is.na(score)) "" else as.character(as.integer(score)),
+          manches), collapse = ";")
+}
+
+# Relit un payload de défi et le valide STRICTEMENT (ville connue, date lisible,
+# température plausible, catégorie dans les bornes, 1 à 15 manches) : renvoie
+# list(periode, score, serie) ou NULL si quoi que ce soit cloche — le lien vient
+# de l'extérieur, il ne doit jamais pouvoir casser l'app ni y injecter du texte.
+deserialiser_defi <- function(chaine, villes_valides, periodes_valides) {
+  if (is.null(chaine) || !is.character(chaine) || length(chaine) != 1) return(NULL)
+  bits <- strsplit(chaine, ";", fixed = TRUE)[[1]]
+  if (length(bits) < 4 || !identical(bits[1], "v1")) return(NULL)
+  periode <- bits[2]
+  if (!periode %in% periodes_valides) return(NULL)
+  score <- suppressWarnings(as.integer(bits[3]))   # NA si absent : score facultatif
+  brutes <- bits[-(1:3)]
+  if (length(brutes) < 1 || length(brutes) > 15) return(NULL)
+  manches <- lapply(brutes, function(m) {
+    ch <- strsplit(m, "~", fixed = TRUE)[[1]]
+    if (length(ch) != 5) return(NULL)
+    d    <- suppressWarnings(as.Date(ch[2]))
+    temp <- suppressWarnings(as.numeric(ch[3]))
+    ci   <- suppressWarnings(as.integer(ch[4]))
+    nm   <- suppressWarnings(as.numeric(ch[5]))
+    if (!ch[1] %in% villes_valides || length(d) != 1 || is.na(d) ||
+        !is.finite(temp) || temp < -45 || temp > 55 ||
+        is.na(ci) || ci < 1 || ci > length(CATEGORIES_QUIZ) || !is.finite(nm)) return(NULL)
+    list(city = ch[1], date = d, temp = temp,
+         correct_answer = CATEGORIES_QUIZ[ci], normale_moy = nm)
+  })
+  if (any(vapply(manches, is.null, logical(1)))) return(NULL)
+  if (!is.na(score) && (score < 0 || score > length(manches))) score <- NA_integer_
+  list(periode = periode, score = score, serie = manches)
+}
+
 # Rang d'une valeur dans une distribution (onglet « Une journée »). Sur le vecteur
 # des tmax de la fenêtre ±7 j (toutes années), renvoie :
 #   - rang_haut : 1 = valeur la plus CHAUDE (nb de valeurs strictement supérieures + 1)

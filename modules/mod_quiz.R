@@ -245,7 +245,8 @@ mod_quiz_ui <- function(id) {
 }
 
 mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
-                            prefill = reactive(NULL), naviguer = NULL) {
+                            prefill = reactive(NULL), defi_recu = reactive(NULL),
+                            naviguer = NULL) {
   moduleServer(id, function(input, output, session) {
 
     ns <- session$ns
@@ -261,6 +262,8 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
     filtres_serie   <- reactiveVal(NULL)        # list(periode, ville, saison, poli)
     debut_serie     <- reactiveVal(NULL)
     serie_terminee  <- reactiveVal(NULL)        # événement remonté à server.R (BDD)
+    defi_attente    <- reactiveVal(NULL)        # défi reçu par lien, pas encore accepté
+    mode_defi       <- reactiveVal(NULL)        # défi de la série EN COURS (score à battre)
 
     # Données de la manche courante (alimentent les outputs du boxplot, déclarés
     # une seule fois plus bas).
@@ -310,6 +313,9 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
 
     # === ÉCRAN 0 : ACCUEIL (paramétrer la série) ============================
     ecran_accueil <- function() {
+      # Un défi reçu prend le pas sur le paramétrage : écran d'invitation dédié.
+      da <- defi_attente()
+      if (!is.null(da)) return(ecran_defi(da))
       f <- filtres_serie()
       sel <- function(cle, defaut) if (!is.null(f) && !is.null(f[[cle]])) f[[cle]] else defaut
       div(class = "quiz-card card",
@@ -337,6 +343,28 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
                        class = "btn-primary btn-lg w-100 mt-2"),
           p(class = "text-muted small text-center mt-2",
             "Une série = 10 questions tirées au hasard.")
+        ))
+    }
+
+    # Écran d'invitation quand un DÉFI a été reçu par lien : la série est imposée
+    # par le payload (mêmes questions que l'expéditeur), pas de paramétrage.
+    ecran_defi <- function(da) {
+      n <- length(da$serie)
+      div(class = "quiz-card card",
+        div(class = "card-body text-center",
+          h2("On vous a défié !", class = "quiz-titre"),
+          p(class = "lead mb-1",
+            if (is.finite(da$score))
+              sprintf("Un ami a fait %d/%d sur cette série. À vous de faire mieux.", da$score, n)
+            else
+              sprintf("Jouez exactement la même série de %d questions que votre ami.", n)),
+          p(class = "text-muted small",
+            sprintf("Les %d questions sont identiques aux siennes (normale de référence %s).",
+                    n, da$periode)),
+          actionButton(ns("defi_btn"), "Relever le défi", icon = icon("bolt"),
+                       class = "btn-warning btn-lg w-100 mt-2"),
+          div(class = "mt-2",
+              actionLink(ns("defi_refus"), "Non merci, je préfère régler ma propre série"))
         ))
     }
 
@@ -440,6 +468,15 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
       # ambiguïté pour l'utilisateur).
       ville_bilan <- if (!identical(f$ville, "Toutes les villes")) f$ville
                      else serie()[[n]]$city
+      # Ligne de comparaison si la série était un défi chiffré.
+      ligne_defi <- if (!is.null(mode_defi()) && is.finite(mode_defi()$score)) {
+        sa <- mode_defi()$score
+        verdict <- if (sc > sa) "défi remporté !"
+                   else if (sc == sa) "égalité parfaite."
+                   else "défi perdu… revanche ?"
+        p(class = "fw-semibold mt-1",
+          sprintf("Score de votre ami : %d/%d — %s", sa, n, verdict))
+      }
 
       lignes <- lapply(seq_len(n), function(i) {
         q <- serie()[[i]]; rp <- reponses()[[i]]; juste <- isTRUE(rp$juste)
@@ -458,6 +495,7 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
             style = sprintf("--accent:%s; --pct:%d;", couleur, as.integer(round(100 * sc / n))),
             span(class = "anneau-chiffre", sprintf("%d/%d", sc, n))),
         p(comm, class = "lead mt-3"),
+        ligne_defi,
         uiOutput(ns("record_perso")),
         hr(),
         h5("Le détail de votre série", class = "text-start"),
@@ -473,6 +511,9 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
         div(class = "mt-3",
           actionButton(ns("rejouer_btn"), "Rejouer une série", icon = icon("rotate-right"),
                        class = "btn-primary btn-lg")),
+        div(class = "mt-2",
+            actionButton(ns("defier_btn"), "Défier un ami sur cette série",
+                         icon = icon("bolt"), class = "btn-outline-primary")),
         div(class = "mt-2", actionLink(ns("reglages_btn"), "Changer les réglages"))
       ))
     }
@@ -642,6 +683,9 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
     }
 
     demarrer_serie <- function(nouvelle) {
+      # Une série fraîchement démarrée n'est pas un défi ; l'acceptation d'un
+      # défi (defi_btn) repose mode_defi APRÈS cet appel.
+      mode_defi(NULL)
       serie(nouvelle)
       idx(1L)
       reponses(vector("list", length(nouvelle)))
@@ -755,6 +799,57 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
     })
 
     observeEvent(input$reglages_btn, { etat("accueil") })
+
+    # Défi reçu par lien (?defi=..., déjà validé par server.R) : mis en attente et
+    # affiché sur l'écran d'accueil, sans jamais interrompre une série en cours.
+    observeEvent(defi_recu(), {
+      da <- defi_recu()
+      req(da)
+      defi_attente(da)
+      if (etat() != "jeu") etat("accueil")
+    })
+
+    # Acceptation du défi : la série du payload remplace tout tirage aléatoire.
+    observeEvent(input$defi_btn, {
+      da <- defi_attente(); req(da)
+      filtres_serie(list(periode = da$periode, ville = "Toutes les villes",
+                         saison = "Toutes les saisons", poli = FALSE))
+      demarrer_serie(da$serie)   # remet mode_defi à NULL...
+      mode_defi(da)              # ...donc on le pose APRÈS
+      defi_attente(NULL)
+    })
+
+    observeEvent(input$defi_refus, { defi_attente(NULL) })
+
+    # « Défier un ami » : sérialise la série jouée dans un lien absolu ; l'ami
+    # rejouera exactement les mêmes questions (?defi=..., validé à la réception).
+    observeEvent(input$defier_btn, {
+      f <- filtres_serie(); req(f, etat() == "resultats", length(serie()) > 0)
+      payload <- serialiser_defi(serie(), f$periode, score_serie())
+      lien <- paste0(url_base_app(session), "?defi=",
+                     utils::URLencode(payload, reserved = TRUE))
+      texte <- sprintf(
+        "J'ai fait %d/%d au quiz « Climat : normal ou pas ? ». Mêmes questions pour toi : tu fais mieux ?",
+        score_serie(), length(serie()))
+      showModal(modalDialog(
+        title = "Défier un ami", easyClose = TRUE,
+        p(sprintf(
+          "Envoyez ce lien : votre ami jouera exactement la même série de %d questions, avec votre score à battre.",
+          length(serie()))),
+        div(class = "input-group",
+            tags$input(id = ns("lien_defi"), type = "text", class = "form-control",
+                       readonly = "readonly", value = lien),
+            tags$button(class = "btn btn-primary", type = "button",
+                        onclick = sprintf("partageCopierLien('%s')", ns("lien_defi")),
+                        icon("copy"), " Copier")),
+        div(class = "text-center mt-3",
+            tags$button(class = "btn btn-outline-secondary", type = "button",
+                        `data-texte` = texte,
+                        onclick = sprintf("partagePartagerLien('%s', this.dataset.texte)",
+                                          ns("lien_defi")),
+                        icon("share-nodes"), " Partager (mobile)")),
+        footer = modalButton("Fermer")))
+    })
 
     # Ville pré-remplie (lien interne « Testez vos repères sur cette ville » ou
     # permalien) : ne touche jamais une série EN COURS — on ajuste le paramétrage

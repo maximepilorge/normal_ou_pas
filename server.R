@@ -76,6 +76,18 @@ server <- function(input, output, session) {
         (is.na(annee_p) || annee_p < an_min_data || annee_p > an_max_data)) annee_p <- NULL
 
     onglet <- params$onglet
+
+    # Défi de série reçu par lien : validé strictement (deserialiser_defi),
+    # sinon ignoré en silence. Un défi valide impose l'onglet quiz.
+    if (!is.null(params$defi)) {
+      payload <- deserialiser_defi(params$defi, villes_triees, periodes_disponibles)
+      if (!is.null(payload)) {
+        payload$stamp <- Sys.time()
+        prefill$quiz_defi <- payload
+        onglet <- "quiz"
+      }
+    }
+
     if (is.null(onglet) || !onglet %in% ONGLETS_APP) return()
     if (onglet == "jour")
       prefill$jour <- list(ville = ville, date = date_p, stamp = Sys.time())
@@ -90,6 +102,7 @@ server <- function(input, output, session) {
   quiz_scores <- mod_quiz_server("quiz_1", db_pool = db_pool,
                                  visitor_id = visitor_id_reactive,
                                  prefill = reactive(prefill$quiz),
+                                 defi_recu = reactive(prefill$quiz_defi),
                                  naviguer = naviguer_vers)
 
   # Cet observe s'exécutera chaque fois que les scores changent

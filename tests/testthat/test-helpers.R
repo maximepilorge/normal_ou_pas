@@ -87,3 +87,48 @@ test_that("construire_query_string encode onglet et état du module", {
 test_that("ONGLETS_APP couvre les cinq onglets de l'app", {
   expect_setequal(ONGLETS_APP, c("quiz", "comparer", "jour", "evolution", "methodo"))
 })
+
+test_that("serialiser/deserialiser_defi font un aller-retour fidèle", {
+  serie <- list(
+    list(city = "Orléans", date = as.Date("2024-08-15"), temp = 34.5,
+         correct_answer = "Au-dessus des normales", normale_moy = 27.3),
+    list(city = "Le Havre", date = as.Date("2024-01-02"), temp = -1,
+         correct_answer = "En-dessous des normales", normale_moy = 7))
+  payload <- serialiser_defi(serie, "1991-2020", score = 2L)
+  out <- deserialiser_defi(payload, c("Orléans", "Le Havre"), "1991-2020")
+  expect_equal(out$periode, "1991-2020")
+  expect_equal(out$score, 2L)
+  expect_length(out$serie, 2)
+  expect_equal(out$serie[[1]]$city, "Orléans")
+  expect_equal(out$serie[[1]]$date, as.Date("2024-08-15"))
+  expect_equal(out$serie[[1]]$temp, 34.5)
+  expect_equal(out$serie[[1]]$correct_answer, "Au-dessus des normales")
+  expect_equal(out$serie[[2]]$temp, -1)          # sérialisé "-1.0"
+  expect_equal(out$serie[[2]]$normale_moy, 7)
+})
+
+test_that("serialiser_defi sans score laisse le champ vide (score NA au retour)", {
+  serie <- list(list(city = "Paris", date = as.Date("2024-06-01"), temp = 25,
+                     correct_answer = "Dans les normales de saison", normale_moy = 22))
+  out <- deserialiser_defi(serialiser_defi(serie, "1951-1980"), "Paris", "1951-1980")
+  expect_true(is.na(out$score))
+  expect_length(out$serie, 1)
+})
+
+test_that("deserialiser_defi rejette tout payload douteux", {
+  villes <- "Paris"; periodes <- "1991-2020"
+  ok <- serialiser_defi(list(list(city = "Paris", date = as.Date("2024-06-01"),
+    temp = 25, correct_answer = "Dans les normales de saison", normale_moy = 22)),
+    "1991-2020", 5L)
+  expect_null(deserialiser_defi(NULL, villes, periodes))
+  expect_null(deserialiser_defi("n'importe quoi", villes, periodes))
+  expect_null(deserialiser_defi(sub("^v1", "v9", ok), villes, periodes))                    # version inconnue
+  expect_null(deserialiser_defi(gsub("Paris", "Gotham", ok, fixed = TRUE), villes, periodes))    # ville inconnue
+  expect_null(deserialiser_defi(gsub("1991-2020", "1901-1930", ok, fixed = TRUE), villes, periodes)) # période inconnue
+  expect_null(deserialiser_defi(gsub("~25.0~", "~99.0~", ok, fixed = TRUE), villes, periodes))   # température invraisemblable
+  expect_null(deserialiser_defi(gsub("~2~", "~8~", ok, fixed = TRUE), villes, periodes))    # catégorie hors bornes
+  # score incohérent (> nb de manches) : neutralisé, la série reste jouable
+  louche <- deserialiser_defi(sub(";5;", ";11;", ok, fixed = TRUE), villes, periodes)
+  expect_true(is.na(louche$score))
+  expect_length(louche$serie, 1)
+})
