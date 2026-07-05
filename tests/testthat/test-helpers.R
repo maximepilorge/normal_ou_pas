@@ -166,3 +166,11 @@ test_that("rechauffement_depuis compare l'époque d'origine aux années récente
   # Naissance récente : fenêtres qui se chevauchent, écart proche de zéro.
   expect_lt(abs(rechauffement_depuis(anoms, 2020)), 0.25)
 })
+
+test_that("rechauffement_depuis couvre une fenêtre pleine même pour un pas pair (30 ans)", {
+  annees <- 1950:2025
+  anoms <- data.frame(annee = annees, anomalie = (annees - 1950) * 0.03)
+  # Origine 1964 -> fenêtre 1950-1979 (30 ans) vs 1996-2025 (30 dernières).
+  expect_equal(rechauffement_depuis(anoms, 1964, fenetre = 30), 46 * 0.03,
+               tolerance = 1e-9)
+})

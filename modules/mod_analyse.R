@@ -517,7 +517,11 @@ mod_analyse_server <- function(id, db_pool, prefill = reactive(NULL)) {
         return()
       }
       av <- av[order(av$annee), ]
-      rech <- rechauffement_depuis(av[, c("annee", "anomalie")], min(av$annee) + 7)
+      # 30 ans vs 30 ans (premières/dernières années de la série) : le même
+      # cadrage que l'« Analyse du réchauffement » affichée en tête d'onglet,
+      # pour que les deux chiffres racontent la même chose.
+      rech <- rechauffement_depuis(av[, c("annee", "anomalie")],
+                                   min(av$annee) + 14, fenetre = 30)
       params <- list(ville = v, annees = av$annee, anomalies = av$anomalie,
                      periode_ref = periode_ref_carte, rechauffement = rech)
       f <- tempfile(fileext = ".png")

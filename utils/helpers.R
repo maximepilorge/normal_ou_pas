@@ -161,9 +161,11 @@ deserialiser_defi <- function(chaine, villes_valides, periodes_valides) {
 # Réchauffement (°C) « depuis une année d'origine » à partir des anomalies
 # annuelles d'une ville : moyenne des anomalies des `fenetre` dernières années
 # disponibles MOINS moyenne sur la fenêtre de même taille centrée sur l'année
-# d'origine. Chaque moyenne exige au moins `min_annees` valeurs (séries
-# trouées) ; NA_real_ sinon. `anomalies` : data.frame(annee, anomalie).
-# Sert à l'accroche « jour de ma naissance » et aux rayures climatiques. Pure.
+# d'origine (couvrant exactement `fenetre` années, parité comprise). Chaque
+# moyenne exige au moins `min_annees` valeurs (séries trouées) ; NA_real_ sinon.
+# `anomalies` : data.frame(annee, anomalie). Sert à l'accroche « jour de ma
+# naissance » (15 ans) et aux rayures climatiques (30 ans, cohérent avec
+# l'« Analyse du réchauffement » de l'onglet Évolution). Pure.
 rechauffement_depuis <- function(anomalies, annee_origine, fenetre = 15, min_annees = 8) {
   if (is.null(anomalies) || nrow(anomalies) == 0 || !is.finite(annee_origine))
     return(NA_real_)
@@ -171,7 +173,8 @@ rechauffement_depuis <- function(anomalies, annee_origine, fenetre = 15, min_ann
   a <- a[order(a$annee), ]
   if (nrow(a) == 0) return(NA_real_)
   demi <- (fenetre - 1) %/% 2
-  origine <- a$anomalie[a$annee >= annee_origine - demi & a$annee <= annee_origine + demi]
+  origine <- a$anomalie[a$annee >= annee_origine - demi &
+                        a$annee <= annee_origine + (fenetre - 1 - demi)]
   recentes <- utils::tail(a$anomalie, fenetre)
   if (length(origine) < min_annees || length(recentes) < min_annees) return(NA_real_)
   mean(recentes) - mean(origine)
