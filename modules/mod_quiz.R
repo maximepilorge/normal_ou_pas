@@ -231,13 +231,6 @@ calculer_feedback_manche <- function(db_pool, data, periode_ref, statique = NULL
        projection_txt = projection_txt, projection_couleur = projection_couleur)
 }
 
-# Libellé court d'une catégorie (pour le récap du bilan).
-verdict_court_quiz <- function(categorie) {
-  if (grepl("Au-dessus", categorie)) "au-dessus des normales"
-  else if (grepl("En-dessous", categorie)) "en-dessous des normales"
-  else "dans les normales de saison"
-}
-
 # --- UI : simple conteneur plein écran (les 3 écrans sont rendus côté serveur) --
 mod_quiz_ui <- function(id) {
   ns <- NS(id)
@@ -464,11 +457,10 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
       n <- length(serie()); sc <- score_serie()
       couleur <- couleur_score(sc, n)
       comm <- commentaire_serie(sc, n, isTRUE(f$poli))
-      # Ville du lien de rebond vers « Évolution » : celle de la série si elle est
-      # filtrée, sinon celle de la dernière manche (le libellé la nomme, aucune
-      # ambiguïté pour l'utilisateur).
-      ville_bilan <- if (!identical(f$ville, "Toutes les villes")) f$ville
-                     else serie()[[n]]$city
+      # Ville du rebond vers « Évolution » : uniquement si la série était filtrée
+      # sur une ville. Sinon on n'en présélectionne AUCUNE — reprendre celle d'une
+      # manche serait arbitraire et illisible pour l'utilisateur.
+      ville_bilan <- if (!identical(f$ville, "Toutes les villes")) f$ville else NULL
       # Ligne de comparaison si la série était un défi chiffré.
       ligne_defi <- if (!is.null(mode_defi()) && is.finite(mode_defi()$score)) {
         sa <- mode_defi()$score
@@ -479,18 +471,8 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
           sprintf("Score de votre ami : %d/%d — %s", sa, n, verdict))
       }
 
-      lignes <- lapply(seq_len(n), function(i) {
-        q <- serie()[[i]]; rp <- reponses()[[i]]; juste <- isTRUE(rp$juste)
-        date_txt <- paste(format(q$date, "%d"), mois_fr[as.numeric(format(q$date, "%m"))])
-        div(class = paste("recap-ligne", if (juste) "recap-juste" else "recap-faux"),
-          span(class = "recap-icone", if (juste) icon("check") else icon("xmark")),
-          div(class = "recap-info",
-            div(class = "recap-fait", paste0(date_txt, " · ", autour_de(q$city), " · ", q$temp, " °C")),
-            if (!juste) div(class = "recap-detail",
-              sprintf("Votre réponse : %s — Bonne réponse : %s",
-                      verdict_court_quiz(rp$user_answer), verdict_court_quiz(q$correct_answer)))))
-      })
-
+      # Pas de récapitulatif des manches ici : chaque question a déjà eu sa
+      # révélation détaillée ; le bilan se concentre sur le score et la suite.
       div(class = "quiz-card card", div(class = "card-body text-center",
         div(class = "anneau-score",
             style = sprintf("--accent:%s; --pct:%d;", couleur, as.integer(round(100 * sc / n))),
@@ -498,18 +480,16 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
         p(comm, class = "lead mt-3"),
         ligne_defi,
         uiOutput(ns("record_perso")),
-        hr(),
-        h5("Le détail de votre série", class = "text-start"),
-        div(class = "recap text-start", lignes),
         p(class = "text-muted small mt-2", .contexte_serie(f$ville, f$saison, f$periode)),
         # CTA principal du bilan : la bascule vers « Évolution » (pré-remplie sur
-        # la ville de la série), mise en avant dans un encart dédié — rejouer et
-        # défier passent en actions secondaires.
+        # la ville de la série si filtrée), mise en avant dans un encart dédié —
+        # rejouer et défier passent en actions secondaires.
         div(class = "mt-3 p-3 rounded text-start",
             style = "background:#eef7f2; border:1px solid #cfe5da;",
             p(class = "mb-2 fw-semibold",
               paste0("La suite : découvrez comment le climat a réellement changé ",
-                     autour_de(ville_bilan), ", année par année.")),
+                     if (!is.null(ville_bilan)) autour_de(ville_bilan) else "dans votre ville",
+                     ", année par année.")),
             actionButton(ns("voir_evolution_btn"), "Voir l'évolution du climat",
                          icon = icon("chart-line"), class = "btn-success btn-lg w-100")),
         div(class = "mt-3",
@@ -865,11 +845,11 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
       etat("accueil")
     })
 
-    # Rebond du bilan vers « Évolution », pré-rempli sur la ville de la série.
+    # Rebond du bilan vers « Évolution » : ville pré-remplie seulement si la
+    # série était filtrée dessus (sinon navigation simple, aucune présélection).
     observeEvent(input$voir_evolution_btn, {
-      f <- filtres_serie(); req(f, length(serie()) > 0)
-      v <- if (!identical(f$ville, "Toutes les villes")) f$ville
-           else serie()[[length(serie())]]$city
+      f <- filtres_serie(); req(f)
+      v <- if (!identical(f$ville, "Toutes les villes")) f$ville else NULL
       if (is.function(naviguer)) naviguer("evolution", ville = v)
     })
 
