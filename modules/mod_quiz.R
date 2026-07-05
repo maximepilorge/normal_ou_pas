@@ -244,7 +244,8 @@ mod_quiz_ui <- function(id) {
   div(class = "quiz-module", uiOutput(ns("quiz_zone")))
 }
 
-mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
+mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
+                            prefill = reactive(NULL), naviguer = NULL) {
   moduleServer(id, function(input, output, session) {
 
     ns <- session$ns
@@ -434,6 +435,11 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
       n <- length(serie()); sc <- score_serie()
       couleur <- couleur_score(sc, n)
       comm <- commentaire_serie(sc, n, isTRUE(f$poli))
+      # Ville du lien de rebond vers « Évolution » : celle de la série si elle est
+      # filtrée, sinon celle de la dernière manche (le libellé la nomme, aucune
+      # ambiguïté pour l'utilisateur).
+      ville_bilan <- if (!identical(f$ville, "Toutes les villes")) f$ville
+                     else serie()[[n]]$city
 
       lignes <- lapply(seq_len(n), function(i) {
         q <- serie()[[i]]; rp <- reponses()[[i]]; juste <- isTRUE(rp$juste)
@@ -457,6 +463,13 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
         h5("Le détail de votre série", class = "text-start"),
         div(class = "recap text-start", lignes),
         p(class = "text-muted small mt-2", .contexte_serie(f$ville, f$saison, f$periode)),
+        # Boucle de circulation : prolonge le bilan vers l'onglet « Évolution »,
+        # pré-rempli sur la ville de la série.
+        div(class = "mt-3",
+            actionLink(ns("voir_evolution_btn"),
+                       label = tagList(icon("chart-line"),
+                                       paste0(" Découvrez comment le climat a changé ",
+                                              autour_de(ville_bilan))))),
         div(class = "mt-3",
           actionButton(ns("rejouer_btn"), "Rejouer une série", icon = icon("rotate-right"),
                        class = "btn-primary btn-lg")),
@@ -742,6 +755,34 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL)) {
     })
 
     observeEvent(input$reglages_btn, { etat("accueil") })
+
+    # Ville pré-remplie (lien interne « Testez vos repères sur cette ville » ou
+    # permalien) : ne touche jamais une série EN COURS — on ajuste le paramétrage
+    # de l'écran d'accueil et on y ramène l'utilisateur.
+    observeEvent(prefill(), {
+      pf <- prefill()
+      req(pf, pf$ville)
+      if (etat() == "jeu") {
+        showNotification(
+          "Une série est en cours : terminez-la (ou abandonnez-la) pour en lancer une sur cette ville.",
+          type = "message", duration = 5)
+        return()
+      }
+      f <- filtres_serie()
+      if (is.null(f)) f <- list(periode = periodes_disponibles[1],
+                                saison = "Toutes les saisons", poli = FALSE)
+      f$ville <- pf$ville
+      filtres_serie(f)
+      etat("accueil")
+    })
+
+    # Rebond du bilan vers « Évolution », pré-rempli sur la ville de la série.
+    observeEvent(input$voir_evolution_btn, {
+      f <- filtres_serie(); req(f, length(serie()) > 0)
+      v <- if (!identical(f$ville, "Toutes les villes")) f$ville
+           else serie()[[length(serie())]]$city
+      if (is.function(naviguer)) naviguer("evolution", ville = v)
+    })
 
     # Abandon d'une série en cours : confirmation (la progression est perdue) puis
     # retour au paramétrage. On ne fige AUCUN score en base (seules les séries

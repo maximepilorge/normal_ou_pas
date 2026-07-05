@@ -59,6 +59,11 @@ mod_jour_ui <- function(id) {
               "Partagez cette journée autour de vous :"),
             actionButton(ns("partager_btn"), "Partager cette journée",
                          icon = icon("share-nodes"), class = "btn-primary")),
+        # Boucle de circulation : rebond vers le quiz, pré-réglé sur cette ville.
+        div(class = "text-center mt-2 mb-2",
+            actionLink(ns("quiz_ville_btn"),
+                       label = tagList(icon("dice"),
+                                       " Testez vos repères sur cette ville avec le quiz"))),
         card_footer(
           tags$small(class = "text-muted", HTML(paste0(
             "Température = moyenne spatiale pondérée sur la commune (réanalyse ",
@@ -71,7 +76,7 @@ mod_jour_ui <- function(id) {
   )
 }
 
-mod_jour_server <- function(id, db_pool, prefill = reactive(NULL)) {
+mod_jour_server <- function(id, db_pool, prefill = reactive(NULL), naviguer = NULL) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -362,6 +367,12 @@ mod_jour_server <- function(id, db_pool, prefill = reactive(NULL)) {
                             gsub("[^A-Za-z0-9]+", "_", res$ville), ".png")
 
       showModal(modal_partage(data_uri, texte, nom_fichier, titre = "Partager cette journée"))
+    })
+
+    # Rebond vers le quiz, pré-réglé sur la ville affichée.
+    observeEvent(input$quiz_ville_btn, {
+      req(input$ville_jour)
+      if (is.function(naviguer)) naviguer("quiz", ville = input$ville_jour)
     })
 
     # État exposé à server.R pour le permalien (?onglet=jour&ville=...&date=...).

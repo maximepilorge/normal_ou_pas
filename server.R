@@ -88,7 +88,9 @@ server <- function(input, output, session) {
 
   # On appelle les modules
   quiz_scores <- mod_quiz_server("quiz_1", db_pool = db_pool,
-                                 visitor_id = visitor_id_reactive)
+                                 visitor_id = visitor_id_reactive,
+                                 prefill = reactive(prefill$quiz),
+                                 naviguer = naviguer_vers)
 
   # Cet observe s'exécutera chaque fois que les scores changent
   observe({
@@ -172,7 +174,8 @@ server <- function(input, output, session) {
 
   # Module « Une journée » : analyse d'un jour précis + partage.
   jour_mod <- mod_jour_server("jour_1", db_pool = db_pool,
-                              prefill = reactive(prefill$jour))
+                              prefill = reactive(prefill$jour),
+                              naviguer = naviguer_vers)
 
   # Module Analyse
   analyse_mod <- mod_analyse_server("analyse_1",
