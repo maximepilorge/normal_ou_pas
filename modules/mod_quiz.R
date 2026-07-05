@@ -502,20 +502,21 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
         h5("Le détail de votre série", class = "text-start"),
         div(class = "recap text-start", lignes),
         p(class = "text-muted small mt-2", .contexte_serie(f$ville, f$saison, f$periode)),
-        # Boucle de circulation : prolonge le bilan vers l'onglet « Évolution »,
-        # pré-rempli sur la ville de la série.
+        # CTA principal du bilan : la bascule vers « Évolution » (pré-remplie sur
+        # la ville de la série), mise en avant dans un encart dédié — rejouer et
+        # défier passent en actions secondaires.
+        div(class = "mt-3 p-3 rounded text-start",
+            style = "background:#eef7f2; border:1px solid #cfe5da;",
+            p(class = "mb-2 fw-semibold",
+              paste0("La suite : découvrez comment le climat a réellement changé ",
+                     autour_de(ville_bilan), ", année par année.")),
+            actionButton(ns("voir_evolution_btn"), "Voir l'évolution du climat",
+                         icon = icon("chart-line"), class = "btn-success btn-lg w-100")),
         div(class = "mt-3",
-            actionLink(ns("voir_evolution_btn"),
-                       label = tagList(icon("chart-line"),
-                                       paste0(" Découvrez comment le climat a changé ",
-                                              autour_de(ville_bilan))))),
-        div(class = "mt-3",
-          actionButton(ns("rejouer_btn"), "Rejouer une série", icon = icon("rotate-right"),
-                       class = "btn-primary btn-lg")),
-        div(class = "mt-2",
-            actionButton(ns("defier_btn"), "Défier un ami sur cette série",
-                         icon = icon("bolt"), class = "btn-outline-primary")),
-        div(class = "mt-2", actionLink(ns("reglages_btn"), "Changer les réglages"))
+            actionButton(ns("rejouer_btn"), "Rejouer une série",
+                         icon = icon("rotate-right"), class = "btn-outline-primary m-1"),
+            actionButton(ns("defier_btn"), "Défier un ami",
+                         icon = icon("bolt"), class = "btn-outline-primary m-1"))
       ))
     }
 
@@ -789,17 +790,9 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
       }
     })
 
-    observeEvent(input$rejouer_btn, {
-      f <- filtres_serie(); req(f)
-      nouvelle <- tirer_serie(f$periode, f$ville, f$saison)
-      if (length(nouvelle) == 0) {
-        showNotification("Impossible de regénérer une série pour ce choix.", type = "error")
-        return()
-      }
-      demarrer_serie(nouvelle)
-    })
-
-    observeEvent(input$reglages_btn, { etat("accueil") })
+    # « Rejouer une série » repasse par le paramétrage (écran d'accueil, filtres
+    # de la dernière série pré-remplis) : on re-choisit avant de relancer.
+    observeEvent(input$rejouer_btn, { etat("accueil") })
 
     # Défi reçu par lien (?defi=..., déjà validé par server.R) : mis en attente et
     # affiché sur l'écran d'accueil, sans jamais interrompre une série en cours.
