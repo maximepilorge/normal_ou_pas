@@ -16,11 +16,16 @@ Quatre onglets, en montée pédagogique :
 
 | Onglet | Module | Idée |
 |---|---|---|
-| **Le Quiz** | `modules/mod_quiz.R` | **Séries de 10 questions** : on paramètre la série (période, ville, saison), on répond à 10 températures (sous / dans / au-dessus des normales) avec révélation immédiate + boxplot repliable (repères présent / 2050 / 2100), puis un bilan affiche le score /10, un commentaire variable, le meilleur score et une carte de série partageable (PNG). |
-| **Comparaison** | `modules/mod_comparer.R` | « Dans l'année » : courbe d'une année vs la normale. « Entre les villes » : carte Leaflet des écarts à une normale ancienne + trajectoire d'une ville, avec curseur d'année. |
-| **Une journée** | `modules/mod_jour.R` | Analyse d'un jour précis (ville + date) : valeur, écart à la normale, rang (« jour le plus chaud autour du… depuis 1950 ») et fréquence, distribution ±7 j, carte partageable. |
-| **Évolution** | `modules/mod_analyse.R` | Écart annuel à la normale (barres), analyse du réchauffement sur 30 ans, jours de forte chaleur vs jours de gel (observé + projeté TRACC). |
+| **Le Quiz** | `modules/mod_quiz.R` | **Séries de 10 questions** : on paramètre la série (période, ville, saison), on répond à 10 températures (sous / dans / au-dessus des normales) avec révélation immédiate + boxplot repliable (repères présent / 2050 / 2100), puis un bilan affiche le score /10, un commentaire variable, le meilleur score, une carte de série partageable (PNG) et un **défi** : un lien `?defi=…` qui fait rejouer exactement la même série à un ami, score à battre inclus. |
+| **Comparaison** | `modules/mod_comparer.R` | « Dans l'année » : courbe d'une année vs la normale. « Entre les villes » : carte Leaflet des écarts à une normale ancienne + trajectoire d'une ville, avec curseur d'année. L'époque de référence (réglage d'expert) est repliée dans « Réglages avancés ». |
+| **Une journée** | `modules/mod_jour.R` | Analyse d'un jour précis (ville + date) : valeur, écart à la normale, rang (« jour le plus chaud autour du… depuis 1950 ») et fréquence, distribution ±7 j, carte partageable. Entrée « **jour de votre naissance** » : réchauffement vécu depuis (moyennes sur 15 ans). |
+| **Évolution** | `modules/mod_analyse.R` | Écart annuel à la normale (barres), analyse du réchauffement sur 30 ans, jours de forte chaleur vs jours de gel (observé + projeté TRACC), carte partageable « **rayures climatiques** » de la ville. |
 | **Méthodo** | `ui.R` (inline) | Sources, définition des normales (percentiles, fenêtre ±7 j), méthode des projections, limites. |
+
+Transverse : l'état de l'app vit dans l'URL (**permaliens** `?onglet=…&ville=…&date=…`,
+copiables à tout moment) ; les onglets se renvoient l'un à l'autre (bilan du quiz →
+Évolution, Une journée → Quiz) ; les périodes de référence sont présentées en repères
+générationnels (« L'époque de vos grands-parents (1951-1980) »).
 
 ---
 
@@ -43,11 +48,15 @@ docs/               Notes de conception (plan projections TRACC).
 
 ### Utilitaires partagés (`utils/`, sans effet de bord, sourçables)
 - `helpers.R` — `get_season_info()`, `largeur_sous_seuil()` (détection petit écran),
-  `log_debug()` (logs de debug conditionnels). Sourcé par `global.R`.
+  `log_debug()` (logs de debug conditionnels), permaliens (`construire_query_string`),
+  défi de série (`serialiser_defi`/`deserialiser_defi`), `libelles_periodes()`
+  (repères générationnels) et `rechauffement_depuis()` (naissance, rayures).
+  Sourcé par `global.R`.
 - `villes_reference.R` — **source de vérité unique** des 30 villes (nom, lat/lon, INSEE).
 - `fenetre_glissante.R` — machinerie de fenêtre ±N jours, partagée entre la
   préparation des normales et le calcul des projections (définition identique).
-- `render_partage.R` — génération de la carte de partage du quiz (ggplot pur).
+- `render_partage.R` — génération des cartes de partage en ggplot pur : manche de
+  quiz, journée précise, rayures climatiques d'une ville.
 
 ---
 
@@ -141,7 +150,9 @@ Rscript tests/run_tests.R
 ```
 
 Couvrent : saison d'une date, fenêtre glissante, seuil de forte chaleur,
-indicateurs annuels, et la carte de partage. Pas de dépendance à la BDD.
+indicateurs annuels, les cartes de partage (quiz, journée, rayures), les
+permaliens, la (dé)sérialisation du défi de série, les libellés d'époques et le
+réchauffement depuis une année. Pas de dépendance à la BDD.
 
 ---
 
