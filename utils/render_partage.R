@@ -230,6 +230,71 @@ dessiner_carte_jour <- function(params) {
     theme_void()
 }
 
+# Carte de partage « RAYURES CLIMATIQUES » d'une ville (façon warming stripes) :
+# une bande verticale par année, du bleu (année plus fraîche que la normale de
+# référence) au rouge (plus chaude). Le visuel climatique le plus reconnu — ici
+# décliné sur les températures maximales de la ville.
+# params : list(ville, annees (entiers), anomalies (°C, alignées sur annees),
+#               periode_ref (libellé de la normale de référence),
+#               rechauffement (optionnel : °C depuis le début de la série))
+dessiner_carte_stripes <- function(params) {
+  annees <- as.integer(params$annees)
+  anom   <- as.numeric(params$anomalies)
+  ok <- is.finite(annees) & is.finite(anom)
+  annees <- annees[ok]; anom <- anom[ok]
+  stopifnot(length(annees) > 0)
+  o <- order(annees); annees <- annees[o]; anom <- anom[o]
+
+  # Palette divergente RdBu (ColorBrewer 11 classes, codée en dur : ce fichier
+  # reste sans dépendance au-delà de ggplot2), bornes symétriques autour de 0
+  # pour que le blanc soit exactement « à la normale ».
+  pal <- c("#053061", "#2166AC", "#4393C3", "#92C5DE", "#D1E5F0", "#F7F7F7",
+           "#FDDBC7", "#F4A582", "#D6604D", "#B2182B", "#67001F")
+  M <- max(abs(anom))
+  if (!is.finite(M) || M <= 0) M <- 1
+  rampe <- grDevices::colorRampPalette(pal)(256)
+  couleur <- rampe[pmin(256L, pmax(1L, as.integer(round((anom + M) / (2 * M) * 255)) + 1L))]
+
+  x0 <- 4; x1 <- 96; y0 <- 28; y1 <- 70
+  n <- length(annees)
+  xs <- seq(x0, x1, length.out = n + 1)
+  bandes <- data.frame(xmin = xs[-(n + 1)], xmax = xs[-1], fill = couleur)
+
+  # « de Nantes » / « d'Avignon » / « du Havre » : on réutilise l'élision
+  # d'autour_de en retirant le mot « autour ».
+  de_ville <- sub("^autour ", "", autour_de(params$ville))
+  rech <- suppressWarnings(as.numeric(params$rechauffement %||% NA))
+  fmt1 <- function(x) format(round(as.numeric(x), 1), nsmall = 1, decimal.mark = ",")
+
+  p <- ggplot() +
+    annotate("rect", xmin = 0, xmax = 100, ymin = 0, ymax = 100, fill = "#f8f9fa") +
+    annotate("text", x = 4, y = 95, hjust = 0, vjust = 1, size = 6.5,
+             color = "#6c757d", fontface = "bold", label = "CLIMAT : NORMAL OU PAS ?") +
+    annotate("text", x = 4, y = 86, hjust = 0, size = 10, fontface = "bold",
+             color = "#343a40", label = paste0("Les rayures climatiques ", de_ville)) +
+    annotate("text", x = 4, y = 78, hjust = 0, size = 4.4, color = "#6c757d",
+             label = paste0("Écart de chaque année à la normale ", params$periode_ref,
+                            " — températures maximales (ERA5-Land)"))
+  if (is.finite(rech) && rech > 0) {
+    p <- p + annotate("text", x = 96, y = 78, hjust = 1, size = 6.5, fontface = "bold",
+                      color = "#B2182B",
+                      label = paste0("≈ +", fmt1(rech), " °C depuis ", annees[1]))
+  }
+  p +
+    geom_rect(data = bandes, aes(xmin = xmin, xmax = xmax, ymin = y0, ymax = y1, fill = fill),
+              inherit.aes = FALSE) +
+    scale_fill_identity() +
+    annotate("text", x = x0, y = 23.5, hjust = 0, size = 5, fontface = "bold",
+             color = "#495057", label = annees[1]) +
+    annotate("text", x = x1, y = 23.5, hjust = 1, size = 5, fontface = "bold",
+             color = "#495057", label = annees[n]) +
+    annotate("text", x = 4, y = 8, hjust = 0, size = 5.5, color = "#6c757d",
+             label = "Chaque bande est une année. Et chez vous ? normal-ou-pas.com") +
+    scale_x_continuous(limits = c(0, 100), expand = c(0, 0)) +
+    scale_y_continuous(limits = c(0, 100), expand = c(0, 0)) +
+    theme_void()
+}
+
 # Ligne de contexte d'une série (« Série : Toutes les villes · Été · normale … »).
 .contexte_serie <- function(ville, saison, periode) {
   bits <- ville %||% "Toutes les villes"
@@ -258,4 +323,8 @@ sauver_carte_partage <- function(params, chemin, largeur = 1200, hauteur = 630) 
 
 sauver_carte_jour <- function(params, chemin, largeur = 1200, hauteur = 630) {
   .sauver_png(dessiner_carte_jour(params), chemin, largeur, hauteur)
+}
+
+sauver_carte_stripes <- function(params, chemin, largeur = 1200, hauteur = 630) {
+  .sauver_png(dessiner_carte_stripes(params), chemin, largeur, hauteur)
 }

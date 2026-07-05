@@ -56,6 +56,10 @@ mod_analyse_ui <- function(id) {
         uiOutput(ns("analyse_rechauffement_ui")),
         div(class = "evolution-plot-wrap",
             plotlyOutput(ns("evolution_plot"), height = "100%")),
+        div(class = "text-center mt-2 mb-1",
+            actionButton(ns("stripes_btn"),
+                         "Partager les rayures climatiques de cette ville",
+                         icon = icon("share-nodes"), class = "btn-outline-primary")),
         card_footer(
           info_repliable(HTML(paste(
             "Ces indicateurs reposent sur les températures <b>maximales</b> journalières",
@@ -495,6 +499,40 @@ mod_analyse_server <- function(id, db_pool, prefill = reactive(NULL)) {
       if (proj_ok && nrow(obs) > 0)
         p <- p + geom_vline(xintercept = nrow(obs) + 0.5, linetype = "dashed", color = "grey55")
       p
+    })
+
+    # --- Partage « rayures climatiques » de la ville -------------------------
+    # Bandes annuelles 1950 -> aujourd'hui : écart à la normale la plus ancienne
+    # (periode_ref_carte, celle de la trajectoire de l'onglet Comparer), rendu en
+    # carte PNG 1200×630 dans le modal de partage commun.
+    observeEvent(input$stripes_btn, {
+      v <- input$ville_analyse
+      req(v)
+      anoms <- obtenir_anomalies_villes_annee()
+      av <- if (is.null(anoms)) NULL
+            else anoms[anoms$ville == v & anoms$n_jours >= 300, ]
+      if (is.null(av) || nrow(av) < 15) {
+        showNotification("Données insuffisantes pour générer les rayures de cette ville.",
+                         type = "warning")
+        return()
+      }
+      av <- av[order(av$annee), ]
+      rech <- rechauffement_depuis(av[, c("annee", "anomalie")], min(av$annee) + 7)
+      params <- list(ville = v, annees = av$annee, anomalies = av$anomalie,
+                     periode_ref = periode_ref_carte, rechauffement = rech)
+      f <- tempfile(fileext = ".png")
+      sauver_carte_stripes(params, f)
+      on.exit(unlink(f), add = TRUE)
+      data_uri <- paste0("data:image/png;base64,",
+                         jsonlite::base64_enc(readBin(f, "raw", n = file.info(f)$size)))
+      texte <- paste0("Les rayures climatiques ", autour_de(v), " : ",
+                      if (is.finite(rech) && rech > 0)
+                        paste0("environ +", fmt_temp(rech), " °C depuis ", min(av$annee), ". ")
+                      else "",
+                      "Chaque bande, une année. Et chez vous ? normal-ou-pas.com")
+      nom_fichier <- paste0("normal-ou-pas_rayures_", gsub("[^A-Za-z0-9]+", "_", v), ".png")
+      showModal(modal_partage(data_uri, texte, nom_fichier,
+                              titre = "Partager les rayures climatiques"))
     })
 
     # État exposé à server.R pour le permalien (?onglet=evolution&ville=...).
