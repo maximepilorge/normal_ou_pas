@@ -109,13 +109,17 @@ mod_comparer_server <- function(id, db_pool, prefill = reactive(NULL)) {
     # recentrera à la réouverture de l'onglet carte.
     centrage_en_attente <- reactiveVal(FALSE)
 
-    # Pré-remplissage (permalien ?onglet=comparer&ville=...&annee=...) : le
-    # recentrage carte est déjà géré par l'observeEvent(ville_focus) existant.
+    # Pré-remplissage (permalien ?onglet=comparer&ville=...&annee=... ou lien
+    # interne, ex. année cliquée dans Évolution). `vue` cible la sous-vue
+    # (« courbe » / « carte ») ; le recentrage carte est déjà géré par
+    # l'observeEvent(ville_focus) existant.
     observeEvent(prefill(), {
       pf <- prefill()
       req(pf)
       if (!is.null(pf$ville)) updatePickerInput(session, "ville_focus", selected = pf$ville)
       if (!is.null(pf$annee)) updateSliderInput(session, "annee", value = pf$annee)
+      if (!is.null(pf$vue) && pf$vue %in% c("courbe", "carte"))
+        bslib::nav_select("sousvue", pf$vue, session = session)
     })
 
     # Le curseur « Année » est fait pour être GLISSÉ (scrubber commun aux deux vues).
@@ -180,6 +184,12 @@ mod_comparer_server <- function(id, db_pool, prefill = reactive(NULL)) {
     est_mobile_courbe <- reactive({
       largeur_sous_seuil(session, ns("climate_plot"))
     })
+    # Garde anti-course : vrai quand le conteneur de la courbe a une taille réelle
+    # (l'arrivée par navigation programmée — clic d'une année dans Évolution —
+    # peut déclencher le rendu en pleine transition d'onglet, à taille nulle).
+    dims_courbe_ok <- reactive({
+      dimensions_valides(session, ns("climate_plot"))
+    })
 
     output$titre_courbe <- renderUI({
       req(input$ville_focus, input$annee, input$periode)
@@ -214,7 +224,7 @@ mod_comparer_server <- function(id, db_pool, prefill = reactive(NULL)) {
     }) %>% bindCache(input$ville_focus, input$periode, annee_deb())
 
     output$climate_plot <- renderPlotly({
-      req(input$ville_focus, input$periode, annee_deb())
+      req(dims_courbe_ok(), input$ville_focus, input$periode, annee_deb())
       d_norm  <- plot_data_normale()
       d_annee <- plot_data_annee()
       req(nrow(d_norm) > 0, nrow(d_annee) > 0)
@@ -270,7 +280,8 @@ mod_comparer_server <- function(id, db_pool, prefill = reactive(NULL)) {
         ) %>%
         config(displayModeBar = FALSE, responsive = TRUE)
     }) %>%
-      bindCache(input$ville_focus, input$periode, annee_deb(), est_mobile_courbe())
+      bindCache(input$ville_focus, input$periode, annee_deb(), est_mobile_courbe(),
+                dims_courbe_ok())
 
     # ================ VUE « ENTRE LES VILLES » : carte + trajectoire =============
 
@@ -452,7 +463,9 @@ mod_comparer_server <- function(id, db_pool, prefill = reactive(NULL)) {
 
     output$graphe_ville <- renderPlotly({
       v <- input$ville_focus
-      req(v)
+      # Même garde anti-course que la courbe : ce graphe vit dans le sous-onglet
+      # carte, initialement masqué (cf. erreurs « width/height incorrecte »).
+      req(dimensions_valides(session, ns("graphe_ville")), v)
       # Agrégat chargé PARESSEUSEMENT au premier affichage de cette trajectoire
       # (cf. global.R : obtenir_anomalies_villes_annee), plus au démarrage de l'app.
       anomalies <- obtenir_anomalies_villes_annee()

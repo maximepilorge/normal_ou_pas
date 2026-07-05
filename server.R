@@ -47,15 +47,18 @@ server <- function(input, output, session) {
   prefill <- reactiveValues(quiz = NULL, jour = NULL, comparer = NULL,
                             analyse = NULL, quiz_defi = NULL)
 
-  # Navigation programmée d'un module vers un onglet, avec pré-remplissage de la
-  # ville cible (boucle de circulation : bilan du quiz -> Évolution, Une journée
-  # -> Quiz…). Passée aux modules émetteurs.
-  naviguer_vers <- function(onglet, ville = NULL) {
-    if (!is.null(ville)) {
-      cible <- switch(onglet, evolution = "analyse", quiz = "quiz",
-                      jour = "jour", comparer = "comparer")
-      if (!is.null(cible)) prefill[[cible]] <- list(ville = ville, stamp = Sys.time())
-    }
+  # Navigation programmée d'un module vers un onglet, avec pré-remplissage de
+  # l'état cible (boucle de circulation : bilan du quiz -> Évolution, Une journée
+  # -> Quiz, année cliquée dans Évolution -> Comparaison…). `vue` cible une
+  # sous-vue interne du module (ex. « courbe » de Comparaison). Passée aux
+  # modules émetteurs.
+  naviguer_vers <- function(onglet, ville = NULL, date = NULL, annee = NULL, vue = NULL) {
+    cible <- switch(onglet, evolution = "analyse", quiz = "quiz",
+                    jour = "jour", comparer = "comparer")
+    if (!is.null(cible) &&
+        !all(vapply(list(ville, date, annee, vue), is.null, logical(1))))
+      prefill[[cible]] <- list(ville = ville, date = date, annee = annee,
+                               vue = vue, stamp = Sys.time())
     bslib::nav_select("nav_principal", onglet, session = session)
   }
 
@@ -193,7 +196,8 @@ server <- function(input, output, session) {
   # Module Analyse
   analyse_mod <- mod_analyse_server("analyse_1",
                                     db_pool = db_pool,
-                                    prefill = reactive(prefill$analyse))
+                                    prefill = reactive(prefill$analyse),
+                                    naviguer = naviguer_vers)
 
   # Permalien continu : l'URL reflète l'onglet actif et l'état du module affiché
   # (ville/date/année) — copiable-partageable à tout moment, sans historique

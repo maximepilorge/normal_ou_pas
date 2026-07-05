@@ -21,6 +21,8 @@ mod_analyse_ui <- function(id) {
     tags$head(tags$style(HTML("
       .evolution-plot-wrap { height: 500px; }
       @media (max-width: 575.98px) { .evolution-plot-wrap { height: 420px; } }
+      /* Les barres du graphe d'évolution sont cliquables (bascule Comparaison). */
+      .evolution-plot-wrap .nsewdrag { cursor: pointer !important; }
     "))),
     div(
       class = "p-2",
@@ -98,7 +100,7 @@ mod_analyse_ui <- function(id) {
 # --- SERVER MIS À JOUR ---
 # Remplacez l'intégralité de l'ancienne fonction mod_analyse_server par celle-ci
 
-mod_analyse_server <- function(id, db_pool, prefill = reactive(NULL)) {
+mod_analyse_server <- function(id, db_pool, prefill = reactive(NULL), naviguer = NULL) {
   moduleServer(id, function(input, output, session) {
 
     ns <- session$ns
@@ -240,7 +242,14 @@ mod_analyse_server <- function(id, db_pool, prefill = reactive(NULL)) {
 
     }, ignoreNULL = TRUE)
     
+    # Garde anti-course : ne rend jamais un graphe dans un conteneur de taille
+    # nulle (arrivée par permalien/navigation programmée en pleine transition).
+    dims_evolution_ok <- reactive({
+      dimensions_valides(session, ns("evolution_plot"))
+    })
+
     output$evolution_plot <- renderPlotly({
+      req(dims_evolution_ok())
       df_anom <- anomalies_annuelles()
       req(nrow(df_anom) > 0)
 
@@ -289,7 +298,7 @@ mod_analyse_server <- function(id, db_pool, prefill = reactive(NULL)) {
         theme_minimal(base_size = taille_police) +
         theme(legend.position = "bottom")
 
-      gp <- ggplotly(p, tooltip = "text") %>%
+      gp <- ggplotly(p, tooltip = "text", source = ns("evo_clic")) %>%
         # Axes verrouillés (pas de zoom/déplacement) ; ticks X imposés ; légende
         # en bande horizontale compacte au-dessus du graphe.
         layout(
@@ -324,13 +333,22 @@ mod_analyse_server <- function(id, db_pool, prefill = reactive(NULL)) {
         }
       }
 
-      gp
+      # Chaque BARRE porte son année (customdata) : le clic bascule vers
+      # Comparaison sur (ville, année) — cf. l'observeEvent plus bas. Posé ici
+      # (et non via aes) pour ne cibler que les barres : un clic sur la courbe
+      # de tendance ou un à-côté ne navigue pas.
+      for (i in seq_along(gp$x$data)) {
+        if (identical(gp$x$data[[i]]$type, "bar"))
+          gp$x$data[[i]]$customdata <- round(as.numeric(gp$x$data[[i]]$x))
+      }
+      plotly::event_register(gp, "plotly_click")
     }) %>%
       bindCache(
         input$ville_analyse,
         input$annee_range_analyse,
         input$periode_ref_analyse,
-        est_mobile_evolution()
+        est_mobile_evolution(),
+        dims_evolution_ok()
       )
     
     # Texte « Analyse du réchauffement » — affiché JUSTE AU-DESSUS du graphe
@@ -412,8 +430,26 @@ mod_analyse_server <- function(id, db_pool, prefill = reactive(NULL)) {
         HTML(paste0("Évolution des températures maximales à <strong>",
                     input$ville_analyse, "</strong>")),
         tags$div(class = "small text-muted fw-normal",
-                 paste0("Écart annuel à la normale ", input$periode_ref_analyse))
+                 paste0("Écart annuel à la normale ", input$periode_ref_analyse,
+                        " · cliquez une année pour l'explorer en détail"))
       )
+    })
+
+    # Clic sur une barre du graphe d'évolution -> onglet Comparaison, sous-vue
+    # « Dans l'année », pré-remplie sur (ville, année cliquée). Seules les barres
+    # portent un customdata (posé au rendu) : tout autre clic est ignoré.
+    # suppressWarnings : avant le premier rendu du graphe, event_data avertit que
+    # la source n'est pas encore enregistrée — bruit de log sans intérêt.
+    observeEvent(suppressWarnings(
+      plotly::event_data("plotly_click", source = ns("evo_clic"),
+                         priority = "event")), {
+      d <- suppressWarnings(
+        plotly::event_data("plotly_click", source = ns("evo_clic")))
+      annee <- suppressWarnings(as.integer(d$customdata[1]))
+      req(length(annee) == 1, is.finite(annee),
+          annee >= an_min_data, annee <= an_max_data)
+      if (is.function(naviguer))
+        naviguer("comparer", ville = input$ville_analyse, annee = annee, vue = "courbe")
     })
 
     output$titre_forte_chaleur <- renderUI({
@@ -432,6 +468,8 @@ mod_analyse_server <- function(id, db_pool, prefill = reactive(NULL)) {
     # Graphe DIVERGENT fusionné : forte chaleur (P90) vers le haut, gel (≤0°C)
     # vers le bas ; décennies observées + horizons projetés (médiane TRACC).
     output$forte_chaleur_plot <- renderPlot({
+      # Garde anti-course (cf. « figure margins too large » sur rendu à taille nulle).
+      req(dimensions_valides(session, ns("forte_chaleur_plot")))
       df   <- indicateurs_ville()
       proj <- extremes_proj_ville()
       obs_ok  <- !is.null(df) && nrow(df) > 0 && "jours_forte_chaleur" %in% names(df)

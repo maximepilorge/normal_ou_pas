@@ -30,6 +30,18 @@ largeur_sous_seuil <- function(session, output_id, seuil = 500) {
   !is.null(w) && w > 0 && w < seuil
 }
 
+# Dimensions rendues valides d'un output (largeur ET hauteur > 0). Sert de garde
+# req() dans les renders de graphes vivant dans des (sous-)onglets : un rendu
+# déclenché pendant la transition d'affichage — taille encore nulle — plante le
+# device (« 'width' ou 'height' incorrecte », « figure margins too large ») et
+# laisse le graphe vide. Booléen : le render se relance quand la taille devient
+# valide (le faux -> vrai ré-invalide), puis reste stable.
+dimensions_valides <- function(session, output_id) {
+  w <- session$clientData[[paste0("output_", output_id, "_width")]]
+  h <- session$clientData[[paste0("output_", output_id, "_height")]]
+  !is.null(w) && !is.null(h) && w > 0 && h > 0
+}
+
 # Journalisation de debug conditionnelle : n'émet un message() que si l'option
 # `normaloupas.debug` est active (options(normaloupas.debug = TRUE) en dev, ou
 # variable d'env NORMALOUPAS_DEBUG=1). Silencieux en production par défaut.

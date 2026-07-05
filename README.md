@@ -24,7 +24,8 @@ Quatre onglets, en montée pédagogique :
 
 Transverse : l'état de l'app vit dans l'URL (**permaliens** `?onglet=…&ville=…&date=…`,
 copiables à tout moment) ; les onglets se renvoient l'un à l'autre (bilan du quiz →
-Évolution, Une journée → Quiz) ; les périodes de référence portent un sous-titre
+Évolution, Une journée → Quiz, **année cliquée** dans le graphe d'Évolution →
+Comparaison « Dans l'année ») ; les périodes de référence portent un sous-titre
 d'ancienneté dans les menus (« 1951-1980 — il y a environ 60 ans »).
 
 ---
