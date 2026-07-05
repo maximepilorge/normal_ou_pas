@@ -35,9 +35,10 @@ mod_jour_ui <- function(id) {
             dateInput(ns("date_jour"), "Date :", value = val_def,
                       min = date_min, max = derniere_date_dispo,
                       format = "dd/mm/yyyy", language = "fr", weekstart = 1),
-            pickerInput(ns("periode_jour"), "Normale de référence :",
+            pickerInput(ns("periode_jour"), "Comparer au climat de :",
                         choices = periodes_disponibles,
                         selected = periodes_disponibles[length(periodes_disponibles)],
+                        choicesOpt = list(subtext = soustitres_periodes(periodes_disponibles)),
                         options = list(container = "body", `live-search` = FALSE))
           ),
           helpText(paste0("Rang et fréquence sont calculés sur une fenêtre de ±7 ",
@@ -45,6 +46,12 @@ mod_jour_ui <- function(id) {
                           an_min_data, "."))
         )
       ),
+
+      # Accroche « anniversaire » : le point d'entrée émotionnel de l'onglet.
+      div(class = "text-center mb-2",
+          actionLink(ns("naissance_btn"),
+                     label = tagList(icon("cake-candles"),
+                                     " Quel temps faisait-il le jour de votre naissance ?"))),
 
       card(
         full_screen = TRUE,
@@ -59,6 +66,13 @@ mod_jour_ui <- function(id) {
               "Partagez cette journée autour de vous :"),
             actionButton(ns("partager_btn"), "Partager cette journée",
                          icon = icon("share-nodes"), class = "btn-primary")),
+        # Boucle de circulation : replacer le jour dans son année (Comparaison),
+        # ou rebondir vers le quiz pré-réglé sur cette ville.
+        div(class = "text-center mt-2", uiOutput(ns("lien_annee"))),
+        div(class = "text-center mt-1 mb-2",
+            actionLink(ns("quiz_ville_btn"),
+                       label = tagList(icon("dice"),
+                                       " Testez vos repères sur cette ville avec le quiz"))),
         card_footer(
           tags$small(class = "text-muted", HTML(paste0(
             "Température = moyenne spatiale pondérée sur la commune (réanalyse ",
@@ -71,11 +85,21 @@ mod_jour_ui <- function(id) {
   )
 }
 
-mod_jour_server <- function(id, db_pool) {
+mod_jour_server <- function(id, db_pool, prefill = reactive(NULL), naviguer = NULL) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
     est_mobile <- reactive({ largeur_sous_seuil(session, ns("dist_plot")) })
+
+    # Pré-remplissage (permalien ?onglet=jour&ville=...&date=... ou lien interne) :
+    # applique ville et date demandées ; le recalage sur la dernière date dispo de
+    # la ville (observeEvent ville_jour ci-dessous) reste le garde-fou.
+    observeEvent(prefill(), {
+      pf <- prefill()
+      req(pf)
+      if (!is.null(pf$ville)) updatePickerInput(session, "ville_jour", selected = pf$ville)
+      if (!is.null(pf$date))  updateDateInput(session, "date_jour", value = pf$date)
+    })
 
     # À chaque changement de ville (et au démarrage) : on cale le calendrier sur la
     # dernière date RÉELLEMENT disponible pour cette ville. La date n'est ramenée à
@@ -105,6 +129,56 @@ mod_jour_server <- function(id, db_pool) {
     # Date sans l'année (« 23 juin ») pour les phrases de rang.
     date_sans_annee <- function(d) paste(lubridate::day(d),
                                           tolower(mois_fr[lubridate::month(d)]))
+
+    # --- « Jour de ma naissance » -------------------------------------------
+    # Date de naissance active (NULL sinon) : tant que la date affichée reste
+    # celle-ci, le verdict ajoute la phrase « depuis votre naissance… ».
+    date_naissance <- reactiveVal(NULL)
+
+    observeEvent(input$naissance_btn, {
+      showModal(modalDialog(
+        title = "Le jour de votre naissance",
+        p("Choisissez votre date de naissance : l'application retrouve la ",
+          "température de ce jour-là et le réchauffement survenu depuis."),
+        dateInput(ns("date_naissance_saisie"), "Date de naissance :",
+                  value = "1990-06-15",
+                  min = as.Date(paste0(an_min_data, "-01-01")),
+                  max = derniere_date_dispo, format = "dd/mm/yyyy",
+                  language = "fr", weekstart = 1, startview = "decade"),
+        p(class = "text-muted small",
+          paste0("Historique disponible : ", an_min_data, "–", an_max_data, ".")),
+        footer = tagList(modalButton("Annuler"),
+                         actionButton(ns("naissance_ok"), "Voir ce jour-là",
+                                      class = "btn-primary")),
+        easyClose = TRUE))
+    })
+
+    observeEvent(input$naissance_ok, {
+      d <- suppressWarnings(as.Date(input$date_naissance_saisie))
+      req(length(d) == 1, !is.na(d))
+      removeModal()
+      date_naissance(d)
+      updateDateInput(session, "date_jour", value = d)
+    })
+
+    # La saisie manuelle d'une AUTRE date sort du mode anniversaire.
+    observeEvent(input$date_jour, {
+      dn <- date_naissance()
+      if (!is.null(dn) && !identical(as.Date(input$date_jour), dn)) date_naissance(NULL)
+    })
+
+    # Réchauffement vécu depuis la naissance : 15 dernières années vs 15 années
+    # centrées sur la naissance, sur les anomalies annuelles pré-agrégées
+    # (obtenir_anomalies_villes_annee, paresseux et mémoïsé — cf. global.R).
+    rechauffement_naissance <- reactive({
+      dn <- date_naissance()
+      req(dn, input$ville_jour)
+      anoms <- obtenir_anomalies_villes_annee()
+      if (is.null(anoms)) return(NA_real_)
+      av <- anoms[anoms$ville == input$ville_jour & anoms$n_jours >= 300,
+                  c("annee", "anomalie")]
+      rechauffement_depuis(av, lubridate::year(dn))
+    })
 
     # --- Calcul central : tout ce dont les sorties ont besoin pour (ville, date,
     #     période). Renvoie ok = FALSE + message si la date n'est pas couverte. ---
@@ -257,6 +331,25 @@ mod_jour_server <- function(id, db_pool) {
           tags$div(class = "mb-2 fw-semibold", style = paste0("color:", couleur, ";"), rec)
       }
 
+      # Mode « anniversaire » : phrase du réchauffement vécu depuis la naissance.
+      bloc_naissance <- NULL
+      dn <- date_naissance()
+      if (!is.null(dn) && identical(dn, res$date)) {
+        rech <- rechauffement_naissance()
+        msg <- if (!is.finite(rech)) NULL
+        else if (rech >= 0.15)
+          paste0("Depuis votre naissance, le climat ", autour_de(res$ville),
+                 " s'est déjà réchauffé d'environ ",
+                 if (rech > 0) "+" else "", fmt_temp(rech),
+                 " °C (comparaison de moyennes sur 15 ans).")
+        else
+          paste0("Vous êtes né(e) trop récemment pour que le réchauffement se ",
+                 "mesure déjà sur votre vie (les moyennes se comparent sur 15 ans).")
+        if (!is.null(msg))
+          bloc_naissance <- tags$div(class = "alert alert-warning mt-2 mb-0 py-2",
+                                     icon("cake-candles"), " ", msg)
+      }
+
       tagList(
         tags$div(style = paste0("font-size:2.4rem; font-weight:800; line-height:1.1; color:", couleur, ";"),
                  paste0(fmt_temp(res$temp), " °C")),
@@ -265,7 +358,8 @@ mod_jour_server <- function(id, db_pool) {
         tags$span(class = "badge",
                   style = paste0("background:", couleur, "; color:#fff; font-size:0.95rem; white-space:normal;"),
                   phrase_rang(res)),
-        tags$div(class = "text-muted mt-2", phrase_frequence(res))
+        tags$div(class = "text-muted mt-2", phrase_frequence(res)),
+        bloc_naissance
       )
     })
 
@@ -293,11 +387,21 @@ mod_jour_server <- function(id, db_pool) {
              layer = "below")
       ) else list()
 
-      plot_ly() %>%
+      fig <- plot_ly() %>%
         add_markers(x = win$tmax, y = jitter_y,
                     marker = list(color = "rgba(31,119,180,0.4)", size = 6),
-                    text = paste0("Année ", win$annee, " : ", round(win$tmax, 1), " °C"),
-                    hoverinfo = "text", showlegend = FALSE) %>%
+                    text = paste0(format(win$date, "%d/%m/%Y"), " : ", round(win$tmax, 1), " °C"),
+                    hoverinfo = "text", showlegend = FALSE)
+
+      # Moyenne (normale) en croix noire, comme le boxplot du quiz. Ajoutée avant le
+      # point du jour pour que ce dernier reste au-dessus quand les deux se touchent.
+      if (res$a_normale)
+        fig <- fig %>% add_markers(x = res$t_moy, y = 0,
+                    marker = list(symbol = "x", color = "black", size = 10),
+                    text = paste0("Moyenne : ", fmt_temp(res$t_moy), " °C"),
+                    hoverinfo = "text", showlegend = FALSE)
+
+      fig %>%
         add_markers(x = res$temp, y = 0,
                     marker = list(symbol = "x", color = "#E41A1C", size = 13,
                                   line = list(color = "#E41A1C", width = 1.8)),
@@ -335,14 +439,52 @@ mod_jour_server <- function(id, db_pool) {
       data_uri <- paste0("data:image/png;base64,",
                          jsonlite::base64_enc(readBin(f, "raw", n = file.info(f)$size)))
 
-      texte <- paste0(fmt_temp(res$temp), "°C ",
-                      autour_de(res$ville), " le ", format(res$date, "%d/%m/%Y"), " : ",
-                      phrase_principale, ". Et vous, sauriez-vous situer ce qui est normal ?")
+      # En mode « anniversaire », le texte porte le fait personnel + le
+      # réchauffement vécu (la carte image, elle, reste la même).
+      est_naissance <- !is.null(date_naissance()) && identical(date_naissance(), res$date)
+      rech <- if (est_naissance) rechauffement_naissance() else NA_real_
+      texte <- paste0(
+        if (est_naissance) "Le jour de ma naissance : " else "",
+        fmt_temp(res$temp), "°C ",
+        autour_de(res$ville), " le ", format(res$date, "%d/%m/%Y"), " : ",
+        phrase_principale, ".",
+        if (est_naissance && is.finite(rech) && rech >= 0.15)
+          paste0(" Depuis, le climat s'y est réchauffé d'environ +", fmt_temp(rech), " °C.")
+        else "",
+        " Et vous, sauriez-vous situer ce qui est normal ?")
       nom_fichier <- paste0("normal-ou-pas_jour_",
                             gsub("[^A-Za-z0-9]+", "_", res$ville), ".png")
 
       showModal(modal_partage(data_uri, texte, nom_fichier, titre = "Partager cette journée"))
     })
+
+    # Rebond vers Comparaison « Dans l'année » : le jour affiché, replacé dans la
+    # courbe de son année (libellé dynamique, d'où le renderUI).
+    output$lien_annee <- renderUI({
+      req(input$date_jour)
+      actionLink(ns("annee_btn"),
+                 label = tagList(icon("chart-bar"),
+                                 sprintf(" Replacer ce jour dans son année %d",
+                                         lubridate::year(as.Date(input$date_jour)))))
+    })
+
+    observeEvent(input$annee_btn, {
+      req(input$ville_jour, input$date_jour)
+      if (is.function(naviguer))
+        naviguer("comparer", ville = input$ville_jour,
+                 annee = lubridate::year(as.Date(input$date_jour)), vue = "courbe")
+    })
+
+    # Rebond vers le quiz, pré-réglé sur la ville affichée.
+    observeEvent(input$quiz_ville_btn, {
+      req(input$ville_jour)
+      if (is.function(naviguer)) naviguer("quiz", ville = input$ville_jour)
+    })
+
+    # État exposé à server.R pour le permalien (?onglet=jour&ville=...&date=...).
+    return(list(
+      etat_url = reactive(list(ville = input$ville_jour, date = input$date_jour))
+    ))
 
   })
 }

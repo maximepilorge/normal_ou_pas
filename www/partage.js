@@ -109,6 +109,34 @@
           "Sur ordinateur, utilisez « Copier l'image » ou les boutons réseau.");
   };
 
+  // --- Partage d'un LIEN (défi de série) : copie ou partage natif ------------
+  window.partageCopierLien = function (inputId) {
+    var el = document.getElementById(inputId);
+    if (!el) { toast("Lien indisponible."); return; }
+    var lien = el.value || el.textContent || "";
+    function repli() {
+      try { el.select(); document.execCommand("copy"); toast("Lien copié ✔"); }
+      catch (e) { toast("Copie impossible — sélectionnez le lien à la main."); }
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(lien).then(function () { toast("Lien copié ✔"); }, repli);
+    } else { repli(); }
+  };
+
+  window.partagePartagerLien = function (inputId, texteMsg) {
+    var el = document.getElementById(inputId);
+    var lien = el ? (el.value || "") : window.location.href;
+    if (navigator.share) {
+      navigator.share({ title: "Climat : Normal ou pas ?", text: texteMsg || "", url: lien })
+        .catch(function (e) {
+          if (e && e.name === "AbortError") return; // fermeture volontaire
+          window.partageCopierLien(inputId);
+        });
+      return;
+    }
+    window.partageCopierLien(inputId); // pas de partage natif : repli copie
+  };
+
   window.partageReseau = function (reseau) {
     var urls = {
       linkedin: "https://www.linkedin.com/feed/?shareActive=true",

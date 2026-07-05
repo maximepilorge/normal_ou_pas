@@ -81,4 +81,9 @@ Rscript utils/verifier_extraction_cds.R
 (Faits récemment : refonte du quiz en **séries de 10** — paramétrage, révélation
 par manche, bilan /10 + commentaire variable + partage + meilleur score, table
 runtime `quiz_series_scores` ; masquage de la courbe de tendance sur mobile ;
-titres dynamiques ville/année dans les en-têtes de carte ; fusion Comparaison + Carte.)
+titres dynamiques ville/année dans les en-têtes de carte ; fusion Comparaison + Carte.
+Branche `feat/parcours-grand-public` : permaliens URL (`?onglet=…&ville=…`),
+boucle inter-onglets (bilan quiz → Évolution, journée → quiz), **défi de série**
+par lien (`?defi=…`, sérialisation validée), sous-titres d'ancienneté des époques
+de référence dans les menus, entrée « jour de ma naissance », carte de partage
+« rayures climatiques ».)

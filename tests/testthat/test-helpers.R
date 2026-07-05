@@ -70,3 +70,114 @@ test_that(".periode_bornes extrait les bornes d'un libellé AAAA-AAAA", {
   expect_equal(.periode_bornes("1991-2020"), c(1991, 2020))
   expect_equal(.periode_bornes("1951-1980")[1], 1951)
 })
+
+test_that("construire_query_string encode onglet et état du module", {
+  expect_equal(construire_query_string("quiz"), "?onglet=quiz")
+  expect_equal(construire_query_string("methodo", NULL), "?onglet=methodo")
+  # ville + date (Une journée), accents et espaces encodés
+  qs <- construire_query_string("jour", list(ville = "Orléans", date = as.Date("2024-08-15")))
+  expect_equal(qs, "?onglet=jour&ville=Orl%C3%A9ans&date=2024-08-15")
+  qs2 <- construire_query_string("comparer", list(ville = "Le Havre", annee = 2003L))
+  expect_equal(qs2, "?onglet=comparer&ville=Le%20Havre&annee=2003")
+  # champs NULL ou vides omis
+  expect_equal(construire_query_string("evolution", list(ville = NULL)), "?onglet=evolution")
+  expect_equal(construire_query_string("evolution", list(ville = "")), "?onglet=evolution")
+})
+
+test_that("ONGLETS_APP couvre les cinq onglets de l'app", {
+  expect_setequal(ONGLETS_APP, c("quiz", "comparer", "jour", "evolution", "methodo"))
+})
+
+test_that("serialiser/deserialiser_defi font un aller-retour fidèle", {
+  serie <- list(
+    list(city = "Orléans", date = as.Date("2024-08-15"), temp = 34.5,
+         correct_answer = "Au-dessus des normales", normale_moy = 27.3),
+    list(city = "Le Havre", date = as.Date("2024-01-02"), temp = -1,
+         correct_answer = "En-dessous des normales", normale_moy = 7))
+  payload <- serialiser_defi(serie, "1991-2020", score = 2L)
+  out <- deserialiser_defi(payload, c("Orléans", "Le Havre"), "1991-2020")
+  expect_equal(out$periode, "1991-2020")
+  expect_equal(out$score, 2L)
+  expect_length(out$serie, 2)
+  expect_equal(out$serie[[1]]$city, "Orléans")
+  expect_equal(out$serie[[1]]$date, as.Date("2024-08-15"))
+  expect_equal(out$serie[[1]]$temp, 34.5)
+  expect_equal(out$serie[[1]]$correct_answer, "Au-dessus des normales")
+  expect_equal(out$serie[[2]]$temp, -1)          # sérialisé "-1.0"
+  expect_equal(out$serie[[2]]$normale_moy, 7)
+})
+
+test_that("serialiser_defi sans score laisse le champ vide (score NA au retour)", {
+  serie <- list(list(city = "Paris", date = as.Date("2024-06-01"), temp = 25,
+                     correct_answer = "Dans les normales de saison", normale_moy = 22))
+  out <- deserialiser_defi(serialiser_defi(serie, "1951-1980"), "Paris", "1951-1980")
+  expect_true(is.na(out$score))
+  expect_length(out$serie, 1)
+})
+
+test_that("deserialiser_defi rejette tout payload douteux", {
+  villes <- "Paris"; periodes <- "1991-2020"
+  ok <- serialiser_defi(list(list(city = "Paris", date = as.Date("2024-06-01"),
+    temp = 25, correct_answer = "Dans les normales de saison", normale_moy = 22)),
+    "1991-2020", 5L)
+  expect_null(deserialiser_defi(NULL, villes, periodes))
+  expect_null(deserialiser_defi("n'importe quoi", villes, periodes))
+  expect_null(deserialiser_defi(sub("^v1", "v9", ok), villes, periodes))                    # version inconnue
+  expect_null(deserialiser_defi(gsub("Paris", "Gotham", ok, fixed = TRUE), villes, periodes))    # ville inconnue
+  expect_null(deserialiser_defi(gsub("1991-2020", "1901-1930", ok, fixed = TRUE), villes, periodes)) # période inconnue
+  expect_null(deserialiser_defi(gsub("~25.0~", "~99.0~", ok, fixed = TRUE), villes, periodes))   # température invraisemblable
+  expect_null(deserialiser_defi(gsub("~2~", "~8~", ok, fixed = TRUE), villes, periodes))    # catégorie hors bornes
+  # score incohérent (> nb de manches) : neutralisé, la série reste jouable
+  louche <- deserialiser_defi(sub(";5;", ";11;", ok, fixed = TRUE), villes, periodes)
+  expect_true(is.na(louche$score))
+  expect_length(louche$serie, 1)
+})
+
+test_that("soustitres_periodes donne une ancienneté neutre, arrondie aux 5 ans", {
+  periodes <- c("1951-1980", "1961-1990", "1971-2000", "1981-2010", "1991-2020")
+  st <- soustitres_periodes(periodes, annee = 2026)
+  expect_equal(st, c("il y a environ 60 ans", "il y a environ 50 ans",
+                     "il y a environ 40 ans", "il y a environ 30 ans",
+                     "la normale actuelle"))
+})
+
+test_that("soustitres_periodes vieillit avec l'année et gère les cas limites", {
+  # Dans 20 ans, 1971-2000 aura ~60 ans d'ancienneté.
+  st <- soustitres_periodes(c("1971-2000", "1991-2020"), annee = 2046)
+  expect_equal(st, c("il y a environ 60 ans", "la normale actuelle"))
+  expect_length(soustitres_periodes(character(0)), 0)
+})
+
+test_that("rechauffement_depuis compare l'époque d'origine aux années récentes", {
+  # Réchauffement linéaire de 0,03 °C/an sur 1950-2025.
+  annees <- 1950:2025
+  anoms <- data.frame(annee = annees, anomalie = (annees - 1950) * 0.03)
+  # Né en 1990 : fenêtre 1983-1997 (centre 1990) vs 2011-2025 (centre 2018).
+  expect_equal(rechauffement_depuis(anoms, 1990), 28 * 0.03, tolerance = 1e-9)
+  # Trop peu de valeurs autour de l'origine (série commençant en 1988) -> NA.
+  expect_true(is.na(rechauffement_depuis(anoms[anoms$annee >= 1988, ], 1950)))
+  expect_true(is.na(rechauffement_depuis(NULL, 1990)))
+  expect_true(is.na(rechauffement_depuis(anoms, NA)))
+  # Naissance récente : fenêtres qui se chevauchent, écart proche de zéro.
+  expect_lt(abs(rechauffement_depuis(anoms, 2020)), 0.25)
+})
+
+test_that("rechauffement_depuis couvre une fenêtre pleine même pour un pas pair (30 ans)", {
+  annees <- 1950:2025
+  anoms <- data.frame(annee = annees, anomalie = (annees - 1950) * 0.03)
+  # Origine 1964 -> fenêtre 1950-1979 (30 ans) vs 1996-2025 (30 dernières).
+  expect_equal(rechauffement_depuis(anoms, 1964, fenetre = 30), 46 * 0.03,
+               tolerance = 1e-9)
+})
+
+test_that("date_click_plotly normalise les formats de clic d'un axe temporel", {
+  attendu <- as.Date("2003-08-12")
+  expect_equal(date_click_plotly("2003-08-12"), attendu)              # chaîne ISO
+  expect_equal(date_click_plotly("2003-08-12 00:00:00"), attendu)     # date-heure
+  expect_equal(date_click_plotly(1060646400000), attendu)             # ms epoch
+  expect_equal(date_click_plotly(1060646400), attendu)                # s epoch
+  expect_equal(date_click_plotly(12276), attendu)                     # jours epoch
+  expect_true(is.na(date_click_plotly("n'importe quoi")))
+  expect_true(is.na(date_click_plotly(NULL)))
+  expect_true(is.na(date_click_plotly(NaN)))
+})

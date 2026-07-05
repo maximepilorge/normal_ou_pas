@@ -184,13 +184,16 @@ ui <- fluidPage( # On utilise tagList comme conteneur principal
     tags$script(src = "partage.js"),
 
     # 5. Habillage du quiz « Série de 10 » (carte, progression, anneau, révélation)
-    tags$link(rel = "stylesheet", href = "quiz_serie.css?v=4")
+    tags$link(rel = "stylesheet", href = "quiz_serie.css?v=5")
   ),
   
   
   # --- INTERFACE PRINCIPALE DE L'APPLICATION ---
   page_navbar(
     title = "Climat : Normal ou pas ?",
+    # id + values des nav_panel : pilotables par nav_select (boucle inter-onglets)
+    # et reflétés dans l'URL (?onglet=...) pour les permaliens (cf. server.R).
+    id = "nav_principal",
     #position = "fixed-top",
     header = tagList(
       useShinyjs(),
@@ -202,27 +205,32 @@ ui <- fluidPage( # On utilise tagList comme conteneur principal
     
     # -- Onglets de l'application --
     nav_panel(
-      "Le Quiz", 
+      "Le Quiz",
       mod_quiz_ui("quiz_1"),
-      icon = icon("question-circle")
+      icon = icon("question-circle"),
+      value = "quiz"
       ),
     nav_panel(
       "Comparaison",
       mod_comparer_ui("comparer_1"),
-      icon = icon("chart-bar")
+      icon = icon("chart-bar"),
+      value = "comparer"
       ),
     nav_panel(
       "Une journée",
       mod_jour_ui("jour_1"),
-      icon = icon("calendar-day")
+      icon = icon("calendar-day"),
+      value = "jour"
       ),
     nav_panel(
       "Évolution",
       mod_analyse_ui("analyse_1"),
-      icon = icon("chart-line")
+      icon = icon("chart-line"),
+      value = "evolution"
       ),
     nav_panel(
       "Méthodo",
+      value = "methodo",
       fluidPage(
         titlePanel("Choix méthodologiques"),
         fluidRow(

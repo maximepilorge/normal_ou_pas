@@ -30,6 +30,18 @@ largeur_sous_seuil <- function(session, output_id, seuil = 500) {
   !is.null(w) && w > 0 && w < seuil
 }
 
+# Dimensions rendues valides d'un output (largeur ET hauteur > 0). Sert de garde
+# req() dans les renders de graphes vivant dans des (sous-)onglets : un rendu
+# déclenché pendant la transition d'affichage — taille encore nulle — plante le
+# device (« 'width' ou 'height' incorrecte », « figure margins too large ») et
+# laisse le graphe vide. Booléen : le render se relance quand la taille devient
+# valide (le faux -> vrai ré-invalide), puis reste stable.
+dimensions_valides <- function(session, output_id) {
+  w <- session$clientData[[paste0("output_", output_id, "_width")]]
+  h <- session$clientData[[paste0("output_", output_id, "_height")]]
+  !is.null(w) && !is.null(h) && w > 0 && h > 0
+}
+
 # Journalisation de debug conditionnelle : n'émet un message() que si l'option
 # `normaloupas.debug` est active (options(normaloupas.debug = TRUE) en dev, ou
 # variable d'env NORMALOUPAS_DEBUG=1). Silencieux en production par défaut.
@@ -50,6 +62,150 @@ fmt_temp <- function(x, dec = 1) {
 
 # Bornes (début, fin) d'un libellé de période « AAAA-AAAA ». Pure.
 .periode_bornes <- function(p) as.numeric(strsplit(p, "-")[[1]])
+
+# Sous-titres « grand public » des périodes de référence, affichés dans les
+# menus déroulants SOUS chaque période (via choicesOpt$subtext de pickerInput) :
+# « il y a environ 60 ans », la plus récente devenant « la normale actuelle ».
+# Le libellé principal reste la période elle-même (« 1951-1980 ») : court, il ne
+# se tronque pas dans le bouton fermé, et l'ancienneté ne présume pas de l'âge
+# de l'utilisateur (contrairement à « l'époque de vos grands-parents »).
+# Ancienneté du centre de la période, arrondie aux 5 ans (stable d'une année
+# sur l'autre) ; `annee` paramétrable pour la testabilité. Pure.
+soustitres_periodes <- function(periodes, annee = as.integer(format(Sys.Date(), "%Y"))) {
+  if (length(periodes) == 0) return(character(0))
+  debuts <- vapply(periodes, function(p) .periode_bornes(p)[1], numeric(1))
+  recente <- periodes[which.max(debuts)]
+  unname(vapply(periodes, function(p) {
+    if (identical(p, recente)) return("la normale actuelle")
+    age <- 5 * round((annee - mean(.periode_bornes(p))) / 5)
+    paste0("il y a environ ", age, " ans")
+  }, character(1)))
+}
+
+# Date d'un clic plotly sur un axe temporel. Selon la conversion ggplotly et le
+# navigateur, le x d'event_data arrive en chaîne ISO (« 2003-08-12 »), en
+# date-heure (« 2003-08-12 00:00:00 »), en millisecondes/secondes depuis epoch,
+# ou en jours depuis 1970 — on discrimine les formes numériques par leur ordre
+# de grandeur. Renvoie une Date (NA si illisible). Pure, testable.
+date_click_plotly <- function(x) {
+  if (is.null(x) || length(x) == 0) return(as.Date(NA))
+  x <- x[1]
+  if (is.numeric(x)) {
+    if (!is.finite(x)) return(as.Date(NA))
+    d <- if (x > 1e11) as.POSIXct(x / 1000, origin = "1970-01-01", tz = "UTC")
+         else if (x > 1e8) as.POSIXct(x, origin = "1970-01-01", tz = "UTC")
+         else return(as.Date(round(x), origin = "1970-01-01"))
+    return(as.Date(d, tz = "UTC"))
+  }
+  # as.Date.character LÈVE une erreur (pas un NA) sur une chaîne non reconnue.
+  tryCatch(as.Date(substr(as.character(x), 1, 10)), error = function(e) as.Date(NA))
+}
+
+# --- Permaliens & navigation inter-onglets ------------------------------------
+# Slugs des onglets dans l'URL (?onglet=...). Source de vérité des `value` des
+# nav_panel de ui.R et des cibles de nav_select (server.R).
+ONGLETS_APP <- c("quiz", "comparer", "jour", "evolution", "methodo")
+
+# Construit la query string d'un permalien (?onglet=...&ville=...&date=...&annee=...)
+# à partir de l'onglet actif et de l'état du module affiché (liste avec, au choix,
+# ville / date / annee ; les champs NULL sont omis). Encodage URL complet des
+# valeurs (accents, espaces). Pure, testable.
+construire_query_string <- function(onglet, etat = NULL) {
+  params <- c(onglet = onglet)
+  if (!is.null(etat)) {
+    if (!is.null(etat$ville) && nzchar(etat$ville))
+      params <- c(params, ville = as.character(etat$ville))
+    if (!is.null(etat$date))
+      params <- c(params, date = format(as.Date(etat$date), "%Y-%m-%d"))
+    if (!is.null(etat$annee))
+      params <- c(params, annee = as.character(etat$annee))
+  }
+  valeurs <- vapply(params, utils::URLencode, character(1), reserved = TRUE)
+  paste0("?", paste0(names(params), "=", valeurs, collapse = "&"))
+}
+
+# URL de base de l'app (protocole, hôte, port non standard, chemin) reconstituée
+# depuis le clientData d'une session Shiny. Sert aux liens absolus (défi de série).
+url_base_app <- function(session) {
+  cd <- session$clientData
+  port <- cd$url_port
+  suffixe_port <- if (!is.null(port) && nzchar(port) && !port %in% c("80", "443"))
+    paste0(":", port) else ""
+  paste0(cd$url_protocol, "//", cd$url_hostname, suffixe_port, cd$url_pathname)
+}
+
+# --- Défi de série : (dé)sérialisation d'une série dans un lien ----------------
+# Une série jouée peut être envoyée à un ami sous forme de lien (?defi=<payload>) :
+# il rejoue EXACTEMENT les mêmes questions. Format texte compact (URL-encodé par
+# l'appelant) :
+#   "v1;periode;score;manche;manche;..."
+#   manche = "ville~AAAA-MM-JJ~temp~c~normale"  (c = index dans CATEGORIES_QUIZ)
+# Fonctions pures, testables.
+serialiser_defi <- function(serie, periode, score = NA_integer_) {
+  manches <- vapply(serie, function(q) paste(
+    q$city,
+    format(as.Date(q$date), "%Y-%m-%d"),
+    sprintf("%.1f", q$temp),
+    match(q$correct_answer, CATEGORIES_QUIZ),
+    sprintf("%.1f", q$normale_moy),
+    sep = "~"), character(1))
+  paste(c("v1", periode,
+          if (is.na(score)) "" else as.character(as.integer(score)),
+          manches), collapse = ";")
+}
+
+# Relit un payload de défi et le valide STRICTEMENT (ville connue, date lisible,
+# température plausible, catégorie dans les bornes, 1 à 15 manches) : renvoie
+# list(periode, score, serie) ou NULL si quoi que ce soit cloche — le lien vient
+# de l'extérieur, il ne doit jamais pouvoir casser l'app ni y injecter du texte.
+deserialiser_defi <- function(chaine, villes_valides, periodes_valides) {
+  if (is.null(chaine) || !is.character(chaine) || length(chaine) != 1) return(NULL)
+  bits <- strsplit(chaine, ";", fixed = TRUE)[[1]]
+  if (length(bits) < 4 || !identical(bits[1], "v1")) return(NULL)
+  periode <- bits[2]
+  if (!periode %in% periodes_valides) return(NULL)
+  score <- suppressWarnings(as.integer(bits[3]))   # NA si absent : score facultatif
+  brutes <- bits[-(1:3)]
+  if (length(brutes) < 1 || length(brutes) > 15) return(NULL)
+  manches <- lapply(brutes, function(m) {
+    ch <- strsplit(m, "~", fixed = TRUE)[[1]]
+    if (length(ch) != 5) return(NULL)
+    d    <- suppressWarnings(as.Date(ch[2]))
+    temp <- suppressWarnings(as.numeric(ch[3]))
+    ci   <- suppressWarnings(as.integer(ch[4]))
+    nm   <- suppressWarnings(as.numeric(ch[5]))
+    if (!ch[1] %in% villes_valides || length(d) != 1 || is.na(d) ||
+        !is.finite(temp) || temp < -45 || temp > 55 ||
+        is.na(ci) || ci < 1 || ci > length(CATEGORIES_QUIZ) || !is.finite(nm)) return(NULL)
+    list(city = ch[1], date = d, temp = temp,
+         correct_answer = CATEGORIES_QUIZ[ci], normale_moy = nm)
+  })
+  if (any(vapply(manches, is.null, logical(1)))) return(NULL)
+  if (!is.na(score) && (score < 0 || score > length(manches))) score <- NA_integer_
+  list(periode = periode, score = score, serie = manches)
+}
+
+# Réchauffement (°C) « depuis une année d'origine » à partir des anomalies
+# annuelles d'une ville : moyenne des anomalies des `fenetre` dernières années
+# disponibles MOINS moyenne sur la fenêtre de même taille centrée sur l'année
+# d'origine (couvrant exactement `fenetre` années, parité comprise). Chaque
+# moyenne exige au moins `min_annees` valeurs (séries trouées) ; NA_real_ sinon.
+# `anomalies` : data.frame(annee, anomalie). Sert à l'accroche « jour de ma
+# naissance » (15 ans) et aux rayures climatiques (30 ans, cohérent avec
+# l'« Analyse du réchauffement » de l'onglet Évolution). Pure.
+rechauffement_depuis <- function(anomalies, annee_origine, fenetre = 15, min_annees = 8) {
+  if (is.null(anomalies) || nrow(anomalies) == 0 || !is.finite(annee_origine))
+    return(NA_real_)
+  a <- anomalies[is.finite(anomalies$annee) & is.finite(anomalies$anomalie), ]
+  a <- a[order(a$annee), ]
+  if (nrow(a) == 0) return(NA_real_)
+  demi <- (fenetre - 1) %/% 2
+  origine <- a$anomalie[a$annee >= annee_origine - demi &
+                        a$annee <= annee_origine + (fenetre - 1 - demi)]
+  recentes <- utils::tail(a$anomalie, fenetre)
+  if (length(origine) < min_annees || length(recentes) < min_annees) return(NA_real_)
+  mean(recentes) - mean(origine)
+}
 
 # Rang d'une valeur dans une distribution (onglet « Une journée »). Sur le vecteur
 # des tmax de la fenêtre ±7 j (toutes années), renvoie :

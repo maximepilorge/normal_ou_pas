@@ -21,6 +21,8 @@ mod_analyse_ui <- function(id) {
     tags$head(tags$style(HTML("
       .evolution-plot-wrap { height: 500px; }
       @media (max-width: 575.98px) { .evolution-plot-wrap { height: 420px; } }
+      /* Les barres du graphe d'évolution sont cliquables (bascule Comparaison). */
+      .evolution-plot-wrap .nsewdrag { cursor: pointer !important; }
     "))),
     div(
       class = "p-2",
@@ -41,8 +43,10 @@ mod_analyse_ui <- function(id) {
             sliderInput(ns("annee_range_analyse"), "Période d'analyse :",
                         min = an_min_data, max = an_max_data,
                         value = c(an_min_data, an_max_data), sep = ""),
-            pickerInput(ns("periode_ref_analyse"), "Période de référence (normale) :",
-                        choices = periodes_disponibles, selected = periodes_disponibles[1],
+            pickerInput(ns("periode_ref_analyse"), "Époque de référence :",
+                        choices = periodes_disponibles,
+                        selected = periodes_disponibles[1],
+                        choicesOpt = list(subtext = soustitres_periodes(periodes_disponibles)),
                         options = list(container = "body", `live-search` = FALSE))
           ),
           helpText("Chaque barre indique l'écart de la moyenne annuelle des températures maximales par rapport à la normale de la période de référence choisie.")
@@ -55,6 +59,10 @@ mod_analyse_ui <- function(id) {
         uiOutput(ns("analyse_rechauffement_ui")),
         div(class = "evolution-plot-wrap",
             plotlyOutput(ns("evolution_plot"), height = "100%")),
+        div(class = "text-center mt-2 mb-1",
+            actionButton(ns("stripes_btn"),
+                         "Partager les rayures climatiques de cette ville",
+                         icon = icon("share-nodes"), class = "btn-outline-primary")),
         card_footer(
           info_repliable(HTML(paste(
             "Ces indicateurs reposent sur les températures <b>maximales</b> journalières",
@@ -83,7 +91,14 @@ mod_analyse_ui <- function(id) {
             "régionales</b>."
           )))
         )
-      )
+      ),
+
+      # Boucle de circulation : l'analyse débouche sur le jeu (cycle complet
+      # quiz -> journée -> comparaison -> évolution -> quiz).
+      div(class = "text-center mt-1 mb-2",
+          actionLink(ns("quiz_ville_btn"),
+                     label = tagList(icon("dice"),
+                                     " Testez vos repères sur cette ville avec le quiz")))
     )
   )
 }
@@ -92,10 +107,18 @@ mod_analyse_ui <- function(id) {
 # --- SERVER MIS À JOUR ---
 # Remplacez l'intégralité de l'ancienne fonction mod_analyse_server par celle-ci
 
-mod_analyse_server <- function(id, db_pool) {
+mod_analyse_server <- function(id, db_pool, prefill = reactive(NULL), naviguer = NULL) {
   moduleServer(id, function(input, output, session) {
-    
+
     ns <- session$ns
+
+    # Pré-remplissage de la ville (permalien ?onglet=evolution&ville=... ou lien
+    # interne depuis le bilan du quiz).
+    observeEvent(prefill(), {
+      pf <- prefill()
+      req(pf, pf$ville)
+      updatePickerInput(session, "ville_analyse", selected = pf$ville)
+    })
 
     # Largeur réelle (px) du graphe d'évolution, transmise par le client.
     # Booléen (et non largeur brute) pour ne ré-invalider le rendu qu'au
@@ -226,7 +249,14 @@ mod_analyse_server <- function(id, db_pool) {
 
     }, ignoreNULL = TRUE)
     
+    # Garde anti-course : ne rend jamais un graphe dans un conteneur de taille
+    # nulle (arrivée par permalien/navigation programmée en pleine transition).
+    dims_evolution_ok <- reactive({
+      dimensions_valides(session, ns("evolution_plot"))
+    })
+
     output$evolution_plot <- renderPlotly({
+      req(dims_evolution_ok())
       df_anom <- anomalies_annuelles()
       req(nrow(df_anom) > 0)
 
@@ -275,7 +305,7 @@ mod_analyse_server <- function(id, db_pool) {
         theme_minimal(base_size = taille_police) +
         theme(legend.position = "bottom")
 
-      gp <- ggplotly(p, tooltip = "text") %>%
+      gp <- ggplotly(p, tooltip = "text", source = ns("evo_clic")) %>%
         # Axes verrouillés (pas de zoom/déplacement) ; ticks X imposés ; légende
         # en bande horizontale compacte au-dessus du graphe.
         layout(
@@ -310,13 +340,22 @@ mod_analyse_server <- function(id, db_pool) {
         }
       }
 
-      gp
+      # Chaque BARRE porte son année (customdata) : le clic bascule vers
+      # Comparaison sur (ville, année) — cf. l'observeEvent plus bas. Posé ici
+      # (et non via aes) pour ne cibler que les barres : un clic sur la courbe
+      # de tendance ou un à-côté ne navigue pas.
+      for (i in seq_along(gp$x$data)) {
+        if (identical(gp$x$data[[i]]$type, "bar"))
+          gp$x$data[[i]]$customdata <- round(as.numeric(gp$x$data[[i]]$x))
+      }
+      plotly::event_register(gp, "plotly_click")
     }) %>%
       bindCache(
         input$ville_analyse,
         input$annee_range_analyse,
         input$periode_ref_analyse,
-        est_mobile_evolution()
+        est_mobile_evolution(),
+        dims_evolution_ok()
       )
     
     # Texte « Analyse du réchauffement » — affiché JUSTE AU-DESSUS du graphe
@@ -398,8 +437,26 @@ mod_analyse_server <- function(id, db_pool) {
         HTML(paste0("Évolution des températures maximales à <strong>",
                     input$ville_analyse, "</strong>")),
         tags$div(class = "small text-muted fw-normal",
-                 paste0("Écart annuel à la normale ", input$periode_ref_analyse))
+                 paste0("Écart annuel à la normale ", input$periode_ref_analyse,
+                        " · cliquez une année pour l'explorer en détail"))
       )
+    })
+
+    # Clic sur une barre du graphe d'évolution -> onglet Comparaison, sous-vue
+    # « Dans l'année », pré-remplie sur (ville, année cliquée). Seules les barres
+    # portent un customdata (posé au rendu) : tout autre clic est ignoré.
+    # suppressWarnings : avant le premier rendu du graphe, event_data avertit que
+    # la source n'est pas encore enregistrée — bruit de log sans intérêt.
+    observeEvent(suppressWarnings(
+      plotly::event_data("plotly_click", source = ns("evo_clic"),
+                         priority = "event")), {
+      d <- suppressWarnings(
+        plotly::event_data("plotly_click", source = ns("evo_clic")))
+      annee <- suppressWarnings(as.integer(d$customdata[1]))
+      req(length(annee) == 1, is.finite(annee),
+          annee >= an_min_data, annee <= an_max_data)
+      if (is.function(naviguer))
+        naviguer("comparer", ville = input$ville_analyse, annee = annee, vue = "courbe")
     })
 
     output$titre_forte_chaleur <- renderUI({
@@ -418,6 +475,8 @@ mod_analyse_server <- function(id, db_pool) {
     # Graphe DIVERGENT fusionné : forte chaleur (P90) vers le haut, gel (≤0°C)
     # vers le bas ; décennies observées + horizons projetés (médiane TRACC).
     output$forte_chaleur_plot <- renderPlot({
+      # Garde anti-course (cf. « figure margins too large » sur rendu à taille nulle).
+      req(dimensions_valides(session, ns("forte_chaleur_plot")))
       df   <- indicateurs_ville()
       proj <- extremes_proj_ville()
       obs_ok  <- !is.null(df) && nrow(df) > 0 && "jours_forte_chaleur" %in% names(df)
@@ -487,6 +546,55 @@ mod_analyse_server <- function(id, db_pool) {
         p <- p + geom_vline(xintercept = nrow(obs) + 0.5, linetype = "dashed", color = "grey55")
       p
     })
+
+    # --- Partage « rayures climatiques » de la ville -------------------------
+    # Bandes annuelles 1950 -> aujourd'hui : écart à la normale la plus ancienne
+    # (periode_ref_carte, celle de la trajectoire de l'onglet Comparer), rendu en
+    # carte PNG 1200×630 dans le modal de partage commun.
+    observeEvent(input$stripes_btn, {
+      v <- input$ville_analyse
+      req(v)
+      anoms <- obtenir_anomalies_villes_annee()
+      av <- if (is.null(anoms)) NULL
+            else anoms[anoms$ville == v & anoms$n_jours >= 300, ]
+      if (is.null(av) || nrow(av) < 15) {
+        showNotification("Données insuffisantes pour générer les rayures de cette ville.",
+                         type = "warning")
+        return()
+      }
+      av <- av[order(av$annee), ]
+      # 30 ans vs 30 ans (premières/dernières années de la série) : le même
+      # cadrage que l'« Analyse du réchauffement » affichée en tête d'onglet,
+      # pour que les deux chiffres racontent la même chose.
+      rech <- rechauffement_depuis(av[, c("annee", "anomalie")],
+                                   min(av$annee) + 14, fenetre = 30)
+      params <- list(ville = v, annees = av$annee, anomalies = av$anomalie,
+                     periode_ref = periode_ref_carte, rechauffement = rech)
+      f <- tempfile(fileext = ".png")
+      sauver_carte_stripes(params, f)
+      on.exit(unlink(f), add = TRUE)
+      data_uri <- paste0("data:image/png;base64,",
+                         jsonlite::base64_enc(readBin(f, "raw", n = file.info(f)$size)))
+      texte <- paste0("Les rayures climatiques ", autour_de(v), " : ",
+                      if (is.finite(rech) && rech > 0)
+                        paste0("environ +", fmt_temp(rech), " °C depuis ", min(av$annee), ". ")
+                      else "",
+                      "Chaque bande, une année. Et chez vous ? normal-ou-pas.com")
+      nom_fichier <- paste0("normal-ou-pas_rayures_", gsub("[^A-Za-z0-9]+", "_", v), ".png")
+      showModal(modal_partage(data_uri, texte, nom_fichier,
+                              titre = "Partager les rayures climatiques"))
+    })
+
+    # Rebond vers le quiz, pré-réglé sur la ville analysée (referme le cycle).
+    observeEvent(input$quiz_ville_btn, {
+      req(input$ville_analyse)
+      if (is.function(naviguer)) naviguer("quiz", ville = input$ville_analyse)
+    })
+
+    # État exposé à server.R pour le permalien (?onglet=evolution&ville=...).
+    return(list(
+      etat_url = reactive(list(ville = input$ville_analyse))
+    ))
 
   })
 }

@@ -65,3 +65,33 @@ test_that("sauver_carte_jour produit un PNG non vide", {
   expect_true(file.exists(f))
   expect_gt(file.info(f)$size, 1000)
 })
+
+test_that("dessiner_carte_stripes retourne un ggplot et tolère les données lacunaires", {
+  p <- dessiner_carte_stripes(list(
+    ville = "Nantes", annees = 1950:2025,
+    anomalies = seq(-0.5, 1.6, length.out = 76),
+    periode_ref = "1951-1980", rechauffement = 1.8))
+  expect_s3_class(p, "ggplot")
+  # NA épars et réchauffement absent : la carte se dessine quand même.
+  anoms <- c(NA, seq(-0.3, 1.2, length.out = 30), NA)
+  p2 <- dessiner_carte_stripes(list(
+    ville = "Avignon", annees = 1994:2025, anomalies = anoms,
+    periode_ref = "1951-1980"))
+  expect_s3_class(p2, "ggplot")
+  # Anomalies toutes nulles : bornes de palette dégénérées gérées.
+  p3 <- dessiner_carte_stripes(list(
+    ville = "Le Havre", annees = 2000:2020, anomalies = rep(0, 21),
+    periode_ref = "1951-1980"))
+  expect_s3_class(p3, "ggplot")
+})
+
+test_that("sauver_carte_stripes produit un PNG non vide", {
+  f <- tempfile(fileext = ".png")
+  on.exit(unlink(f), add = TRUE)
+  sauver_carte_stripes(list(
+    ville = "Paris", annees = 1950:2025,
+    anomalies = (0:75) * 0.025, periode_ref = "1951-1980",
+    rechauffement = 1.6), f)
+  expect_true(file.exists(f))
+  expect_gt(file.info(f)$size, 1000)
+})
