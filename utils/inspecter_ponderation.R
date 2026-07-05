@@ -1,44 +1,57 @@
 # utils/inspecter_ponderation.R
 #
-# INSPECTEUR DE PONDÉRATION — outil Shiny de contrôle qualité (hors app, hors
-# Docker) : confirme visuellement que la température d'une ville est bien la
-# moyenne pondérée par surface des mailles ERA5-Land recouvrant sa commune.
+# INSPECTEUR DE DONNÉES SOURCES — outil Shiny de contrôle qualité (hors app,
+# hors Docker) : confirme visuellement que les températures d'une ville sont
+# fidèles aux données brutes, pour les DEUX sources du projet.
 #
 #   Rscript utils/inspecter_ponderation.R        # http://127.0.0.1:5001
 #
-# Pour une ville et un jour donnés :
-#   - carte : contour communal + mailles colorées par température (extrêmes du
-#     jour ou heure par heure), étiquetées M1..Mn avec leur poids ;
+# Source « ERA5-Land (observé) » — moyenne pondérée par surface :
+#   - carte : contour communal + mailles 0,1° colorées par température (extrêmes
+#     du jour ou heure par heure UTC), étiquetées M1..Mn avec leur poids ;
 #   - tableau par maille : tmin/tmax du jour, surface de la maille, surface
 #     intersectant la commune, poids recalculé ici vs poids du pipeline ;
-#   - tableau horaire : température de chaque maille heure par heure (UTC,
-#     la convention du pipeline) + moyenne pondérée de chaque heure ;
-#   - panneau de vérification : tmax/tmin pondérées RECALCULÉES ICI, confrontées
-#     à la fonction du pipeline (traiter_fichier_horaire), au RDS de staging
+#   - tableau horaire : chaque maille heure par heure + moyenne pondérée ;
+#   - vérification : tmax/tmin pondérées RECALCULÉES ICI, confrontées à la
+#     fonction du pipeline (traiter_fichier_horaire), au RDS de staging
 #     (era5_temperatures_france.rds) et à la BDD (temperatures_max).
+#   Rappel méthodo : le pipeline moyenne les EXTRÊMES JOURNALIERS par maille
+#   (max/min des 24 h UTC), pas les heures. Les NetCDF horaires étant supprimés
+#   après agrégation, le jour inspecté est re-téléchargé via le CDS (bbox de la
+#   commune, ~1-5 min) puis mis en cache dans data/verif_mailles/.
 #
-# Rappel méthodo : le pipeline calcule d'abord les EXTRÊMES JOURNALIERS de
-# chaque maille (max/min des 24 h UTC), puis leur moyenne pondérée — il ne
-# moyenne pas les heures. La vue horaire sert à inspecter la matière première.
+# Source « DRIAS (projections) » — POINT LE PLUS PROCHE (pas de pondération) :
+#   - carte : contour communal + points de grille 8 km voisins (emprise ~8 km)
+#     colorés par tasmax/tasmin du jour ; le point RETENU par le pipeline
+#     (règle : minimum de (Δlon² + Δlat²) vs le centre-ville) est surligné ;
+#   - tableau par point : valeur du jour, distance au centre-ville, retenu ou
+#     non — signale aussi si le plus proche « en km » diffère du retenu ;
+#   - série ±7 jours du point retenu : recalcul vs cache RDS (contrôle de
+#     l'alignement des dates, calendriers de modèles) ;
+#   - vérification : valeurs au point RECALCULÉES ICI, confrontées à la fonction
+#     du pipeline (lire_serie_drias) et au cache data/drias_villes_5sims.rds.
+#     Pas de ligne BDD : la base ne stocke que des agrégats DRIAS (deltas ±7 j,
+#     canicules), pas de série journalière.
 #
-# Les NetCDF horaires étant supprimés après agrégation par le pipeline, l'outil
-# re-télécharge le jour inspecté via le CDS (bbox de la commune, ~1-5 min) et le
-# met en cache dans data/verif_mailles/ (chargements suivants instantanés).
-# Prérequis : .Renviron (KEY_CDS ; DB_* facultatifs pour la comparaison BDD) et
-# data/villes_et_mailles_associees.rds (l'association produite par le pipeline).
+# Prérequis : .Renviron (KEY_CDS pour ERA5 ; DB_* facultatifs),
+# data/villes_et_mailles_associees.rds, et pour DRIAS les .nc dans
+# data/drias_raw/ (+ data/drias_villes_5sims.rds pour la comparaison cache).
 
 library(shiny)
 library(leaflet)
 
 # Fonctions du pipeline : villes_insee, construire_cellules_era5,
-# charger_contour_commune (definir_mailles_communes.R, sourcé en cascade) et
-# traiter_fichier_horaire (agrégation de référence). Les gardes sys.nframe()
-# garantissent qu'aucun téléchargement ne part au source().
+# charger_contour_commune, traiter_fichier_horaire (ERA5) ; decoder_temps_nc,
+# identifier_var_donnees, localiser_point_drias, lire_serie_drias,
+# parser_meta_drias, DRIAS_RAW_DIR (DRIAS). Les gardes sys.nframe()
+# garantissent qu'aucun téléchargement/extraction ne part au source().
 source(here::here("utils", "telecharger_data.R"))
+source(here::here("utils", "telecharger_drias.R"))
 
-CHEMIN_ASSOC  <- here::here("data", "villes_et_mailles_associees.rds")
-CHEMIN_RDS    <- here::here("data", "era5_temperatures_france.rds")
-DOSSIER_CACHE <- here::here("data", "verif_mailles")
+CHEMIN_ASSOC     <- here::here("data", "villes_et_mailles_associees.rds")
+CHEMIN_RDS       <- here::here("data", "era5_temperatures_france.rds")
+CHEMIN_DRIAS_RDS <- here::here("data", "drias_villes_5sims.rds")
+DOSSIER_CACHE    <- here::here("data", "verif_mailles")
 dir.create(DOSSIER_CACHE, showWarnings = FALSE)
 
 if (!file.exists(CHEMIN_ASSOC))
@@ -46,8 +59,30 @@ if (!file.exists(CHEMIN_ASSOC))
        ") — lancer d'abord le pipeline (telecharger_data.R).")
 assoc_pipeline <- readRDS(CHEMIN_ASSOC)
 
-# RDS de staging (facultatif : comparaison seulement).
+# RDS de staging ERA5 (facultatif : comparaison seulement).
 staging <- if (file.exists(CHEMIN_RDS)) readRDS(CHEMIN_RDS) else NULL
+
+# Catalogue des NetCDF DRIAS présents (métadonnées de nom de fichier, sans
+# ouverture) : un fichier par (variable, simulation, scénario).
+catalogue_drias <- {
+  fichiers <- list.files(DRIAS_RAW_DIR, pattern = "[.]nc$", full.names = TRUE)
+  if (length(fichiers) == 0) NULL else
+    bind_rows(lapply(fichiers, function(f) {
+      m <- parser_meta_drias(f)
+      tibble(fichier = f, variable = m$variable, scenario = m$scenario,
+             simulation = m$simulation)
+    }))
+}
+drias_dispo <- !is.null(catalogue_drias)
+
+# Cache DRIAS par ville (séries extraites par le pipeline) : ~260 Mo, chargé
+# PARESSEUSEMENT à la première vérification DRIAS puis gardé en mémoire.
+.env_drias <- new.env()
+cache_drias_villes <- function() {
+  if (is.null(.env_drias$series) && file.exists(CHEMIN_DRIAS_RDS))
+    .env_drias$series <- readRDS(CHEMIN_DRIAS_RDS)
+  .env_drias$series
+}
 
 # Connexion BDD facultative (comparaison au chiffre servi par l'app),
 # PARESSEUSE et auto-réparante : (re)tentée à chaque vérification si absente ou
@@ -70,7 +105,7 @@ connexion_bdd <- function() {
 shiny::onStop(function()
   if (!is.null(.env_bdd$con)) try(DBI::dbDisconnect(.env_bdd$con), silent = TRUE))
 
-# Clé CDS (facultative tant qu'on reste sur des jours déjà en cache).
+# Clé CDS (facultative tant qu'on reste sur des jours ERA5 déjà en cache).
 cds_ok <- tryCatch({
   wf_set_key(key = Sys.getenv("KEY_CDS"), user = "maxp17.mp@gmail.com"); TRUE
 }, error = function(e) FALSE)
@@ -126,7 +161,7 @@ analyser_geometrie_ville <- function(v) {
          aire_commune_km2 = as.numeric(st_area(st_transform(emprise, 2154))) / 1e6)
 }
 
-# --- Lecture HORAIRE indépendante d'un NetCDF CDS ------------------------------
+# --- Lecture HORAIRE indépendante d'un NetCDF CDS (ERA5) -----------------------
 # Volontairement distincte de traiter_fichier_horaire (qu'on veut contrôler) :
 # mêmes conventions (variable au plus de dimensions, Kelvin, axe « since »,
 # coordonnées arrondies au centième) mais ré-implémentées. Renvoie une ligne
@@ -161,7 +196,7 @@ lire_horaires_nc <- function(nc_path, coords) {
   }))
 }
 
-# --- Téléchargement CDS d'UN jour sur la bbox de la ville ----------------------
+# --- Téléchargement CDS d'UN jour ERA5 sur la bbox de la ville -----------------
 telecharger_jour_cds <- function(cellules, date, cible) {
   if (!cds_ok) stop("Clé CDS indisponible (KEY_CDS dans .Renviron).")
   bb <- st_bbox(cellules)
@@ -189,58 +224,167 @@ telecharger_jour_cds <- function(cellules, date, cible) {
   cible
 }
 
+# --- Voisinage DRIAS : points de grille autour de la ville, valeurs d'un jour --
+# Lecture INDÉPENDANTE de localiser_point_drias (qu'on veut contrôler) : on
+# énumère les points de la grille (layouts B curvilinéaire / C aplati / A
+# régulier), on garde les voisins du centre-ville, on lit la valeur du jour de
+# chacun (slab 1×1×1) et la série complète du point RETENU. Le point retenu
+# applique la même règle que le pipeline : minimum de (Δlon² + Δlat²), en
+# degrés. La distance en km (équirectangulaire) est fournie à titre de contrôle
+# — si le plus proche « en km » diffère du retenu, l'outil le signale.
+lire_voisinage_drias <- function(nc_path, lon_v, lat_v, date_cible,
+                                 rayon_km = 15, n_min = 9) {
+  nc <- nc_open(nc_path)
+  on.exit(nc_close(nc), add = TRUE)
+
+  tps <- decoder_temps_nc(nc)
+  it <- match(as.Date(date_cible), tps$dates)
+  if (is.na(it)) return(list(erreur = sprintf(
+    "Le %s est absent de ce fichier (couverture %s → %s).",
+    format(as.Date(date_cible), "%d/%m/%Y"), min(tps$dates), max(tps$dates))))
+
+  m <- parser_meta_drias(nc_path)
+  nom_var <- identifier_var_donnees(nc, indice = m$variable)
+  unites <- tryCatch(ncatt_get(nc, nom_var, "units")$value, error = function(e) "")
+  kelvin <- is.character(unites) && grepl("^k", tolower(unites))
+  nom_temps <- tps$nom
+
+  # Énumération des points : lon/lat + indices à figer pour chaque point.
+  noms_var <- names(nc$var)
+  nom_lon <- intersect(c("lon", "longitude"), noms_var)[1]
+  nom_lat <- intersect(c("lat", "latitude"), noms_var)[1]
+  if (is.na(nom_lon) || is.na(nom_lat))
+    stop("Variables lat/lon introuvables — lancer inspecter_drias_nc().")
+  lon2 <- ncvar_get(nc, nom_lon); lat2 <- ncvar_get(nc, nom_lat)
+  dims_lon <- vapply(nc$var[[nom_lon]]$dim, `[[`, "", "name")
+
+  if (length(dim(lon2)) == 2) {                      # (B) curvilinéaire
+    pts <- tibble(lon = as.numeric(lon2), lat = as.numeric(lat2),
+                  i = rep(seq_len(nrow(lon2)), times = ncol(lon2)),
+                  j = rep(seq_len(ncol(lon2)), each = nrow(lon2)))
+    fixes <- function(p) setNames(list(p$i, p$j), dims_lon)
+  } else if (length(dims_lon) == 1 &&
+             identical(dims_lon, vapply(nc$var[[nom_lat]]$dim, `[[`, "", "name"))) {
+    pts <- tibble(lon = as.numeric(lon2), lat = as.numeric(lat2),  # (C) aplati
+                  i = seq_along(lon2), j = NA_integer_)
+    fixes <- function(p) setNames(list(p$i), dims_lon)
+  } else {                                           # (A) grille régulière
+    pts <- tibble(lon = rep(as.numeric(lon2), times = length(lat2)),
+                  lat = rep(as.numeric(lat2), each = length(lon2)),
+                  i = rep(seq_along(lon2), times = length(lat2)),
+                  j = rep(seq_along(lat2), each = length(lon2)))
+    fixes <- function(p) setNames(list(p$i, p$j),
+                                  c(dims_lon, vapply(nc$var[[nom_lat]]$dim, `[[`, "", "name")))
+  }
+
+  pts <- pts %>%
+    mutate(dist2_deg = (lon - lon_v)^2 + (lat - lat_v)^2,
+           dist_km = sqrt((111.320 * cos(lat_v * pi / 180) * (lon - lon_v))^2 +
+                          (110.574 * (lat - lat_v))^2))
+  # Voisinage : tous les points sous rayon_km, complétés aux n_min plus proches.
+  garder <- pts$dist_km <= rayon_km
+  garder[order(pts$dist_km)[seq_len(min(n_min, nrow(pts)))]] <- TRUE
+  voisins <- pts[garder, ] %>% arrange(dist_km)
+  voisins$retenu <- with(voisins, dist2_deg == min(pts$dist2_deg))
+
+  # Valeur du jour de chaque voisin + série complète du point retenu.
+  lire_point <- function(p, seulement_jour = TRUE) {
+    ind <- fixes(p)
+    if (seulement_jour) ind[[nom_temps]] <- it
+    v <- faire_extracteur_drias(nc, ind)(nom_var, tps$n)
+    if (kelvin) v <- v - 273.15
+    v
+  }
+  voisins$valeur <- vapply(seq_len(nrow(voisins)),
+                           function(k) lire_point(voisins[k, ])[1], numeric(1))
+  p_ret <- voisins[voisins$retenu, ][1, ]
+  serie_retenu <- tibble(date = tps$dates,
+                         valeur = lire_point(p_ret, seulement_jour = FALSE))
+
+  list(voisins = voisins, serie_retenu = serie_retenu,
+       variable = m$variable, point_retenu = p_ret)
+}
+
 fmt1 <- function(x, dec = 3) ifelse(is.finite(x), format(round(x, dec), nsmall = dec, decimal.mark = ","), "—")
 
 # =================================== UI ========================================
 ui <- fluidPage(
-  titlePanel("Inspecteur de pondération — mailles ERA5-Land par commune"),
+  titlePanel("Inspecteur des données sources — ERA5-Land & DRIAS par commune"),
   p(class = "text-muted", style = "max-width: 1100px;",
-    "Contrôle qualité : la température d'une ville doit être la moyenne des mailles ",
-    "ERA5-Land recouvrant sa commune, pondérée par la surface communale couverte. ",
-    "Le pipeline moyenne les extrêmes JOURNALIERS de chaque maille (max/min des 24 h UTC), ",
-    "pas les heures — la vue horaire sert à inspecter la matière première."),
+    "Contrôle qualité des extractions par ville. ERA5-Land (observé) : moyenne des ",
+    "mailles 0,1° recouvrant la commune, pondérée par la surface couverte — le ",
+    "pipeline moyenne les extrêmes JOURNALIERS de chaque maille (max/min des 24 h ",
+    "UTC). DRIAS (projections) : valeur du point de grille 8 km le plus proche du ",
+    "centre-ville, sans pondération."),
   fluidRow(
     column(3,
       wellPanel(
+        radioButtons("source_donnees", "Source :",
+                     choices = c("ERA5-Land (observé)" = "era5",
+                                 "DRIAS (projections)" = "drias"),
+                     inline = TRUE),
         selectInput("ville", "Ville :", choices = sort(villes_insee$ville), selected = "Lyon"),
         dateInput("date", "Jour :", value = "2003-08-12",
                   min = "1950-01-01", max = Sys.Date() - 6,
                   format = "dd/mm/yyyy", language = "fr", weekstart = 1),
-        uiOutput("etat_cache"),
-        actionButton("charger_btn", "Charger les températures de ce jour",
-                     class = "btn-primary", width = "100%"),
-        radioButtons("mode", "Colorer les mailles par :",
-                     choices = c("Tmax du jour" = "tmax", "Tmin du jour" = "tmin",
-                                 "Température d'une heure" = "heure")),
-        conditionalPanel("input.mode == 'heure'",
-          sliderInput("heure", "Heure (UTC) :", min = 0, max = 23, value = 14, step = 1))
+        conditionalPanel("input.source_donnees == 'era5'",
+          uiOutput("etat_cache"),
+          actionButton("charger_btn", "Charger les températures de ce jour",
+                       class = "btn-primary", width = "100%"),
+          radioButtons("mode", "Colorer les mailles par :",
+                       choices = c("Tmax du jour" = "tmax", "Tmin du jour" = "tmin",
+                                   "Température d'une heure" = "heure")),
+          conditionalPanel("input.mode == 'heure'",
+            sliderInput("heure", "Heure (UTC) :", min = 0, max = 23, value = 14, step = 1))
+        ),
+        conditionalPanel("input.source_donnees == 'drias'",
+          selectInput("simulation", "Simulation (GCM/RCM) :", choices = NULL),
+          radioButtons("mode_drias", "Colorer les points par :",
+                       choices = c("Tasmax (tmax)" = "tasmax", "Tasmin (tmin)" = "tasmin")),
+          p(class = "text-muted small",
+            "Lecture locale des NetCDF de data/drias_raw/ — pas de téléchargement.")
+        )
       ),
       uiOutput("panneau_verif")
     ),
     column(5,
       leafletOutput("carte", height = "560px"),
-      p(class = "text-muted small",
-        "Étiquettes : identifiant de maille · poids pipeline. Mailles grises : écartées ",
-        "(part de surface < 2 %) ou sans donnée chargée.")
+      uiOutput("legende_carte")
     ),
     column(4,
       h4(textOutput("titre_tableau")),
       tableOutput("tableau_mailles"),
-      p(class = "text-muted small",
-        "part brute = surface intersectée / total intersecté ; le poids recalculé écarte ",
-        "les éclats < 2 % puis renormalise — mêmes règles que le pipeline.")
+      uiOutput("note_tableau")
     )
   ),
   fluidRow(
     column(9, offset = 3,
-      h4("Détail horaire (UTC) — température de chaque maille et moyenne pondérée"),
-      tableOutput("tableau_horaire")
+      uiOutput("titre_detail"),
+      tableOutput("tableau_detail")
     )
   )
 )
 
 # ================================= SERVER ======================================
 server <- function(input, output, session) {
+
+  # --- Bascule de source : bornes du calendrier + simulations disponibles ------
+  observeEvent(input$source_donnees, {
+    if (input$source_donnees == "drias") {
+      if (!drias_dispo)
+        showNotification("Aucun NetCDF dans data/drias_raw/ — mode DRIAS indisponible.",
+                         type = "error", duration = 8)
+      sims <- sort(unique(catalogue_drias$simulation))
+      updateSelectInput(session, "simulation", choices = sims, selected = sims[1])
+      # Les projections couvrent 1950-2100 : on élargit, et on propose un jour
+      # de plein réchauffement si la date courante est « observée ».
+      updateDateInput(session, "date", min = "1950-01-01", max = "2100-12-31",
+                      value = if (input$date <= Sys.Date()) as.Date("2085-08-11") else input$date)
+    } else {
+      updateDateInput(session, "date", min = "1950-01-01", max = Sys.Date() - 6,
+                      value = if (input$date > Sys.Date()) as.Date("2003-08-12") else input$date)
+    }
+  })
 
   # Géométrie de la ville (contour + mailles + surfaces + poids), mémoïsée.
   cache_geo <- new.env()
@@ -255,11 +399,17 @@ server <- function(input, output, session) {
     cache_geo[[input$ville]]
   })
 
+  ville_ref <- reactive({
+    req(input$ville)
+    villes_insee[villes_insee$ville == input$ville, ]
+  })
+
+  # =========================== BRANCHE ERA5-LAND ================================
+
   chemin_nc <- reactive({
     req(input$ville, input$date)
-    v <- villes_insee[villes_insee$ville == input$ville, ]
     file.path(DOSSIER_CACHE,
-              sprintf("era5_verif_%s_%s.nc", v$insee, format(input$date, "%Y%m%d")))
+              sprintf("era5_verif_%s_%s.nc", ville_ref()$insee, format(input$date, "%Y%m%d")))
   })
 
   output$etat_cache <- renderUI({
@@ -274,8 +424,9 @@ server <- function(input, output, session) {
   # NetCDF est déjà en cache (relecture locale instantanée).
   declencheur <- reactiveVal(0)
   observeEvent(input$charger_btn, declencheur(declencheur() + 1))
-  observeEvent(list(input$ville, input$date), {
-    if (file.exists(chemin_nc())) declencheur(declencheur() + 1)
+  observeEvent(list(input$ville, input$date, input$source_donnees), {
+    if (input$source_donnees == "era5" && file.exists(chemin_nc()))
+      declencheur(declencheur() + 1)
   })
 
   horaires <- eventReactive(declencheur(), {
@@ -311,7 +462,7 @@ server <- function(input, output, session) {
       summarise(tmax_maille = max(t), tmin_maille = min(t), .groups = "drop")
   })
 
-  # Table maîtresse : géométrie + poids + extrêmes du jour.
+  # Table maîtresse ERA5 : géométrie + poids + extrêmes du jour.
   table_mailles <- reactive({
     g <- geo()
     df <- st_drop_geometry(g$cellules)
@@ -321,7 +472,75 @@ server <- function(input, output, session) {
     df
   })
 
-  # --- Vérification : moyennes pondérées confrontées aux quatre sources -------
+  # =========================== BRANCHE DRIAS ====================================
+
+  # Fichier DRIAS pour (simulation, variable, date) : historical jusqu'à 2005,
+  # rcp85 ensuite (la concaténation du pipeline suit la même règle).
+  fichier_drias <- function(variable) {
+    req(drias_dispo, input$simulation)
+    scen <- if (input$date <= as.Date("2005-12-31")) "historical" else "rcp85"
+    f <- catalogue_drias %>%
+      filter(simulation == input$simulation, variable == !!variable, scenario == scen)
+    if (nrow(f) == 0) return(NULL)
+    f$fichier[1]
+  }
+
+  # Voisinages du jour (tasmax ET tasmin, deux fichiers d'une même grille).
+  voisinage <- reactive({
+    req(input$source_donnees == "drias", input$ville, input$date, input$simulation)
+    v <- ville_ref()
+    lire_un <- function(variable) {
+      f <- fichier_drias(variable)
+      if (is.null(f)) return(list(erreur = paste0(
+        "Aucun fichier ", variable, " pour cette simulation/période dans data/drias_raw/.")))
+      lire_voisinage_drias(f, v$longitude, v$latitude, input$date)
+    }
+    withProgress(message = "Lecture des NetCDF DRIAS…", value = 0.4, {
+      res <- list(tasmax = lire_un("tasmax"), tasmin = lire_un("tasmin"))
+    })
+    res
+  })
+
+  # Cache RDS du pipeline pour (ville, simulation), fenêtre ±7 j.
+  cache_drias_fenetre <- reactive({
+    req(input$source_donnees == "drias")
+    series <- withProgress(cache_drias_villes(),
+                           message = "Chargement du cache DRIAS (~260 Mo, une seule fois)…")
+    if (is.null(series)) return(NULL)
+    series %>%
+      filter(ville == input$ville, simulation == input$simulation,
+             date >= input$date - 7, date <= input$date + 7)
+  })
+
+  # --- Vérification DRIAS : point retenu vs pipeline vs cache RDS --------------
+  verifs_drias <- reactive({
+    vs <- voisinage()
+    req(is.null(vs$tasmax$erreur), is.null(vs$tasmin$erreur))
+    v <- ville_ref()
+
+    recalc <- list(tmax = vs$tasmax$voisins$valeur[vs$tasmax$voisins$retenu][1],
+                   tmin = vs$tasmin$voisins$valeur[vs$tasmin$voisins$retenu][1])
+
+    # Fonction du pipeline (localiser_point_drias + extraction) sur les mêmes nc.
+    pipe <- tryCatch({
+      lire_un <- function(variable) {
+        s <- lire_serie_drias(fichier_drias(variable), v$longitude, v$latitude, variable)
+        s$valeur[s$date == input$date][1]
+      }
+      list(tmax = lire_un("tasmax"), tmin = lire_un("tasmin"))
+    }, error = function(e) list(tmax = NA_real_, tmin = NA_real_))
+
+    cache <- {
+      cf <- cache_drias_fenetre()
+      j <- if (is.null(cf)) NULL else cf[cf$date == input$date, ]
+      list(tmax = if (!is.null(j) && nrow(j)) j$temperature_max[1] else NA_real_,
+           tmin = if (!is.null(j) && nrow(j)) j$temperature_min[1] else NA_real_)
+    }
+
+    list(recalc = recalc, pipe = pipe, cache = cache)
+  })
+
+  # --- Vérification ERA5 : moyennes pondérées confrontées aux quatre sources ---
   verifs <- reactive({
     df <- table_mailles()
     req(any(is.finite(df$tmax_maille)))
@@ -365,166 +584,310 @@ server <- function(input, output, session) {
          pipe = pipe, stag = stag, bdd = bdd, bdd_statut = bdd_statut)
   })
 
+  # --- Panneau de vérification (les deux sources) ------------------------------
+  ligne_verif <- function(nom, val, ref) {
+    if (!is.finite(val)) return(tags$tr(tags$td(nom), tags$td("—"), tags$td("—")))
+    ecart <- val - ref
+    ok <- abs(ecart) < 0.05
+    tags$tr(
+      tags$td(nom),
+      tags$td(paste0(fmt1(val), " °C")),
+      tags$td(style = paste0("color:", if (ok) "#2E8B57" else "#C0392B", "; font-weight:600;"),
+              paste0(if (ok) "✔ " else "✘ ", sprintf("%+.3f", ecart)))
+    )
+  }
+  bloc_verif <- function(titre, lignes) {
+    tags$table(class = "table table-sm mb-2",
+      tags$thead(tags$tr(tags$th(titre), tags$th("Valeur"), tags$th("Écart"))),
+      tags$tbody(lignes))
+  }
+
   output$panneau_verif <- renderUI({
-    v <- tryCatch(verifs(), error = function(e) NULL)
-    if (is.null(v))
-      return(wellPanel(p(class = "text-muted mb-0",
-                         "Chargez un jour pour lancer la vérification.")))
-    ligne <- function(nom, val, ref) {
-      if (!is.finite(val)) return(tags$tr(tags$td(nom), tags$td("—"), tags$td("—")))
-      ecart <- val - ref
-      ok <- abs(ecart) < 0.05
-      tags$tr(
-        tags$td(nom),
-        tags$td(paste0(fmt1(val), " °C")),
-        tags$td(style = paste0("color:", if (ok) "#2E8B57" else "#C0392B", "; font-weight:600;"),
-                paste0(if (ok) "✔ " else "✘ ", sprintf("%+.3f", ecart)))
-      )
+    if (input$source_donnees == "drias") {
+      vs <- tryCatch(voisinage(), error = function(e) NULL)
+      err <- c(vs$tasmax$erreur, vs$tasmin$erreur)
+      if (!is.null(vs) && length(err) > 0)
+        return(wellPanel(p(class = "small mb-0", style = "color:#C0392B;", err[1])))
+      v <- tryCatch(verifs_drias(), error = function(e) NULL)
+      if (is.null(v))
+        return(wellPanel(p(class = "text-muted mb-0",
+                           "Choisissez une simulation et un jour couverts par les NetCDF.")))
+      bloc <- function(titre, champ) bloc_verif(titre, tagList(
+        ligne_verif("Recalcul (cet outil)", v$recalc[[champ]], v$recalc[[champ]]),
+        ligne_verif("Fonction pipeline", v$pipe[[champ]], v$recalc[[champ]]),
+        ligne_verif("Cache RDS (villes)", v$cache[[champ]], v$recalc[[champ]])))
+      wellPanel(
+        h4("Vérification au point retenu"),
+        bloc("Tasmax (tmax)", "tmax"),
+        bloc("Tasmin (tmin)", "tmin"),
+        p(class = "text-muted small mb-0",
+          "Écarts vs le recalcul indépendant ; ✔ si < 0,05 °C. Pas de ligne BDD : ",
+          "la base ne stocke que des agrégats DRIAS (deltas ±7 j, canicules)."))
+    } else {
+      v <- tryCatch(verifs(), error = function(e) NULL)
+      if (is.null(v))
+        return(wellPanel(p(class = "text-muted mb-0",
+                           "Chargez un jour pour lancer la vérification.")))
+      note_bdd <- switch(v$bdd_statut,
+        hors_ligne = tags$p(class = "small mb-0", style = "color:#C0392B;",
+          icon("database"),
+          sprintf(" BDD injoignable (hôte %s) — démarrez la base puis recliquez « Charger ».",
+                  Sys.getenv("DB_HOST"))),
+        jour_absent = p(class = "text-muted small mb-0", icon("database"),
+                        " BDD connectée, mais ce jour n'y figure pas."),
+        NULL)
+      bloc <- function(titre, champ) bloc_verif(titre, tagList(
+        ligne_verif("Recalcul (cet outil)", v$recalc[[champ]], v$recalc[[champ]]),
+        ligne_verif("Fonction pipeline", v$pipe[[champ]], v$recalc[[champ]]),
+        ligne_verif("RDS de staging", v$stag[[champ]], v$recalc[[champ]]),
+        ligne_verif("BDD (app)", v$bdd[[champ]], v$recalc[[champ]])))
+      wellPanel(
+        h4("Vérification des moyennes pondérées"),
+        bloc("Tmax pondérée", "tmax"),
+        bloc("Tmin pondérée", "tmin"),
+        p(class = "text-muted small mb-1",
+          "Écarts vs le recalcul indépendant ; ✔ si < 0,05 °C. Source absente : « — »."),
+        note_bdd)
     }
-    bloc <- function(titre, champ) {
-      ref <- v$recalc[[champ]]
-      tags$table(class = "table table-sm mb-2",
-        tags$thead(tags$tr(tags$th(titre), tags$th("Valeur"), tags$th("Écart"))),
-        tags$tbody(
-          ligne("Recalcul (cet outil)", ref, ref),
-          ligne("Fonction pipeline", v$pipe[[champ]], ref),
-          ligne("RDS de staging", v$stag[[champ]], ref),
-          ligne("BDD (app)", v$bdd[[champ]], ref)
-        ))
-    }
-    note_bdd <- switch(v$bdd_statut,
-      hors_ligne = tags$p(class = "small mb-0", style = "color:#C0392B;",
-        icon("database"),
-        sprintf(" BDD injoignable (hôte %s) — démarrez la base puis recliquez « Charger ».",
-                Sys.getenv("DB_HOST"))),
-      jour_absent = p(class = "text-muted small mb-0", icon("database"),
-                      " BDD connectée, mais ce jour n'y figure pas."),
-      NULL)
-    wellPanel(
-      h4("Vérification des moyennes pondérées"),
-      bloc("Tmax pondérée", "tmax"),
-      bloc("Tmin pondérée", "tmin"),
-      p(class = "text-muted small mb-1",
-        "Écarts vs le recalcul indépendant ; ✔ si < 0,05 °C. Source absente : « — »."),
-      note_bdd)
   })
 
-  # --- Carte -------------------------------------------------------------------
+  # --- Carte (les deux sources) -------------------------------------------------
   output$carte <- renderLeaflet({
     g <- geo()
-    df <- table_mailles()
-    cellules <- g$cellules
-    cellules$tmax_maille <- df$tmax_maille
-    cellules$tmin_maille <- df$tmin_maille
 
-    valeur <- switch(input$mode,
-      tmax = cellules$tmax_maille,
-      tmin = cellules$tmin_maille,
-      heure = {
-        h <- tryCatch(horaires(), error = function(e) NULL)
-        if (is.null(h)) rep(NA_real_, nrow(cellules)) else {
-          hh <- h %>% filter(as.integer(format(heure, "%H", tz = "UTC")) == input$heure)
-          st_drop_geometry(cellules) %>%
-            left_join(hh, by = c("lon_grille", "lat_grille")) %>% pull(t)
-        }
-      })
-    cellules$valeur <- valeur
+    if (input$source_donnees == "drias") {
+      vs <- tryCatch(voisinage(), error = function(e) NULL)
+      vv <- if (!is.null(vs) && is.null(vs[[input$mode_drias]]$erreur))
+        vs[[input$mode_drias]]$voisins else NULL
+      v <- ville_ref()
 
-    pal <- if (any(is.finite(valeur)))
-      colorNumeric("Spectral", domain = range(valeur, na.rm = TRUE), reverse = TRUE)
-    else function(x) "#b8bcc0"
+      m <- leaflet() %>%
+        addProviderTiles(providers$CartoDB.Positron) %>%
+        addPolygons(data = g$emprise, fill = FALSE, color = "#1f4e9c", weight = 2.5) %>%
+        addMarkers(lng = v$longitude, lat = v$latitude,
+                   label = paste0("Centre-ville (référence du pipeline) : ",
+                                  sprintf("%.4f, %.4f", v$longitude, v$latitude)))
+      if (is.null(vv)) return(m)
 
-    centres <- suppressWarnings(st_coordinates(st_centroid(cellules)))
-    etiquettes <- ifelse(is.finite(cellules$poids_pipeline),
-                         paste0(cellules$id, " · ", round(100 * cellules$poids_pipeline), " %"),
-                         paste0(cellules$id, " · écartée"))
+      # Emprises ~8 km des points (carrés en Lambert-93, indicatifs).
+      pts_sf <- st_as_sf(vv, coords = c("lon", "lat"), crs = 4326)
+      carres <- st_buffer(st_transform(pts_sf, 2154), dist = 4000,
+                          endCapStyle = "SQUARE") %>% st_transform(4326)
+      pal <- colorNumeric("Spectral", domain = range(vv$valeur, na.rm = TRUE),
+                          reverse = TRUE)
+      infob <- sprintf(
+        "<b>P%d</b> (%.3f, %.3f)<br/>%s : %s °C<br/>Distance : %.2f km%s",
+        seq_len(nrow(vv)), vv$lon, vv$lat, input$mode_drias, fmt1(vv$valeur, 2),
+        vv$dist_km, ifelse(vv$retenu, "<br/><b>POINT RETENU par le pipeline</b>", ""))
 
-    infobulles <- sprintf(
-      "<b>%s</b> (%.2f, %.2f)<br/>Poids pipeline : %s<br/>Tmax : %s °C · Tmin : %s °C<br/>Valeur affichée : %s °C",
-      cellules$id, cellules$lon_grille, cellules$lat_grille,
-      ifelse(is.finite(cellules$poids_pipeline),
-             sprintf("%.1f %%", 100 * cellules$poids_pipeline), "écartée"),
-      fmt1(cellules$tmax_maille, 2), fmt1(cellules$tmin_maille, 2), fmt1(cellules$valeur, 2))
+      m %>%
+        addPolygons(data = carres, fillColor = pal(vv$valeur), fillOpacity = 0.5,
+                    color = ifelse(vv$retenu, "#000000", "#666666"),
+                    weight = ifelse(vv$retenu, 3, 1), popup = infob) %>%
+        addLabelOnlyMarkers(lng = vv$lon, lat = vv$lat,
+                            label = paste0("P", seq_len(nrow(vv)),
+                                           ifelse(vv$retenu, " ★", "")),
+                            labelOptions = labelOptions(
+                              noHide = TRUE, direction = "center", textOnly = TRUE,
+                              style = list("font-weight" = "700", "font-size" = "12px",
+                                           "text-shadow" = "0 0 3px #ffffff"))) %>%
+        addLegend("bottomright", pal = pal, values = vv$valeur, title = "°C", opacity = 0.8)
+    } else {
+      df <- table_mailles()
+      cellules <- g$cellules
+      cellules$tmax_maille <- df$tmax_maille
+      cellules$tmin_maille <- df$tmin_maille
 
-    m <- leaflet() %>%
-      addProviderTiles(providers$CartoDB.Positron) %>%
-      addPolygons(data = cellules,
-                  fillColor = ~ifelse(is.finite(valeur), pal(valeur), "#b8bcc0"),
-                  fillOpacity = 0.55, color = "#444444", weight = 1,
-                  popup = infobulles) %>%
-      addLabelOnlyMarkers(lng = centres[, 1], lat = centres[, 2],
-                          label = etiquettes,
-                          labelOptions = labelOptions(
-                            noHide = TRUE, direction = "center", textOnly = TRUE,
-                            style = list("font-weight" = "700", "font-size" = "12px",
-                                         "text-shadow" = "0 0 3px #ffffff"))) %>%
-      addPolygons(data = g$emprise, fill = FALSE, color = "#1f4e9c", weight = 2.5)
-    if (any(is.finite(valeur)))
-      m <- m %>% addLegend("bottomright", pal = pal,
-                           values = valeur[is.finite(valeur)],
-                           title = "°C", opacity = 0.8)
-    m
+      valeur <- switch(input$mode,
+        tmax = cellules$tmax_maille,
+        tmin = cellules$tmin_maille,
+        heure = {
+          h <- tryCatch(horaires(), error = function(e) NULL)
+          if (is.null(h)) rep(NA_real_, nrow(cellules)) else {
+            hh <- h %>% filter(as.integer(format(heure, "%H", tz = "UTC")) == input$heure)
+            st_drop_geometry(cellules) %>%
+              left_join(hh, by = c("lon_grille", "lat_grille")) %>% pull(t)
+          }
+        })
+      cellules$valeur <- valeur
+
+      pal <- if (any(is.finite(valeur)))
+        colorNumeric("Spectral", domain = range(valeur, na.rm = TRUE), reverse = TRUE)
+      else function(x) "#b8bcc0"
+
+      centres <- suppressWarnings(st_coordinates(st_centroid(cellules)))
+      etiquettes <- ifelse(is.finite(cellules$poids_pipeline),
+                           paste0(cellules$id, " · ", round(100 * cellules$poids_pipeline), " %"),
+                           paste0(cellules$id, " · écartée"))
+      infobulles <- sprintf(
+        "<b>%s</b> (%.2f, %.2f)<br/>Poids pipeline : %s<br/>Tmax : %s °C · Tmin : %s °C<br/>Valeur affichée : %s °C",
+        cellules$id, cellules$lon_grille, cellules$lat_grille,
+        ifelse(is.finite(cellules$poids_pipeline),
+               sprintf("%.1f %%", 100 * cellules$poids_pipeline), "écartée"),
+        fmt1(cellules$tmax_maille, 2), fmt1(cellules$tmin_maille, 2), fmt1(cellules$valeur, 2))
+
+      m <- leaflet() %>%
+        addProviderTiles(providers$CartoDB.Positron) %>%
+        addPolygons(data = cellules,
+                    fillColor = ~ifelse(is.finite(valeur), pal(valeur), "#b8bcc0"),
+                    fillOpacity = 0.55, color = "#444444", weight = 1,
+                    popup = infobulles) %>%
+        addLabelOnlyMarkers(lng = centres[, 1], lat = centres[, 2],
+                            label = etiquettes,
+                            labelOptions = labelOptions(
+                              noHide = TRUE, direction = "center", textOnly = TRUE,
+                              style = list("font-weight" = "700", "font-size" = "12px",
+                                           "text-shadow" = "0 0 3px #ffffff"))) %>%
+        addPolygons(data = g$emprise, fill = FALSE, color = "#1f4e9c", weight = 2.5)
+      if (any(is.finite(valeur)))
+        m <- m %>% addLegend("bottomright", pal = pal,
+                             values = valeur[is.finite(valeur)],
+                             title = "°C", opacity = 0.8)
+      m
+    }
   })
 
-  # --- Tableau par maille --------------------------------------------------------
+  output$legende_carte <- renderUI({
+    if (input$source_donnees == "drias")
+      p(class = "text-muted small",
+        "★ = point retenu (règle du pipeline : minimum de Δlon² + Δlat², en degrés). ",
+        "Carrés ~8 km indicatifs autour des points de grille SAFRAN.")
+    else
+      p(class = "text-muted small",
+        "Étiquettes : identifiant de maille · poids pipeline. Mailles grises : écartées ",
+        "(part de surface < 2 %) ou sans donnée chargée.")
+  })
+
+  # --- Tableau principal (les deux sources) --------------------------------------
   output$titre_tableau <- renderText({
     g <- geo()
-    sprintf("%s — commune de %s km² · %d mailles retenues",
-            input$ville, format(round(g$aire_commune_km2, 1), decimal.mark = ","),
-            sum(st_drop_geometry(g$cellules)$retenue))
+    if (input$source_donnees == "drias")
+      sprintf("%s — points de grille DRIAS voisins (%s)", input$ville,
+              if (is.null(input$simulation)) "" else input$simulation)
+    else
+      sprintf("%s — commune de %s km² · %d mailles retenues",
+              input$ville, format(round(g$aire_commune_km2, 1), decimal.mark = ","),
+              sum(st_drop_geometry(g$cellules)$retenue))
   })
 
   output$tableau_mailles <- renderTable({
-    df <- table_mailles()
-    tot <- df %>% filter(is.finite(poids_pipeline))
-    tibble(
-      Maille = paste0(df$id, ifelse(df$retenue, "", " (écartée)")),
-      `Lon/Lat` = sprintf("%.2f / %.2f", df$lon_grille, df$lat_grille),
-      `Tmin (°C)` = fmt1(df$tmin_maille, 2),
-      `Tmax (°C)` = fmt1(df$tmax_maille, 2),
-      `Maille (km²)` = fmt1(df$aire_maille_km2, 1),
-      `Intersection (km²)` = fmt1(df$aire_inter_km2, 2),
-      `Part brute` = sprintf("%.1f %%", 100 * df$part_brute),
-      `Poids recalculé` = ifelse(is.finite(df$poids_recalc),
-                                 sprintf("%.4f", df$poids_recalc), "—"),
-      `Poids pipeline` = ifelse(is.finite(df$poids_pipeline),
-                                sprintf("%.4f", df$poids_pipeline), "—")
-    ) %>%
-      bind_rows(tibble(
-        Maille = "TOTAL (retenues)", `Lon/Lat` = "",
-        `Tmin (°C)` = "", `Tmax (°C)` = "",
-        `Maille (km²)` = "",
-        `Intersection (km²)` = fmt1(sum(tot$aire_inter_km2), 2),
-        `Part brute` = "",
-        `Poids recalculé` = sprintf("%.4f", sum(tot$poids_recalc, na.rm = TRUE)),
-        `Poids pipeline` = sprintf("%.4f", sum(tot$poids_pipeline, na.rm = TRUE))))
+    if (input$source_donnees == "drias") {
+      vs <- tryCatch(voisinage(), error = function(e) NULL)
+      if (is.null(vs) || !is.null(vs$tasmax$erreur) || !is.null(vs$tasmin$erreur)) return(NULL)
+      vmax <- vs$tasmax$voisins
+      vmin <- vs$tasmin$voisins %>% select(lon, lat, tasmin = valeur)
+      d <- vmax %>%
+        left_join(vmin, by = c("lon", "lat")) %>%
+        arrange(dist_km)
+      # Contrôle : le retenu (règle degrés²) est-il aussi le plus proche en km ?
+      divergence <- which(d$retenu)[1] != 1
+      tibble(
+        Point = paste0("P", seq_len(nrow(d)), ifelse(d$retenu, " ★", "")),
+        `Lon/Lat` = sprintf("%.3f / %.3f", d$lon, d$lat),
+        `Distance (km)` = fmt1(d$dist_km, 2),
+        `Tasmax (°C)` = fmt1(d$valeur, 2),
+        `Tasmin (°C)` = fmt1(d$tasmin, 2),
+        Statut = ifelse(d$retenu, "RETENU (pipeline)",
+                        ifelse(seq_len(nrow(d)) == 1 & divergence,
+                               "plus proche en km !", ""))
+      )
+    } else {
+      df <- table_mailles()
+      tot <- df %>% filter(is.finite(poids_pipeline))
+      tibble(
+        Maille = paste0(df$id, ifelse(df$retenue, "", " (écartée)")),
+        `Lon/Lat` = sprintf("%.2f / %.2f", df$lon_grille, df$lat_grille),
+        `Tmin (°C)` = fmt1(df$tmin_maille, 2),
+        `Tmax (°C)` = fmt1(df$tmax_maille, 2),
+        `Maille (km²)` = fmt1(df$aire_maille_km2, 1),
+        `Intersection (km²)` = fmt1(df$aire_inter_km2, 2),
+        `Part brute` = sprintf("%.1f %%", 100 * df$part_brute),
+        `Poids recalculé` = ifelse(is.finite(df$poids_recalc),
+                                   sprintf("%.4f", df$poids_recalc), "—"),
+        `Poids pipeline` = ifelse(is.finite(df$poids_pipeline),
+                                  sprintf("%.4f", df$poids_pipeline), "—")
+      ) %>%
+        bind_rows(tibble(
+          Maille = "TOTAL (retenues)", `Lon/Lat` = "",
+          `Tmin (°C)` = "", `Tmax (°C)` = "",
+          `Maille (km²)` = "",
+          `Intersection (km²)` = fmt1(sum(tot$aire_inter_km2), 2),
+          `Part brute` = "",
+          `Poids recalculé` = sprintf("%.4f", sum(tot$poids_recalc, na.rm = TRUE)),
+          `Poids pipeline` = sprintf("%.4f", sum(tot$poids_pipeline, na.rm = TRUE))))
+    }
   }, striped = TRUE, spacing = "xs", width = "100%")
 
-  # --- Tableau horaire -----------------------------------------------------------
-  output$tableau_horaire <- renderTable({
-    h <- tryCatch(horaires(), error = function(e) NULL)
-    if (is.null(h) || nrow(h) == 0) return(NULL)
-    g <- st_drop_geometry(geo()$cellules)
-    h2 <- h %>%
-      inner_join(g[, c("lon_grille", "lat_grille", "id", "poids_pipeline")],
-                 by = c("lon_grille", "lat_grille")) %>%
-      mutate(heure_txt = format(heure, "%H h", tz = "UTC"))
-    large <- h2 %>%
-      select(heure_txt, id, t) %>%
-      tidyr::pivot_wider(names_from = id, values_from = t)
-    moyennes <- h2 %>%
-      filter(is.finite(poids_pipeline)) %>%
-      group_by(heure_txt) %>%
-      summarise(`Moyenne pondérée` = weighted.mean(t, poids_pipeline), .groups = "drop")
-    large %>%
-      left_join(moyennes, by = "heure_txt") %>%
-      rename(`Heure (UTC)` = heure_txt) %>%
-      mutate(across(-`Heure (UTC)`, ~ fmt1(.x, 2)))
+  output$note_tableau <- renderUI({
+    if (input$source_donnees == "drias")
+      p(class = "text-muted small",
+        "DRIAS n'utilise PAS de pondération surfacique : une seule valeur, celle du ",
+        "point le plus proche du centre-ville (règle en degrés² du pipeline). Si le ",
+        "classement en km divergeait, la colonne Statut le signalerait.")
+    else
+      p(class = "text-muted small",
+        "part brute = surface intersectée / total intersecté ; le poids recalculé écarte ",
+        "les éclats < 2 % puis renormalise — mêmes règles que le pipeline.")
+  })
+
+  # --- Tableau détail : horaire (ERA5) ou série ±7 j (DRIAS) ---------------------
+  output$titre_detail <- renderUI({
+    if (input$source_donnees == "drias")
+      h4("Série ±7 jours au point retenu — recalcul vs cache RDS du pipeline")
+    else
+      h4("Détail horaire (UTC) — température de chaque maille et moyenne pondérée")
+  })
+
+  output$tableau_detail <- renderTable({
+    if (input$source_donnees == "drias") {
+      vs <- tryCatch(voisinage(), error = function(e) NULL)
+      if (is.null(vs) || !is.null(vs$tasmax$erreur) || !is.null(vs$tasmin$erreur)) return(NULL)
+      fen <- tibble(date = seq(input$date - 7, input$date + 7, by = "day"))
+      recal <- fen %>%
+        left_join(vs$tasmax$serie_retenu %>% rename(tmax_outil = valeur), by = "date") %>%
+        left_join(vs$tasmin$serie_retenu %>% rename(tmin_outil = valeur), by = "date")
+      cachef <- cache_drias_fenetre()
+      if (!is.null(cachef))
+        recal <- recal %>% left_join(
+          cachef %>% select(date, tmax_cache = temperature_max, tmin_cache = temperature_min),
+          by = "date")
+      else { recal$tmax_cache <- NA_real_; recal$tmin_cache <- NA_real_ }
+      tibble(
+        Date = format(recal$date, "%d/%m/%Y"),
+        `Tasmax outil` = fmt1(recal$tmax_outil, 2),
+        `Tasmax cache` = fmt1(recal$tmax_cache, 2),
+        `Écart tmax` = ifelse(is.finite(recal$tmax_outil) & is.finite(recal$tmax_cache),
+                              sprintf("%+.3f", recal$tmax_outil - recal$tmax_cache), "—"),
+        `Tasmin outil` = fmt1(recal$tmin_outil, 2),
+        `Tasmin cache` = fmt1(recal$tmin_cache, 2),
+        `Écart tmin` = ifelse(is.finite(recal$tmin_outil) & is.finite(recal$tmin_cache),
+                              sprintf("%+.3f", recal$tmin_outil - recal$tmin_cache), "—")
+      )
+    } else {
+      h <- tryCatch(horaires(), error = function(e) NULL)
+      if (is.null(h) || nrow(h) == 0) return(NULL)
+      g <- st_drop_geometry(geo()$cellules)
+      h2 <- h %>%
+        inner_join(g[, c("lon_grille", "lat_grille", "id", "poids_pipeline")],
+                   by = c("lon_grille", "lat_grille")) %>%
+        mutate(heure_txt = format(heure, "%H h", tz = "UTC"))
+      large <- h2 %>%
+        select(heure_txt, id, t) %>%
+        tidyr::pivot_wider(names_from = id, values_from = t)
+      moyennes <- h2 %>%
+        filter(is.finite(poids_pipeline)) %>%
+        group_by(heure_txt) %>%
+        summarise(`Moyenne pondérée` = weighted.mean(t, poids_pipeline), .groups = "drop")
+      large %>%
+        left_join(moyennes, by = "heure_txt") %>%
+        rename(`Heure (UTC)` = heure_txt) %>%
+        mutate(across(-`Heure (UTC)`, ~ fmt1(.x, 2)))
+    }
   }, striped = TRUE, spacing = "xs")
 }
 
 # --- Lancement autonome ---------------------------------------------------------
 if (sys.nframe() == 0L) {
-  message("Inspecteur de pondération : http://127.0.0.1:5001")
+  message("Inspecteur des données sources : http://127.0.0.1:5001")
   runApp(shinyApp(ui, server), port = 5001L, host = "127.0.0.1", launch.browser = FALSE)
 }

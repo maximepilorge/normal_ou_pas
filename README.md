@@ -143,13 +143,17 @@ telecharger_drias.R → calculer_projections.R → deployer_projections.R
 
 Scripts de vérification / QA : `utils/verifier_*.R`, `utils/inspecter_donnees.R`.
 
-**Inspecteur de pondération** (`Rscript utils/inspecter_ponderation.R`, port 5001) :
-mini-app Shiny de contrôle qualité. Pour une ville et un jour, elle montre sur
-carte les mailles ERA5-Land recouvrant la commune (température, surface
-intersectée, poids), le détail horaire (UTC), et confronte la moyenne pondérée
-recalculée indépendamment à la fonction du pipeline, au RDS de staging et à la
-BDD. Le jour inspecté est re-téléchargé via le CDS (bbox de la commune) puis mis
-en cache dans `data/verif_mailles/`.
+**Inspecteur des données sources** (`Rscript utils/inspecter_ponderation.R`,
+port 5001) : mini-app Shiny de contrôle qualité des extractions par ville, pour
+les deux sources. **ERA5-Land** : mailles 0,1° recouvrant la commune sur carte
+(température, surface intersectée, poids recalculé vs pipeline), détail horaire
+UTC, et moyenne pondérée confrontée à la fonction du pipeline, au RDS de staging
+et à la BDD — le jour inspecté est re-téléchargé via le CDS (bbox de la commune)
+puis mis en cache dans `data/verif_mailles/`. **DRIAS** : points de grille 8 km
+voisins du centre-ville (valeurs du jour, distances, point retenu par la règle
+du pipeline), série ±7 j au point retenu, et valeurs confrontées à
+`lire_serie_drias` et au cache `drias_villes_5sims.rds` — lecture locale des
+NetCDF de `data/drias_raw/`.
 
 ---
 
