@@ -231,6 +231,285 @@ calculer_feedback_manche <- function(db_pool, data, periode_ref, statique = NULL
        projection_txt = projection_txt, projection_couleur = projection_couleur)
 }
 
+# --- Animation pédagogique de révélation (1re manche) -----------------------
+# À la 1re manche d'une série, le boxplot statique est remplacé par une animation
+# 100 % CLIENT : un contrôleur JS pilote Plotly (restyle/relayout en
+# requestAnimationFrame) pour dérouler courbe annuelle -> empilement de la fenêtre
+# ±7 j année après année -> effondrement en boxplot. Aucun aller-retour serveur
+# pendant le jeu ; l'ÉTAT FINAL reproduit le boxplot de feedback_boxplot. Le
+# payload est pré-calculé (preparer_payload_anim, helpers.R) et injecté en JSON.
+ANIM_JS <- r"---(
+  var Plotly = window.Plotly;
+  var cap = document.getElementById(A.capId);
+  var st = { cancel: false, running: false };
+  var dark = 'rgba(51,51,51,1)';
+  var pick = function(arr, ix){ return ix.map(function(i){ return arr[i]; }); };
+
+  function ease(t){ return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2; }
+  function lerp(a,b,t){ return a + (b-a)*t; }
+  function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+  function tween(dur, step){
+    return new Promise(function(res){
+      var t0 = null;
+      function fr(ts){
+        if (st.cancel){ res(); return; }
+        if (t0 === null) t0 = ts;
+        var p = Math.min(1, (ts - t0) / dur);
+        step(ease(p));
+        if (p < 1) requestAnimationFrame(fr); else res();
+      }
+      requestAnimationFrame(fr);
+    });
+  }
+  function setCap(html){
+    if (!cap) return;
+    cap.style.opacity = 0;
+    setTimeout(function(){ cap.innerHTML = html; cap.style.opacity = 1; }, 170);
+  }
+  // Affiche/masque les contrôles (titre + comparaison d'horizons 2050/2100) :
+  // masqués pendant le déroulé — pour ne pas divulguer la zone avant la révélation,
+  // ET pour empêcher un changement d'horizon en plein (re)play, qui re-rendrait le
+  // boxplot statique par-dessus l'animation en cours ; révélés à la fin.
+  function setExtra(show){
+    if (!A.extraId) return;
+    var ex = document.getElementById(A.extraId);
+    if (ex) ex.style.display = show ? '' : 'none';
+  }
+  function bandShape(){
+    return { type:'rect', xref:'x', yref:'paper', x0:A.winX0-0.5, x1:A.winX1+0.5,
+             y0:0, y1:1, fillcolor:'rgba(120,120,120,0.12)', line:{width:0}, layer:'below' };
+  }
+  function zoneShapes(){
+    var c = '#2E8B57', z = A.zone;
+    return [
+      { type:'rect', xref:'paper', yref:'y', x0:0, x1:1, y0:z.p10, y1:z.p90,
+        fillcolor:c, opacity:0.15, line:{width:0}, layer:'below' },
+      { type:'line', xref:'paper', yref:'y', x0:0, x1:1, y0:z.p10, y1:z.p10,
+        line:{color:c, dash:'dash', width:1.6}, layer:'below' },
+      { type:'line', xref:'paper', yref:'y', x0:0, x1:1, y0:z.p90, y1:z.p90,
+        line:{color:c, dash:'dash', width:1.6}, layer:'below' }
+    ];
+  }
+  function boxShapes(){
+    var b = A.box, x0 = 0.75, x1 = 1.25;
+    return [
+      { type:'rect', xref:'x', yref:'y', x0:x0, x1:x1, y0:b.q1, y1:b.q3,
+        fillcolor:'rgba(135,206,235,0.7)', line:{width:0}, layer:'below' },
+      { type:'rect', xref:'x', yref:'y', x0:x0, x1:x1, y0:b.q1, y1:b.q3,
+        fillcolor:'rgba(0,0,0,0)', line:{color:dark, width:1.5}, layer:'above' },
+      { type:'line', xref:'x', yref:'y', x0:x0, x1:x1, y0:b.q2, y1:b.q2,
+        line:{color:dark, width:2}, layer:'above' },
+      { type:'line', xref:'x', yref:'y', x0:1, x1:1, y0:b.q3, y1:b.uf,
+        line:{color:dark, width:1.2}, layer:'above' },
+      { type:'line', xref:'x', yref:'y', x0:1, x1:1, y0:b.q1, y1:b.lf,
+        line:{color:dark, width:1.2}, layer:'above' },
+      { type:'line', xref:'x', yref:'y', x0:0.87, x1:1.13, y0:b.uf, y1:b.uf,
+        line:{color:dark, width:1.2}, layer:'above' },
+      { type:'line', xref:'x', yref:'y', x0:0.87, x1:1.13, y0:b.lf, y1:b.lf,
+        line:{color:dark, width:1.2}, layer:'above' }
+    ];
+  }
+  function finalShapes(){ return zoneShapes().concat(boxShapes()); }
+
+  function reset(){
+    setExtra(false);   // re-masque titre + horizons à chaque (re)lecture
+    Plotly.restyle(el, { x:[[]], y:[[]], opacity:1, mode:'lines' }, [0]);
+    Plotly.restyle(el, { x:[[]], y:[[]], 'marker.opacity':0 }, [1]);
+    Plotly.restyle(el, { x:[[]], y:[[]] }, [2]);
+    Plotly.restyle(el, { x:[[]], y:[[]] }, [3]);
+    Plotly.relayout(el, { shapes:[], annotations:[], 'xaxis.range':A.xFull,
+                          'yaxis.range':A.yFull, 'xaxis.showticklabels':true });
+  }
+
+  function endState(){
+    st.cancel = true;
+    Plotly.restyle(el, { x:[[]], y:[[]], opacity:1 }, [0]);
+    Plotly.restyle(el, { x:[A.cloudColX], y:[A.cloudY], 'marker.opacity':0.5 }, [1]);
+    Plotly.restyle(el, { x:[[1]], y:[[A.quizTemp]] }, [2]);
+    Plotly.restyle(el, { x:[[1]], y:[[A.moy]] }, [3]);
+    Plotly.relayout(el, { shapes:finalShapes(), annotations:[], 'xaxis.range':A.xCol,
+                          'yaxis.range':A.yWin, 'xaxis.showticklabels':false });
+    setCap(A.caps[5]);
+    setExtra(true);
+    st.running = false;
+  }
+
+  async function run(){
+    if (st.running) return;
+    // Sécurité : ne jouer que sur le widget ANIMÉ (4 traces). Autoplay part
+    // toujours d'un rendu frais ; ce garde-fou évite tout jeu sur un widget
+    // re-rendu en boxplot statique (3 traces).
+    if (!el || !el.data || el.data.length !== 4) return;
+    st.running = true; st.cancel = false;
+    reset();
+    await sleep(300);
+
+    // Acte 1 — tracé progressif de l'année
+    setCap(A.caps[0]);
+    var n = A.yearX.length;
+    await tween(1500, function(t){
+      var k = Math.max(2, Math.floor(t * n));
+      Plotly.restyle(el, { x:[A.yearX.slice(0,k)], y:[A.yearY.slice(0,k)] }, [0]);
+    });
+    if (st.cancel) return;
+    await sleep(450);
+
+    // Acte 2 — zoom + surbrillance de la croix rouge (prolonge la légende de l'acte 1)
+    await tween(1100, function(t){
+      Plotly.relayout(el, {
+        'xaxis.range':[lerp(A.xFull[0],A.xWin[0],t), lerp(A.xFull[1],A.xWin[1],t)],
+        'yaxis.range':[lerp(A.yFull[0],A.yWin[0],t), lerp(A.yFull[1],A.yWin[1],t)]
+      });
+    });
+    if (st.cancel) return;
+    Plotly.relayout(el, { shapes:[bandShape()] });
+    Plotly.restyle(el, { x:[[A.centerX]], y:[[A.quizTemp]] }, [2]);
+    await sleep(1700);
+    if (st.cancel) return;
+
+    // Acte 3a — on isole les 15 jours de la fenêtre pour la SEULE année de départ
+    setCap(A.caps[1]);
+    var g0 = A.groups[0];
+    Plotly.restyle(el, { mode:'lines+markers', 'marker.color':'rgba(20,90,160,0.95)',
+                         'marker.size':6,
+                         x:[pick(A.cloudDay, g0.idx)], y:[pick(A.cloudY, g0.idx)] }, [0]);
+    Plotly.restyle(el, { x:[pick(A.cloudCalX, g0.idx)], y:[pick(A.cloudY, g0.idx)],
+                         'marker.opacity':0.5 }, [1]);
+    await sleep(1500);
+    if (st.cancel) return;
+
+    // Acte 3b — empilement : chaque année dépose ses 15 jours (légende de 3a conservée)
+    var cum = g0.idx.slice();
+    for (var k = 1; k < A.groups.length; k++) {
+      if (st.cancel) return;
+      var g = A.groups[k];
+      cum = cum.concat(g.idx);
+      Plotly.restyle(el, { x:[pick(A.cloudCalX, cum)], y:[pick(A.cloudY, cum)] }, [1]);
+      Plotly.restyle(el, { x:[pick(A.cloudDay, g.idx)], y:[pick(A.cloudY, g.idx)] }, [0]);
+      await sleep(85);
+    }
+    if (st.cancel) return;
+    Plotly.restyle(el, { x:[[]], y:[[]] }, [0]);   // retirer le trait de la dernière année
+    setCap(A.caps[2]);
+    await sleep(1600);
+    if (st.cancel) return;
+
+    // Acte 4 — effondrement du nuage en colonne
+    setCap(A.caps[3]);
+    await tween(1400, function(t){
+      var xs = A.cloudCalX.map(function(cx,i){ return lerp(cx, A.cloudColX[i], t); });
+      Plotly.restyle(el, { x:[xs] }, [1]);
+      Plotly.restyle(el, { x:[[lerp(A.centerX,1,t)]] }, [2]);
+      Plotly.relayout(el, { 'xaxis.range':[lerp(A.xWin[0],A.xCol[0],t),
+                                           lerp(A.xWin[1],A.xCol[1],t)] });
+    });
+    if (st.cancel) return;
+    Plotly.relayout(el, { 'xaxis.showticklabels':false });
+    await sleep(600);   // laisse respirer « on les regroupe… » après l'effondrement
+
+    // ...boîte + moustaches, puis zone normale
+    Plotly.relayout(el, { shapes:boxShapes() });
+    Plotly.restyle(el, { x:[[1]], y:[[A.moy]] }, [3]);
+    setCap(A.caps[4]);
+    await sleep(3000);   // 3 notions (boîte / médiane / moustaches) : laisser lire
+    if (st.cancel) return;
+    Plotly.relayout(el, { shapes:finalShapes() });
+    setCap(A.caps[5]);
+    setExtra(true);
+    st.running = false;
+  }
+
+  // « Passer » saute au boxplot final. Garde : si le widget a été re-rendu en
+  // boxplot statique (changement d'horizon -> 3 traces), on ne touche à rien, les
+  // index de traces ne correspondraient plus. « Rejouer » passe, lui, par un
+  // re-rendu serveur (input rejouer_anim) qui régénère un widget animé frais.
+  window.animDemo = {
+    skip: function(){
+      if (!el || !el.data || el.data.length !== 4) return;
+      st.cancel = true; setTimeout(endState, 60);
+    }
+  };
+
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (A.autoplay && !reduce) run(); else endState();
+)---"
+
+# Plot de base : 4 traces VIDES (le JS les remplit) reprenant le style de
+# feedback_boxplot (axe °C, pas de barre d'outils). Le contrôleur JS s'y greffe.
+.anim_plot_base <- function(payload) {
+  vide <- numeric(0)
+  plot_ly() %>%
+    add_trace(x = vide, y = vide, type = "scatter", mode = "lines", name = "annee",
+              line = list(color = "rgba(20,90,160,0.95)", width = 2),
+              hoverinfo = "skip") %>%
+    add_trace(x = vide, y = vide, type = "scatter", mode = "markers", name = "nuage",
+              marker = list(color = "rgba(0,0,139,0.5)", size = 5, opacity = 0),
+              hoverinfo = "skip") %>%
+    add_trace(x = vide, y = vide, type = "scatter", mode = "markers", name = "quiz",
+              marker = list(symbol = "x", color = "rgba(255,0,0,0.9)", size = 13,
+                            line = list(color = "rgba(255,0,0,0.9)", width = 1.5)),
+              hoverinfo = "skip") %>%
+    add_trace(x = vide, y = vide, type = "scatter", mode = "markers", name = "moyenne",
+              marker = list(symbol = "x", color = "black", size = 10),
+              hoverinfo = "skip") %>%
+    layout(
+      showlegend = FALSE, margin = list(t = 10),
+      font = list(size = 12),
+      xaxis = list(range = payload$xFull, fixedrange = TRUE, zeroline = FALSE,
+                   showgrid = FALSE, tickvals = payload$tickVals,
+                   ticktext = payload$tickText),
+      yaxis = list(range = payload$yFull, fixedrange = TRUE,
+                   title = "Température Maximale", ticksuffix = " °C")
+    ) %>%
+    config(displayModeBar = FALSE, responsive = TRUE)
+}
+
+# Greffe le contrôleur JS sur le plot de base et injecte le payload en JSON.
+# `cap_id`   : id (namespacé) du div de légende ; `autoplay` FALSE -> boxplot direct.
+# `extra_id` : id du conteneur (titre + horizons) révélé À LA FIN de l'animation.
+rendre_anim_quiz <- function(payload, autoplay = TRUE, cap_id = "anim-caption",
+                             extra_id = NULL) {
+  payload$autoplay <- autoplay
+  payload$capId <- cap_id
+  payload$extraId <- extra_id
+  js <- paste0(
+    "function(el, x){ var A = ",
+    jsonlite::toJSON(payload, auto_unbox = TRUE, digits = 10, null = "null"),
+    ";\n", ANIM_JS, "\n}"
+  )
+  htmlwidgets::onRender(.anim_plot_base(payload), js)
+}
+
+# Assemble l'animation de la 1re manche à partir des données déjà en mémoire
+# (nuage ±7 j) + UNE requête de la série annuelle de l'année type. Renvoie le
+# widget animé, ou NULL si une garde échoue (l'appelant retombe alors sur le
+# boxplot statique) : zone normale absente, fenêtre à cheval sur le Nouvel An
+# (axe calendaire discontinu), trop peu d'années, ou année type trop trouée.
+construire_anim_quiz <- function(db_pool, cloud_brut, data_quiz, seuils, periode,
+                                 cap_id, extra_id = NULL) {
+  if (is.null(seuils) || !is.finite(seuils$p10) || !is.finite(seuils$p90)) return(NULL)
+  centre <- jour_calendaire_2023(data_quiz$date)
+  if (centre <= 7L || centre >= 359L) return(NULL)   # fenêtre à cheval sur le 31/12
+  cloud <- data.frame(date = cloud_brut$date, tmax = cloud_brut$tmax_celsius)
+  if (length(unique(lubridate::year(cloud$date))) < 3L) return(NULL)
+
+  annee_ref <- annee_reference_fenetre(cloud)
+  courbe <- tbl(db_pool, "temperatures_max") %>%
+    filter(ville == !!data_quiz$city, annee == !!annee_ref) %>%
+    select(date, temperature_max) %>%
+    arrange(date) %>%
+    collect()
+  if (nrow(courbe) < 60L) return(NULL)              # série annuelle trop trouée
+  courbe <- data.frame(date = courbe$date, tmax = courbe$temperature_max)
+
+  payload <- preparer_payload_anim(
+    cloud = cloud, annee_curve = courbe, annee_ref = annee_ref,
+    ville = data_quiz$city, periode = periode, date_quiz = data_quiz$date,
+    quiz_temp = data_quiz$temp, categorie = data_quiz$correct_answer,
+    zone = list(p10 = seuils$p10, p90 = seuils$p90), moy = data_quiz$normale_moy)
+  rendre_anim_quiz(payload, autoplay = TRUE, cap_id = cap_id, extra_id = extra_id)
+}
+
 # --- UI : simple conteneur plein écran (les 3 écrans sont rendus côté serveur) --
 mod_quiz_ui <- function(id) {
   ns <- NS(id)
@@ -269,6 +548,17 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
     # au lancement de la série (cf. precalculer_feedback_serie) ; NULL -> repli sur
     # les requêtes à la volée dans calculer_feedback_manche.
     feedback_statique <- reactiveVal(NULL)
+
+    # Animation pédagogique de révélation : jouée UNE fois par série, à la 1re
+    # manche (remise à FALSE au démarrage d'une série). Bascule TRUE dès le 1er
+    # rendu animé du boxplot -> les rendus suivants (changement d'horizon) restent
+    # sur le boxplot statique sans réamorcer l'animation.
+    anim_vue <- reactiveVal(FALSE)
+    # « Rejouer » (bouton serveur) : incrémenté pour forcer un NOUVEAU rendu du
+    # widget animé (4 traces fraîches). Indispensable car un changement d'horizon
+    # re-rend le boxplot STATIQUE (3 traces) dans le même nœud : rejouer via le
+    # contrôleur JS écrirait alors le nuage dans la trace de la croix rouge.
+    replay_nonce <- reactiveVal(0L)
 
     # Score CUMULÉ sur la session (compat analytics_visits / server.R) — incrémenté
     # à chaque validation, exactement comme le quiz historique.
@@ -413,8 +703,35 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
           div(class = cls, ic, span(o))
         })
         fb <- feedback_courant()
-        distribution <- accordion(open = FALSE,
-          accordion_panel("Voir la distribution",
+        # 1re manche : l'accordéon joue l'animation guidée (légende + Rejouer/Passer).
+        # Le titre et le sélecteur d'horizon vivent dans un conteneur MASQUÉ (#anim-extra),
+        # révélé par le contrôleur JS À LA FIN de l'animation : ils dévoileraient sinon la
+        # zone normale (et ses chiffres) avant la révélation. Manches 2-10 : affichés d'emblée.
+        panneau <- if (idx() == 1L) {
+          tagList(
+            # Titre + sélecteur d'horizon AU-DESSUS du graphe (comme aux manches
+            # 2-10), mais dans un conteneur MASQUÉ pendant le déroulé (ils
+            # dévoileraient la zone), révélé par le contrôleur JS à la fin.
+            div(id = ns("anim-extra"), style = "display:none;",
+                if (!is.null(projections_quiz()))
+                  div(class = "text-center mb-2",
+                      radioGroupButtons(ns("horizon_proj"), label = "Comparer à la normale de :",
+                        choices = c("Aujourd'hui" = "present", "2050 (+2,7 °C)" = "2050",
+                                    "2100 (+4 °C)" = "2100"),
+                        selected = "present", size = "sm", status = "primary")),
+                uiOutput(ns("boxplot_titre"))),
+            plotlyOutput(ns("feedback_boxplot"), height = "340px"),
+            div(id = ns("anim-caption"), class = "anim-caption"),
+            div(class = "anim-ctrl text-center",
+                # Rejouer = re-rendu serveur (widget animé frais), robuste même si
+                # l'utilisateur a changé d'horizon entre-temps (widget devenu statique).
+                actionButton(ns("rejouer_anim"), tagList(icon("rotate-right"), " Rejouer"),
+                             class = "btn btn-sm btn-outline-primary"),
+                tags$button(type = "button", class = "btn btn-sm btn-outline-secondary",
+                            onclick = "window.animDemo && window.animDemo.skip()",
+                            icon("forward"), " Passer")))
+        } else {
+          tagList(
             if (!is.null(projections_quiz()))
               div(class = "text-center mb-2",
                   radioGroupButtons(ns("horizon_proj"), label = "Comparer à la normale de :",
@@ -422,7 +739,12 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
                                 "2100 (+4 °C)" = "2100"),
                     selected = "present", size = "sm", status = "primary")),
             uiOutput(ns("boxplot_titre")),
-            plotlyOutput(ns("feedback_boxplot"), height = "340px")))
+            plotlyOutput(ns("feedback_boxplot"), height = "340px"))
+        }
+        distribution <- accordion(open = FALSE,
+          accordion_panel(
+            if (idx() == 1L) "Voir la distribution (animation guidée)" else "Voir la distribution",
+            panneau))
         tagList(
           div(class = "carte-question carte-reveal", h3(enonce, class = "enonce")),
           badge,
@@ -551,6 +873,10 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
         tags$p(class = "text-muted small mb-2", sous_titre)
       )
     })
+    # À la 1re manche, ce titre vit dans le conteneur MASQUÉ révélé en fin
+    # d'animation : sans cette option il serait suspendu (invisible) et rendu vide
+    # au moment de la révélation. Toujours calculé (simple texte, coût négligeable).
+    outputOptions(output, "boxplot_titre", suspendWhenHidden = FALSE)
 
     output$feedback_boxplot <- renderPlotly({
       donnees_historiques_jour_plot <- boxplot_rows()
@@ -559,6 +885,21 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
       seuils <- seuils_quiz()
       proj   <- projections_quiz()
       actif  <- repere_actif()
+      replay_nonce()   # dép. : « Rejouer » force un nouveau rendu du widget animé
+
+      # 1re manche : on remplace le boxplot statique par l'animation pédagogique
+      # (courbe -> empilement -> boxplot), qui aboutit EXACTEMENT à ce graphe. Lue
+      # via isolate() : elle ne réactive pas ce rendu (pas de boucle) et bascule
+      # anim_vue à TRUE pour ne jouer qu'une fois. Repli gracieux (NULL) sur le
+      # boxplot statique si une garde échoue (cf. construire_anim_quiz).
+      if (isolate(idx() == 1L && !anim_vue())) {
+        anim <- tryCatch(
+          construire_anim_quiz(db_pool, donnees_historiques_jour_plot, data_quiz,
+                               seuils, filtres_serie()$periode,
+                               ns("anim-caption"), ns("anim-extra")),
+          error = function(e) { log_debug("construire_anim_quiz : ", conditionMessage(e)); NULL })
+        if (!is.null(anim)) { anim_vue(TRUE); return(anim) }
+      }
 
       yv <- donnees_historiques_jour_plot$tmax_celsius
       all_y <- c(yv, data_quiz$temp)
@@ -680,6 +1021,7 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
       reponses(vector("list", length(nouvelle)))
       phase_manche("question")
       feedback_courant(NULL)
+      anim_vue(FALSE)   # l'animation de révélation rejoue à la 1re manche
       quiz_data(nouvelle[[1]])
       # Préchargement groupé des données statiques (seuils + projections) des 10
       # manches : chaque révélation lira ces valeurs en mémoire au lieu d'émettre
@@ -780,6 +1122,14 @@ mod_quiz_server <- function(id, db_pool, visitor_id = reactive(NULL),
     # « Rejouer une série » repasse par le paramétrage (écran d'accueil, filtres
     # de la dernière série pré-remplis) : on re-choisit avant de relancer.
     observeEvent(input$rejouer_btn, { etat("accueil") })
+
+    # « Rejouer » l'animation de révélation : on réarme (anim_vue FALSE) et on bump
+    # le nonce -> le rendu de feedback_boxplot repart sur un widget ANIMÉ frais
+    # (4 traces), même si un changement d'horizon l'avait re-rendu en statique.
+    observeEvent(input$rejouer_anim, {
+      anim_vue(FALSE)
+      replay_nonce(replay_nonce() + 1L)
+    })
 
     # Défi reçu par lien (?defi=..., déjà validé par server.R) : mis en attente et
     # affiché sur l'écran d'accueil, sans jamais interrompre une série en cours.

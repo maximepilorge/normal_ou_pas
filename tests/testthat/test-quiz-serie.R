@@ -185,3 +185,85 @@ test_that("couleur_score : bandes rouge (0-2) / ambre (3-6) / vert (7-8) / or (9
   expect_equal(couleur_score(9, 10), "#B8860B")
   expect_equal(couleur_score(10, 10), "#B8860B")
 })
+
+# --- Animation pédagogique de révélation (fonctions pures) --------------------
+
+test_that("jour_calendaire_2023 projette sur une année non bissextile fixe", {
+  expect_equal(jour_calendaire_2023(as.Date("2024-01-01")), 1L)
+  expect_equal(jour_calendaire_2023(as.Date("2024-08-12")), 224L)
+  expect_equal(jour_calendaire_2023(as.Date("2024-12-31")), 365L)
+  # deux 12 août de deux années -> MÊME jour calendaire (condition de l'empilement)
+  expect_equal(jour_calendaire_2023(as.Date("1975-08-12")),
+               jour_calendaire_2023(as.Date("2021-08-12")))
+  # 29 février ramené au 28 (jour 59) -> pas de trou dans l'axe
+  expect_equal(jour_calendaire_2023(as.Date("2020-02-29")),
+               jour_calendaire_2023(as.Date("2023-02-28")))
+})
+
+test_that("annee_reference_fenetre choisit l'année de moyenne médiane", {
+  cloud <- rbind(
+    data.frame(date = as.Date("2018-08-05") + 0:14, tmax = 20),   # froide
+    data.frame(date = as.Date("2019-08-05") + 0:14, tmax = 25),   # médiane
+    data.frame(date = as.Date("2020-08-05") + 0:14, tmax = 30))   # chaude
+  expect_equal(annee_reference_fenetre(cloud), 2019L)
+})
+
+# Nuage synthétique : 3 années × 15 jours autour du 12 août ; moyennes 24/25/26.
+faire_nuage_anim <- function(annees = 2018:2020, m = 8L, j = 12L) {
+  do.call(rbind, lapply(annees, function(an) {
+    c0 <- as.Date(sprintf("%d-%02d-%02d", an, m, j))
+    data.frame(date = c0 + (-7:7), tmax = 25 + (an - 2019) + seq(-2, 2, length.out = 15))
+  }))
+}
+faire_courbe_anim <- function(annee = 2019L) {
+  d <- seq(as.Date(sprintf("%d-01-01", annee)), as.Date(sprintf("%d-12-31", annee)), by = "day")
+  data.frame(date = d, tmax = 15 + 10 * sin(2 * pi * (as.integer(format(d, "%j")) - 114) / 365))
+}
+
+test_that("preparer_payload_anim assemble un payload cohérent avec le boxplot", {
+  cloud <- faire_nuage_anim()
+  courbe <- faire_courbe_anim(2019L)
+  p <- preparer_payload_anim(
+    cloud = cloud, annee_curve = courbe, annee_ref = 2019L,
+    ville = "Toulouse", periode = "1991-2020", date_quiz = as.Date("2024-08-12"),
+    quiz_temp = 33, categorie = "Au-dessus des normales",
+    zone = list(p10 = 21, p90 = 29), moy = 25)
+
+  # Corps du boxplot = quantiles type 7 du nuage (ordre indifférent).
+  qs <- as.numeric(stats::quantile(cloud$tmax, c(.25, .5, .75), type = 7))
+  expect_equal(unname(c(p$box$q1, p$box$q2, p$box$q3)), qs)
+  # Passe-plats.
+  expect_equal(p$quizTemp, 33); expect_equal(p$moy, 25)
+  expect_equal(p$zone, list(p10 = 21, p90 = 29))
+  expect_equal(p$centerX, 224L)               # 12 août
+  expect_equal(p$nAnnees, 3L)
+  expect_equal(length(p$tickVals), 12L); expect_equal(length(p$tickText), 12L)
+
+  # Groupes d'empilement : année type d'abord, indices 0-based couvrant tout le nuage.
+  expect_length(p$groups, 3L)
+  expect_equal(p$groups[[1]]$year, 2019L)
+  tous_idx <- sort(unlist(lapply(p$groups, function(g) as.integer(g$idx))))
+  expect_equal(tous_idx, 0:(nrow(cloud) - 1L))
+
+  # Courbe triée par jour calendaire croissant ; 6 légendes ; verdict cohérent.
+  expect_false(is.unsorted(p$yearX))
+  expect_length(p$caps, 6L)
+  expect_match(p$caps[6], "au-dessus")
+  expect_match(p$caps[6], "Au-dessus des normales")
+})
+
+test_that("preparer_payload_anim : jitter reproductible et RNG global non pollué", {
+  cloud <- faire_nuage_anim(); courbe <- faire_courbe_anim()
+  args <- list(cloud = cloud, annee_curve = courbe, annee_ref = 2019L,
+               ville = "Toulouse", periode = "1991-2020", date_quiz = as.Date("2024-08-12"),
+               quiz_temp = 33, categorie = "Dans les normales de saison",
+               zone = list(p10 = 21, p90 = 29), moy = 25)
+  p1 <- do.call(preparer_payload_anim, args)
+  p2 <- do.call(preparer_payload_anim, args)
+  expect_equal(p1$cloudCalX, p2$cloudCalX)   # jitter figé (seed local)
+
+  # avec_seed_local restaure .Random.seed : un runif() encadrant l'appel est intact.
+  set.seed(123); attendu <- runif(1)
+  set.seed(123); invisible(do.call(preparer_payload_anim, args)); obtenu <- runif(1)
+  expect_equal(obtenu, attendu)
+})

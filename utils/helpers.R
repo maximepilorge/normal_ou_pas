@@ -455,6 +455,140 @@ construire_projections <- function(base_9120, deltas_proj) {
     niveaux = niveaux)
 }
 
+# --- Quiz : animation pédagogique de révélation (courbe -> boxplot) ------------
+# Payload PUR consommé par le contrôleur JS (mod_quiz.R) : à la 1re manche d'une
+# série, une animation explique COMMENT se construit le boxplot de la révélation
+# (tracé de l'année type -> empilement de la fenêtre ±7 j année après année ->
+# effondrement en boxplot). L'état final reproduit le boxplot statique ; l'anim
+# n'en est qu'un chemin. Fonctions pures (aucune BDD) pour rester testables : la
+# requête de l'année type et le rendu Plotly/JS vivent dans mod_quiz.R.
+
+# Repères d'axe : 1er jour de chaque mois (année NON bissextile) + libellés courts.
+TICK_MOIS_JOUR <- c(1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335)
+TICK_MOIS_LBL  <- c("jan", "fév", "mar", "avr", "mai", "juin",
+                    "juil", "août", "sep", "oct", "nov", "déc")
+
+# Jour calendaire (1..365) d'une date, projeté sur une année NON bissextile fixe
+# (2023) : deux 12 août de deux années tombent ainsi sur le MÊME x, condition de
+# l'empilement de la fenêtre année après année. Le 29 février est ramené au 28.
+# Vectorisé, pur.
+jour_calendaire_2023 <- function(date) {
+  m <- lubridate::month(date); j <- lubridate::day(date)
+  j[m == 2 & j == 29] <- 28L
+  as.integer(as.Date(sprintf("2023-%02d-%02d", m, j)) - as.Date("2023-01-01")) + 1L
+}
+
+# Exécute `expr` avec un seed fixe SANS polluer le RNG global (sauve/restaure
+# .Random.seed) : jitter reproductible en test, neutre pour le reste de l'app.
+avec_seed_local <- function(seed, expr) {
+  if (exists(".Random.seed", envir = .GlobalEnv)) {
+    old <- get(".Random.seed", envir = .GlobalEnv)
+    on.exit(assign(".Random.seed", old, envir = .GlobalEnv), add = TRUE)
+  } else {
+    on.exit(suppressWarnings(rm(".Random.seed", envir = .GlobalEnv)), add = TRUE)
+  }
+  set.seed(seed)
+  force(expr)
+}
+
+# Année « type » d'un nuage de fenêtre (data.frame date + tmax) : celle dont la
+# moyenne de fenêtre est MÉDIANE — courbe représentative, ni la plus chaude ni la
+# plus froide. Sert à choisir l'année tracée aux actes 1-3a de l'animation. Pure.
+annee_reference_fenetre <- function(cloud) {
+  an <- lubridate::year(cloud$date)
+  moy_fen <- tapply(cloud$tmax, an, mean, na.rm = TRUE)
+  as.integer(names(sort(moy_fen))[ceiling(length(moy_fen) / 2)])
+}
+
+# Construit le payload d'animation à partir des données RÉELLES de la manche :
+#   cloud       : data.frame(date, tmax) — fenêtre ±7 j, toutes les années de la période
+#   annee_curve : data.frame(date, tmax) — série journalière complète de l'année type
+#   zone        : list(p10, p90) — bornes de la zone normale (repère vert final)
+#   moy         : moyenne (croix noire finale) ; quiz_temp : température de la manche (croix rouge)
+#   categorie   : catégorie révélée (pilote la phrase de verdict finale)
+# Reproduit le corps du boxplot de feedback_boxplot (mêmes quantiles/moustaches).
+# Pure (jitter figé par avec_seed_local -> testable). Suppose des entrées valides :
+# les gardes (zone finie, fenêtre hors Nouvel An, assez d'années/de jours) sont
+# faites par l'appelant construire_anim_quiz (mod_quiz.R).
+preparer_payload_anim <- function(cloud, annee_curve, annee_ref, ville, periode,
+                                  date_quiz, quiz_temp, categorie, zone, moy) {
+  centre <- jour_calendaire_2023(date_quiz)
+  win    <- (centre - 7):(centre + 7)
+
+  ord        <- order(lubridate::year(cloud$date), jour_calendaire_2023(cloud$date))
+  cloud      <- cloud[ord, , drop = FALSE]
+  cloud_y    <- cloud$tmax
+  cloud_day  <- jour_calendaire_2023(cloud$date)
+  cloud_year <- lubridate::year(cloud$date)
+  n          <- length(cloud_y)
+
+  # Corps du boxplot (identique à feedback_boxplot) : quartiles type 7, moustaches
+  # à 1,5×IQR bornées aux valeurs observées.
+  vf  <- cloud_y[is.finite(cloud_y)]
+  qs  <- as.numeric(stats::quantile(vf, c(.25, .5, .75), type = 7))
+  iqr <- qs[3] - qs[1]
+  lf  <- min(vf[vf >= qs[1] - 1.5 * iqr]); uf <- max(vf[vf <= qs[3] + 1.5 * iqr])
+
+  # x : calendaire (jour de l'année, léger jitter) -> colonne (autour de 1) pour
+  # l'effondrement. Jitter figé (seed local) : reproductible sans polluer le RNG.
+  jit <- avec_seed_local(7, list(cal = runif(n, -0.18, 0.18),
+                                 col = runif(n, -0.18, 0.18)))
+  cloud_cal <- cloud_day + jit$cal
+  cloud_col <- 1 + jit$col
+
+  # Groupes d'empilement : l'année type d'ABORD (déjà tracée en 3a), puis les
+  # autres par ordre chronologique. Indices 0-based dans les vecteurs cloud_*
+  # (triés année-major, jour croissant). I() force un tableau JSON même à 1 élément.
+  annees_all <- sort(unique(cloud_year))
+  ordre      <- c(annee_ref, setdiff(annees_all, annee_ref))
+  groups <- lapply(ordre, function(an)
+    list(year = an, idx = I(which(cloud_year == an) - 1L)))
+
+  # Courbe de l'année type, sur l'axe calendaire commun (2023).
+  courbe    <- annee_curve[is.finite(annee_curve$tmax), , drop = FALSE]
+  curve_day <- jour_calendaire_2023(courbe$date)
+  oc        <- order(curve_day)
+  year_x    <- curve_day[oc]; year_y <- courbe$tmax[oc]
+
+  pad    <- function(r, f = 0.06) r + c(-1, 1) * f * diff(r)
+  y_full <- pad(range(year_y))
+  y_win  <- pad(range(c(cloud_y, quiz_temp, zone$p10, zone$p90, moy, lf, uf)))
+
+  naan  <- length(annees_all)
+  mlbl  <- TICK_MOIS_LBL[lubridate::month(date_quiz)]
+  jourq <- lubridate::day(date_quiz)
+  verdict <- switch(categorie,
+    "Au-dessus des normales"  = "<b>au-dessus</b> de la zone verte",
+    "En-dessous des normales" = "<b>sous</b> la zone verte",
+    "en plein <b>dans</b> la zone verte")
+
+  # 6 légendes (une par étape SAUF l'acte 2, qui prolonge celle de l'acte 1, et
+  # l'empilement, qui prolonge celle de l'acte 3a) : laisse le temps de lire.
+  caps <- c(
+    sprintf("<b>%s, %d.</b> La température maximale, jour après jour.", ville, annee_ref),
+    sprintf("Pour juger de la <b>fréquence</b> de cette température, on isole les <b>15 jours</b> autour du %d %s, puis on empile cette fenêtre <b>année après année</b>, de %d à %d…", jourq, mlbl, min(annees_all), max(annees_all)),
+    sprintf("<b>%d années × 15 jours = %d relevés</b> autour du %d %s.", naan, n, jourq, mlbl),
+    "On les regroupe dans une seule colonne pour lire leur <b>répartition</b>.",
+    "La <b>boîte</b> = la moitié centrale des relevés ; la barre = la médiane ; les <b>moustaches</b> = les extrêmes courants.",
+    sprintf("La <b>zone verte</b> = les normales de saison. La croix rouge tombe %s : voilà pourquoi cette température est « <b>%s</b> ».", verdict, categorie)
+  )
+
+  list(
+    ville = ville, annee = annee_ref, periode = periode, nAnnees = naan,
+    yearX = year_x, yearY = year_y,
+    cloudCalX = cloud_cal, cloudColX = cloud_col, cloudY = cloud_y, cloudDay = cloud_day,
+    groups = groups,
+    centerX = centre, winX0 = min(win), winX1 = max(win),
+    quizTemp = quiz_temp, moy = moy,
+    box = list(q1 = qs[1], q2 = qs[2], q3 = qs[3], lf = lf, uf = uf),
+    zone = list(p10 = zone$p10, p90 = zone$p90),
+    xFull = c(1, 366), xWin = c(min(win) - 8, max(win) + 8), xCol = c(0.5, 1.5),
+    yFull = y_full, yWin = y_win,
+    tickVals = TICK_MOIS_JOUR, tickText = TICK_MOIS_LBL,
+    caps = caps
+  )
+}
+
 # Construit le modal de partage d'une image (carte de résultat). Partagé par le
 # quiz et l'onglet « Une journée » : même UX, mêmes identifiants que www/partage.js
 # (#apercu-partage-img, #partage-zone[data-texte]) qui pilote copie / partage natif

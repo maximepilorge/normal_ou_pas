@@ -181,6 +181,24 @@
   color: #343a40;
 }
 
+/* --- Animation pédagogique de révélation (1re manche) --- */
+.anim-caption {
+  min-height: 3.4em;
+  transition: opacity 0.18s ease;
+  font-size: 1rem;
+  line-height: 1.45;
+  padding: 0.6rem 0.2rem;
+  text-align: center;
+  color: #343a40;
+}
+.anim-ctrl { margin-top: 0.2rem; }
+.anim-ctrl .btn { margin: 0 0.25rem; }
+/* Respect de la préférence système : pas de fondu de légende si mouvement réduit
+   (le contrôleur JS saute déjà l'animation elle-même). */
+@media (prefers-reduced-motion: reduce) {
+  .anim-caption { transition: none; }
+}
+
 /* --- Mobile --- */
 @media (max-width: 575px) {
   .quiz-module .quiz-card { margin: 0.5rem 0.25rem; }
